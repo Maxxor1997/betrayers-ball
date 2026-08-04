@@ -1,3 +1,4 @@
+import { aiVoteProbability } from "../engine/endgame";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells } from "../engine/turns";
 import { GameAction, GameState } from "../engine/types";
 
@@ -6,10 +7,11 @@ export type Rng = () => number;
 const DEFAULT_FLIP_PROBABILITY = 0.3;
 
 /**
- * Chooses one legal action for `playerId`'s current decision point. A turn is a
- * sequence of up to two calls: first (maybe) a flip, then always a place-or-pass —
- * flip doesn't end the turn, so the caller should call this again after a flip
- * action to get the place/pass action that follows.
+ * Chooses one legal action for `playerId`'s current decision point -- a turn-based
+ * flip/place/pass, or a vote if one is in progress. A turn is a sequence of up to two
+ * calls: first (maybe) a flip, then always a place-or-pass -- flip doesn't end the
+ * turn, so the caller should call this again after a flip action to get the
+ * place/pass action that follows.
  */
 export function chooseAiAction(
   state: GameState,
@@ -17,6 +19,12 @@ export function chooseAiAction(
   rng: Rng = Math.random,
   flipProbability = DEFAULT_FLIP_PROBABILITY
 ): GameAction {
+  if (state.phase === "voting") {
+    if (playerId in state.votes) throw new Error(`${playerId} has already voted`);
+    const vote = rng() < aiVoteProbability(state.round, state.config.roundCap);
+    return { type: "castVote", playerId, vote };
+  }
+
   if (playerId !== currentPlayerId(state)) {
     throw new Error(`It is not ${playerId}'s turn`);
   }

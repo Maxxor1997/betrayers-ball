@@ -23,6 +23,10 @@ export interface CardDef {
   name: string;
   base: number;
   bucket: CardBucket;
+  /** Short human-readable effect summary, for hand/board UI. */
+  text: string;
+  /** Full effect description, matching game_spec.md's wording -- for hover tooltips. */
+  fullText: string;
 }
 
 /** A card before it's been dealt to a player — no owner yet. */
@@ -66,7 +70,7 @@ export interface GameConfig {
   roundCap: number;
   flipUnlockRound: number;
   centerEffect: CenterEffectId;
-  /** Earliest round an end-game request is allowed, per the spec's min-round floor. */
+  /** Earliest round a vote can be called, per the spec's min-round floor. */
   minRoundFloor: number;
 }
 
@@ -84,11 +88,15 @@ export interface GameState {
   /** Players who had no legal placement and are passing for the rest of the game. */
   passedPlayerIds: Set<string>;
   hasFlippedThisTurn: boolean;
-  /** True once someone has asked to end the game — takes effect at the next round boundary. */
-  endRequested: boolean;
+  /**
+   * Votes cast in the current voting round (playerId -> end/continue). Empty when
+   * phase isn't "voting". AI votes are filled in immediately when voting opens;
+   * human vote(s) stay pending until a castVote action arrives.
+   */
+  votes: Record<string, boolean>;
   /** instanceIds in the order they were placed on the board — for turn-order UI/history. */
   placementOrder: string[];
-  phase: "playing" | "ended";
+  phase: "playing" | "voting" | "ended";
   result: GameResult | null;
 }
 
@@ -111,17 +119,17 @@ export interface PassAction {
 }
 
 /**
- * A simplified stand-in for the spec's full voting protocol (simultaneous private
- * commit, tally, tie->continue — deferred, see plan). Any player may request the
- * game end; it takes effect at the next round boundary, honoring the min-round floor
- * and the "never end mid-round" fairness rule.
+ * A single player's vote in the current voting round (LOCKED protocol: simultaneous
+ * private commit, tallied once everyone's voted — tie means continue). `vote: true`
+ * means "end the game now".
  */
-export interface RequestEndAction {
-  type: "requestEnd";
+export interface CastVoteAction {
+  type: "castVote";
   playerId: string;
+  vote: boolean;
 }
 
-export type GameAction = FlipAction | PlaceAction | PassAction | RequestEndAction;
+export type GameAction = FlipAction | PlaceAction | PassAction | CastVoteAction;
 
 export function posKey(pos: Position): string {
   return `${pos.x},${pos.y}`;

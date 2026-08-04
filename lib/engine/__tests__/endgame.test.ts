@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeGameResult, isBoardFull, isRoundCapHit, shouldEndGame } from "../endgame";
+import { aiVoteProbability, computeGameResult, isBoardFull, isRoundCapHit, shouldEndGame } from "../endgame";
 import { Board, BoardBounds, CardInstance, posKey } from "../types";
 
 const BOUNDS: BoardBounds = { width: 3, height: 3, center: { x: 1, y: 1 } };
@@ -36,15 +36,23 @@ describe("isBoardFull", () => {
 
 describe("shouldEndGame", () => {
   it("triggers on cap even with an empty board", () => {
-    expect(shouldEndGame(new Map(), BOUNDS, 6, 6, false)).toBe(true);
+    expect(shouldEndGame(new Map(), BOUNDS, 6, 6)).toBe(true);
   });
 
-  it("does not trigger below cap on a non-full board without a request", () => {
-    expect(shouldEndGame(new Map(), BOUNDS, 3, 6, false)).toBe(false);
+  it("does not trigger below cap on a non-full board", () => {
+    expect(shouldEndGame(new Map(), BOUNDS, 3, 6)).toBe(false);
+  });
+});
+
+describe("aiVoteProbability", () => {
+  it("increases linearly with round, reaching certainty at the cap", () => {
+    expect(aiVoteProbability(1, 10)).toBeCloseTo(0.1);
+    expect(aiVoteProbability(5, 10)).toBeCloseTo(0.5);
+    expect(aiVoteProbability(10, 10)).toBe(1);
   });
 
-  it("triggers when endRequested is true, regardless of cap/board state", () => {
-    expect(shouldEndGame(new Map(), BOUNDS, 3, 6, true)).toBe(true);
+  it("never exceeds 1 past the cap", () => {
+    expect(aiVoteProbability(12, 10)).toBe(1);
   });
 });
 

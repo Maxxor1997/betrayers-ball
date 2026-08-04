@@ -75,7 +75,7 @@ describe("applyAction — board-fill endgame trigger", () => {
     roundCap: 10,
     flipUnlockRound: 2,
     centerEffect: "none",
-    minRoundFloor: 1,
+    minRoundFloor: 10, // above where the board fills (round 4), so voting doesn't interfere here
   };
 
   it("ends when the board fills, before the (much higher) round cap", () => {
@@ -136,46 +136,80 @@ describe("applyAction — turn ownership", () => {
   });
 });
 
-describe("applyAction — requestEnd", () => {
+describe("applyAction — voting", () => {
   const config: GameConfig = {
     boardBounds: { width: 7, height: 7, center: { x: 3, y: 3 } },
     handSize: 4,
     roundCap: 10,
     flipUnlockRound: 2,
     centerEffect: "none",
-    minRoundFloor: 2,
+    minRoundFloor: 1,
   };
 
-  it("rejects a request before the min-round floor", () => {
-    const state = createGame(["p1", "p2"], config, deterministicRng(6));
-    expect(() => applyAction(state, { type: "requestEnd", playerId: "p1" })).toThrow();
+  function playRound1(rngForBoundary: () => number) {
+    let state = createGame(["human", "bot"], config, deterministicRng(6), ["bot"]);
+    const cell1 = getLegalPlacementCells(state)[0];
+    state = applyAction(state, { type: "place", playerId: "human", instanceId: state.players[0].hand[0].instanceId, position: cell1 });
+    const cell2 = getLegalPlacementCells(state)[0];
+    // round boundary: this is the action whose rng decides the AI's vote.
+    state = applyAction(
+      state,
+      { type: "place", playerId: "bot", instanceId: state.players[1].hand[0].instanceId, position: cell2 },
+      rngForBoundary
+    );
+    return state;
+  }
+
+  it("opens a vote at the round boundary once the min-round floor is met, with the AI's vote pre-filled", () => {
+    const state = playRound1(() => 0.01); // well under the round-1 probability (1/10) -> AI votes yes
+    expect(state.phase).toBe("voting");
+    expect(state.votes.bot).toBe(true);
+    expect(state.votes.human).toBeUndefined();
+    expect(state.round).toBe(1); // not incremented yet -- vote is still pending
   });
 
-  it("doesn't advance the turn, and doesn't end the game until the next round boundary", () => {
-    let state = createGame(["p1", "p2"], config, deterministicRng(6));
-    // finish round 1 so we're at/after the min-round floor.
-    let cell = getLegalPlacementCells(state)[0];
-    state = applyAction(state, { type: "place", playerId: "p1", instanceId: state.players[0].hand[0].instanceId, position: cell });
-    cell = getLegalPlacementCells(state)[0];
-    state = applyAction(state, { type: "place", playerId: "p2", instanceId: state.players[1].hand[0].instanceId, position: cell });
+  it("does not open a vote before the min-round floor", () => {
+    const belowFloorConfig: GameConfig = { ...config, minRoundFloor: 5 };
+    let state = createGame(["human", "bot"], belowFloorConfig, deterministicRng(6), ["bot"]);
+    const cell1 = getLegalPlacementCells(state)[0];
+    state = applyAction(state, { type: "place", playerId: "human", instanceId: state.players[0].hand[0].instanceId, position: cell1 });
+    const cell2 = getLegalPlacementCells(state)[0];
+    state = applyAction(state, { type: "place", playerId: "bot", instanceId: state.players[1].hand[0].instanceId, position: cell2 });
+    expect(state.phase).toBe("playing");
     expect(state.round).toBe(2);
-    expect(state.phase).toBe("playing");
+  });
 
-    const beforeRequest = state.currentPlayerIndex;
-    state = applyAction(state, { type: "requestEnd", playerId: "p1" });
-    expect(state.endRequested).toBe(true);
-    expect(state.phase).toBe("playing"); // takes effect at the next boundary, not immediately
-    expect(state.currentPlayerIndex).toBe(beforeRequest); // requestEnd doesn't consume a turn
-
-    // p1's round-2 placement: still mid-round, still shouldn't end.
-    cell = getLegalPlacementCells(state)[0];
-    state = applyAction(state, { type: "place", playerId: "p1", instanceId: state.players[0].hand[0].instanceId, position: cell });
-    expect(state.phase).toBe("playing");
-
-    // p2 completes round 2 -> round boundary -> endRequested takes effect.
-    cell = getLegalPlacementCells(state)[0];
-    state = applyAction(state, { type: "place", playerId: "p2", instanceId: state.players[1].hand[0].instanceId, position: cell });
+  it("ends the game once all players vote yes (2p consensus)", () => {
+    let state = playRound1(() => 0.01); // AI votes yes
+    state = applyAction(state, { type: "castVote", playerId: "human", vote: true });
     expect(state.phase).toBe("ended");
     expect(state.result).not.toBeNull();
+  });
+
+  it("continues (tie) if votes split, resetting votes and advancing the round", () => {
+    let state = playRound1(() => 0.01); // AI votes yes
+    state = applyAction(state, { type: "castVote", playerId: "human", vote: false });
+    expect(state.phase).toBe("playing");
+    expect(state.votes).toEqual({});
+    expect(state.round).toBe(2);
+    expect(state.currentPlayerIndex).toBe(0);
+  });
+
+  it("continues if the AI itself voted no", () => {
+    let state = playRound1(() => 0.99); // well over 1/10 -> AI votes no
+    expect(state.votes.bot).toBe(false);
+    state = applyAction(state, { type: "castVote", playerId: "human", vote: true });
+    expect(state.phase).toBe("playing");
+    expect(state.round).toBe(2);
+  });
+
+  it("rejects casting a vote when no vote is in progress", () => {
+    const state = createGame(["human", "bot"], config, deterministicRng(6), ["bot"]);
+    expect(() => applyAction(state, { type: "castVote", playerId: "human", vote: true })).toThrow();
+  });
+
+  it("rejects voting twice", () => {
+    const state = playRound1(() => 0.99); // AI votes no, human still pending
+    expect(() => applyAction(state, { type: "castVote", playerId: "bot", vote: true })).toThrow();
   });
 });

@@ -12,16 +12,27 @@ function deterministicRng(seed: number) {
   };
 }
 
+/** Whoever has a decision to make right now: the current turn player, or (during a
+ * vote) the next player who hasn't cast one yet. */
+function activePlayerId(state: GameState): string {
+  if (state.phase === "voting") {
+    const pending = state.players.find((p) => !(p.id in state.votes));
+    if (!pending) throw new Error("no pending voter, but phase is still 'voting'");
+    return pending.id;
+  }
+  return currentPlayerId(state);
+}
+
 function playFullAiGame(config: GameConfig, seed: number, maxIterations = 500): GameState {
   const rng = deterministicRng(seed);
   let state = createGame(["p1", "p2"], config, rng);
   let iterations = 0;
 
-  while (state.phase === "playing" && iterations < maxIterations) {
-    const playerId = currentPlayerId(state);
+  while (state.phase !== "ended" && iterations < maxIterations) {
+    const playerId = activePlayerId(state);
     const action = chooseAiAction(state, playerId, rng);
     // applyAction throws on any illegal action -- that's the property under test.
-    state = applyAction(state, action);
+    state = applyAction(state, action, rng);
     iterations++;
   }
 
@@ -61,16 +72,32 @@ describe("chooseAiAction", () => {
     const rng = deterministicRng(7);
     let state = createGame(["p1", "p2"], DEFAULT_2P_CONFIG, rng);
     let iterations = 0;
-    while (state.phase === "playing" && iterations < 500) {
-      const playerId = currentPlayerId(state);
+    while (state.phase !== "ended" && iterations < 500) {
+      const playerId = activePlayerId(state);
       const before = state.hasFlippedThisTurn;
       const action = chooseAiAction(state, playerId, rng);
       if (action.type === "flip") {
         expect(before).toBe(false);
       }
-      state = applyAction(state, action);
+      state = applyAction(state, action, rng);
       iterations++;
     }
     expect(state.phase).toBe("ended");
+  });
+
+  it("casts a vote when one is in progress, and never votes twice", () => {
+    const rng = deterministicRng(9);
+    let state = createGame(["p1", "p2"], DEFAULT_2P_CONFIG, rng);
+    let sawAVote = false;
+    let iterations = 0;
+    while (state.phase !== "ended" && iterations < 500) {
+      if (state.phase === "voting") sawAVote = true;
+      const playerId = activePlayerId(state);
+      const action = chooseAiAction(state, playerId, rng);
+      state = applyAction(state, action, rng);
+      iterations++;
+    }
+    expect(state.phase).toBe("ended");
+    expect(sawAVote).toBe(true);
   });
 });

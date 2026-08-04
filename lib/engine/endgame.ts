@@ -10,18 +10,18 @@ export function isRoundCapHit(completedRound: number, roundCap: number): boolean
   return completedRound >= roundCap;
 }
 
+/** Board-fill and the round cap end the game unconditionally, checked at a round boundary. */
+export function shouldEndGame(board: Board, bounds: BoardBounds, completedRound: number, roundCap: number): boolean {
+  return isBoardFull(board, bounds) || isRoundCapHit(completedRound, roundCap);
+}
+
 /**
- * Whichever-first endgame triggers, checked only at a round boundary. `endRequested`
- * stands in for the spec's full voting protocol (see RequestEndAction in types.ts).
+ * How likely an AI is to vote to end the game on a given round -- increases linearly
+ * as the game goes on, reaching certainty at the round cap. Not a spec number; a
+ * reasonable default for the single-device AI opponent.
  */
-export function shouldEndGame(
-  board: Board,
-  bounds: BoardBounds,
-  completedRound: number,
-  roundCap: number,
-  endRequested: boolean
-): boolean {
-  return endRequested || isBoardFull(board, bounds) || isRoundCapHit(completedRound, roundCap);
+export function aiVoteProbability(round: number, roundCap: number): number {
+  return Math.min(1, round / roundCap);
 }
 
 /**

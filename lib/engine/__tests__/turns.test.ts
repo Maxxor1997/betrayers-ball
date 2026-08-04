@@ -29,7 +29,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     round: 1,
     passedPlayerIds: new Set(),
     hasFlippedThisTurn: false,
-    endRequested: false,
+    votes: {},
     placementOrder: [],
     phase: "playing",
     result: null,
