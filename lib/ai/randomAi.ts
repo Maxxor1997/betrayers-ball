@@ -4,7 +4,7 @@ import { GameAction, GameState } from "../engine/types";
 
 export type Rng = () => number;
 
-const DEFAULT_FLIP_PROBABILITY = 0.3;
+const DEFAULT_FLIP_PROBABILITY = 0.8;
 
 /**
  * Chooses one legal action for `playerId`'s current decision point -- a turn-based

@@ -367,3 +367,121 @@ describe("resolveBoard — totals", () => {
     expect(totalsByOwner.p2).toBe(6);
   });
 });
+
+describe("resolveBoard — center effect: No Man's Land", () => {
+  it("gives -2 to cards on the center's row or column, center exempt", () => {
+    const board: Board = new Map();
+    const onRow = place(board, 0, 4, "Footman", "p1"); // same row as center (4,4)
+    const onCol = place(board, 4, 0, "Footman", "p1"); // same column as center
+    const offCross = place(board, 0, 0, "Footman", "p1");
+    const { cards } = resolveBoard(board, BOUNDS, 3, "noMansLand");
+    expect(find(cards, onRow.instanceId).finalValue).toBe(3);
+    expect(find(cards, onCol.instanceId).finalValue).toBe(3);
+    expect(find(cards, offCross.instanceId).finalValue).toBe(5);
+  });
+
+  it("does not apply when a different center effect (or none) is active", () => {
+    const board: Board = new Map();
+    const onRow = place(board, 0, 4, "Footman", "p1");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, onRow.instanceId).finalValue).toBe(5);
+  });
+});
+
+describe("resolveBoard — center effect: Mirror Pool", () => {
+  it("gives +2 each when the mirrored cell holds the same card type", () => {
+    const board: Board = new Map();
+    // center (4,4); mirror of (2,2) is (2, 8-2=6)
+    const a = place(board, 2, 2, "Footman", "p1");
+    const b = place(board, 2, 6, "Footman", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3, "mirrorPool");
+    expect(find(cards, a.instanceId).finalValue).toBe(7);
+    expect(find(cards, b.instanceId).finalValue).toBe(7);
+  });
+
+  it("gives +1 each when the mirrored cell holds a different card type", () => {
+    const board: Board = new Map();
+    const a = place(board, 2, 2, "Footman", "p1");
+    const b = place(board, 2, 6, "Giant", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3, "mirrorPool");
+    expect(find(cards, a.instanceId).finalValue).toBe(6);
+    expect(find(cards, b.instanceId).finalValue).toBe(7);
+  });
+
+  it("gives no bonus when the mirror cell is empty", () => {
+    const board: Board = new Map();
+    const a = place(board, 2, 2, "Footman", "p1");
+    const { cards } = resolveBoard(board, BOUNDS, 3, "mirrorPool");
+    expect(find(cards, a.instanceId).finalValue).toBe(5);
+  });
+
+  it("a card exactly on the center row has no distinct mirror", () => {
+    const board: Board = new Map();
+    const a = place(board, 0, 4, "Footman", "p1"); // center row, mirrors onto itself
+    const { cards } = resolveBoard(board, BOUNDS, 3, "mirrorPool");
+    expect(find(cards, a.instanceId).finalValue).toBe(5);
+  });
+});
+
+describe("resolveBoard — center effect: Champion of the Weak", () => {
+  it("transfers the center's value to the unique last-place player", () => {
+    const board: Board = new Map();
+    place(board, 0, 0, "Footman", "p1"); // p1 total 5
+    place(board, 1, 0, "Footman", "p2"); // p2 total 5... make p2 strictly higher
+    place(board, 2, 0, "Footman", "p2"); // p2 total 10
+    const { totalsByOwner, centerAward } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1", "p2"]);
+    expect(centerAward).toEqual({ value: 5, ownerId: "p1" });
+    expect(totalsByOwner.p1).toBe(10); // 5 (own card) + 5 (center)
+  });
+
+  it("makes no transfer on a tie for last place", () => {
+    const board: Board = new Map();
+    place(board, 0, 0, "Footman", "p1");
+    place(board, 1, 0, "Footman", "p2");
+    const { totalsByOwner, centerAward } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1", "p2"]);
+    expect(centerAward).toBeNull();
+    expect(totalsByOwner.p1).toBe(5);
+    expect(totalsByOwner.p2).toBe(5);
+  });
+
+  it("a player with zero cards is eligible as the unique last place", () => {
+    const board: Board = new Map();
+    place(board, 0, 0, "Footman", "p1");
+    const { totalsByOwner, centerAward } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1", "p2"]);
+    expect(centerAward).toEqual({ value: 5, ownerId: "p2" });
+    expect(totalsByOwner.p2).toBe(5);
+  });
+
+  it("center value is modified by adjacent Bannerman/Earthshaker/Skysplitter", () => {
+    const board: Board = new Map();
+    // Bannerman directly adjacent to center (4,4) -> +1 (center is never a Footman)
+    place(board, 4, 3, "Bannerman", "p2");
+    place(board, 0, 0, "Footman", "p1");
+    const { centerAward } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1", "p2"]);
+    expect(centerAward?.value).toBe(6);
+  });
+});
+
+describe("resolveBoard — center effect: Kingslayer", () => {
+  it("zeroes the single highest-value card and adjusts totals", () => {
+    const board: Board = new Map();
+    const small = place(board, 0, 0, "Footman", "p1"); // 5
+    const big = place(board, 1, 0, "Exile", "p2"); // 9 - 2*1 neighbor = 7
+    const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    expect(find(cards, big.instanceId).finalValue).toBe(0);
+    expect(find(cards, small.instanceId).finalValue).toBe(5);
+    expect(totalsByOwner.p2).toBe(0);
+    expect(totalsByOwner.p1).toBe(5);
+  });
+
+  it("zeroes all tied-for-highest cards", () => {
+    const board: Board = new Map();
+    const a = place(board, 0, 0, "Footman", "p1");
+    const b = place(board, 5, 5, "Footman", "p2");
+    const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    expect(find(cards, a.instanceId).finalValue).toBe(0);
+    expect(find(cards, b.instanceId).finalValue).toBe(0);
+    expect(totalsByOwner.p1).toBe(0);
+    expect(totalsByOwner.p2).toBe(0);
+  });
+});

@@ -62,7 +62,7 @@ export interface PlayerState {
   isAI: boolean;
 }
 
-export type CenterEffectId = "none";
+export type CenterEffectId = "none" | "noMansLand" | "mirrorPool" | "championOfTheWeak" | "kingslayer" | "shadowlands";
 
 export interface GameConfig {
   boardBounds: BoardBounds;

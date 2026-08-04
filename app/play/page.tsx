@@ -5,13 +5,42 @@ import { CARD_DEFS } from "@/lib/engine/cards";
 import { inBounds, isCenterPosition } from "@/lib/engine/board";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { resolveBoard, ResolvedCard } from "@/lib/engine/resolution";
-import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, mustPass } from "@/lib/engine/turns";
-import { CardInstance, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
-import { chooseAiAction } from "@/lib/ai/randomAi";
+import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
+import { CardInstance, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
+import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
 
 const HUMAN = "human";
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 6;
+
+const CENTER_EFFECT_LABELS: Record<CenterEffectId, string> = {
+  none: "None",
+  noMansLand: "No Man's Land",
+  mirrorPool: "Mirror Pool",
+  championOfTheWeak: "Champion of the Weak",
+  kingslayer: "Kingslayer",
+  shadowlands: "Shadowlands",
+};
+
+const CENTER_EFFECT_DESCRIPTIONS: Record<CenterEffectId, string> = {
+  none: "No special rule this game.",
+  noMansLand: "Every placed card on the center's row or column scores −2. The center tile itself is exempt.",
+  mirrorPool:
+    "Each card has one mirror position (same column, opposite side of the center row). If occupied, both cards get +1, or +2 each if they're the same card type.",
+  championOfTheWeak:
+    "The center counts as a card worth 5 (modified by adjacent buffs/dents). After scoring, it's transferred to the unique last-place player — a tie for last means no transfer.",
+  kingslayer: "After scoring, the highest-value card(s) on the board are set to 0. Ties zero all of them.",
+  shadowlands: "Flipping is only allowed on rounds 2, 4, and 6.",
+};
+
+/** The 5 real effects a "Random" draw picks from -- "none" is only reachable by explicit choice. */
+const DRAWABLE_CENTER_EFFECTS: CenterEffectId[] = [
+  "noMansLand",
+  "mirrorPool",
+  "championOfTheWeak",
+  "kingslayer",
+  "shadowlands",
+];
 
 const PLAYER_COLOR_CLASSES = [
   "border-blue-500 bg-blue-50 dark:bg-blue-950",
@@ -28,10 +57,11 @@ function buildPlayerIds(playerCount: number): string[] {
   return [HUMAN, ...Array.from({ length: playerCount - 1 }, (_, i) => `ai-${i + 1}`)];
 }
 
-function newGameState(playerCount: number): GameState {
+function newGameState(playerCount: number, centerEffect: CenterEffectId): GameState {
   const playerIds = buildPlayerIds(playerCount);
   const aiPlayerIds = playerIds.filter((id) => id !== HUMAN);
-  return createGame(playerIds, configForPlayerCount(playerCount), undefined, aiPlayerIds);
+  const config = { ...configForPlayerCount(playerCount), centerEffect };
+  return createGame(playerIds, config, undefined, aiPlayerIds);
 }
 
 const AI_NAMES = [
@@ -71,13 +101,15 @@ export default function PlayPage() {
 
 function Game() {
   const [playerCount, setPlayerCount] = useState(2);
-  const [state, setState] = useState<GameState>(() => newGameState(2));
+  const [state, setState] = useState<GameState>(() => newGameState(2, "none"));
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [pendingFlip, setPendingFlip] = useState<{ instanceId: string; label: string } | null>(null);
-  // Player count is only ever chosen from this setup popup (opened by "New game"),
-  // never editable while a game is in progress.
-  const [newGameSetup, setNewGameSetup] = useState<{ playerCount: number } | null>(null);
+  // Player count and center effect are only ever chosen from this setup popup (opened
+  // by "New game"), never editable while a game is in progress.
+  const [newGameSetup, setNewGameSetup] = useState<{ playerCount: number; centerEffect: CenterEffectId | "random" } | null>(
+    null
+  );
 
   const dispatch = (action: GameAction) => {
     setState((prev) => {
@@ -98,7 +130,7 @@ function Game() {
   const legalCells = isHumanTurn ? getLegalPlacementCells(state) : [];
   const legalCellKeys = new Set(legalCells.map(posKey));
   const flipTargetIds = new Set((isHumanTurn ? getLegalFlipTargets(state) : []).map((c) => c.instanceId));
-  const flipUnlocked = state.round >= state.config.flipUnlockRound;
+  const flipUnlocked = isFlipUnlocked(state.round, state.config);
   const humanMustPass = isHumanTurn && mustPass(state);
 
   // Drive the AI's turn(s) automatically. A turn can be up to two actions (an
@@ -107,7 +139,7 @@ function Game() {
   useEffect(() => {
     if (!isAiTurn) return;
     const timer = setTimeout(() => {
-      const action = chooseAiAction(state, currentPlayerId(state));
+      const action = chooseGreedyAiAction(state, currentPlayerId(state));
       dispatch(action);
     }, 550);
     return () => clearTimeout(timer);
@@ -178,13 +210,17 @@ function Game() {
   }
 
   function openNewGameSetup() {
-    setNewGameSetup({ playerCount });
+    setNewGameSetup({ playerCount, centerEffect: "random" });
   }
 
   function confirmNewGame() {
     if (!newGameSetup) return;
+    const centerEffect: CenterEffectId =
+      newGameSetup.centerEffect === "random"
+        ? DRAWABLE_CENTER_EFFECTS[Math.floor(Math.random() * DRAWABLE_CENTER_EFFECTS.length)]
+        : newGameSetup.centerEffect;
     setPlayerCount(newGameSetup.playerCount);
-    setState(newGameState(newGameSetup.playerCount));
+    setState(newGameState(newGameSetup.playerCount, centerEffect));
     setSelectedInstanceId(null);
     setPendingFlip(null);
     setNewGameSetup(null);
@@ -204,7 +240,13 @@ function Game() {
         <div>
           <h1 className="text-xl font-semibold">Board Game — engine playtest</h1>
           <p className="text-sm text-zinc-500">
-            Round {state.round} / {state.config.roundCap} · {flipUnlocked ? "flipping unlocked" : "flipping locks at round " + state.config.flipUnlockRound}
+            Round {state.round} / {state.config.roundCap} ·{" "}
+            {flipUnlocked
+              ? "flipping unlocked"
+              : state.config.centerEffect === "shadowlands"
+                ? "flipping locked this round (Shadowlands)"
+                : "flipping locks at round " + state.config.flipUnlockRound}{" "}
+            · Center: {CENTER_EFFECT_LABELS[state.config.centerEffect]}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -315,16 +357,32 @@ function Game() {
       {newGameSetup && (
         <div className="fixed top-20 left-1/2 z-50 w-[min(90vw,20rem)] -translate-x-1/2 rounded-lg border border-zinc-300 bg-white p-3 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
           <p className="mb-2 font-medium">Start a new game</p>
-          <label className="mb-3 flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
+          <label className="mb-2 flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
             Players
             <select
               value={newGameSetup.playerCount}
-              onChange={(e) => setNewGameSetup({ playerCount: Number(e.target.value) })}
+              onChange={(e) => setNewGameSetup({ ...newGameSetup, playerCount: Number(e.target.value) })}
               className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700"
             >
               {Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i).map((n) => (
                 <option key={n} value={n}>
                   {n} (you + {n - 1} AI)
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="mb-3 flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
+            Center effect
+            <select
+              value={newGameSetup.centerEffect}
+              onChange={(e) => setNewGameSetup({ ...newGameSetup, centerEffect: e.target.value as CenterEffectId | "random" })}
+              className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700"
+            >
+              <option value="random">Random</option>
+              <option value="none">None</option>
+              {DRAWABLE_CENTER_EFFECTS.map((id) => (
+                <option key={id} value={id}>
+                  {CENTER_EFFECT_LABELS[id]}
                 </option>
               ))}
             </select>
@@ -392,9 +450,18 @@ function BoardGrid({
             return (
               <div
                 key={key}
-                className="flex h-20 w-20 items-center justify-center rounded-md border-2 border-dashed border-zinc-400 text-[10px] text-zinc-400"
+                className="relative"
+                onMouseEnter={() => setHoveredKey(key)}
+                onMouseLeave={() => setHoveredKey((prev) => (prev === key ? null : prev))}
               >
-                center
+                <div className="flex h-20 w-20 items-center justify-center rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400">
+                  {CENTER_EFFECT_LABELS[state.config.centerEffect]}
+                </div>
+                {hoveredKey === key && (
+                  <div className="pointer-events-none absolute -top-9 left-1/2 z-10 w-max max-w-[14rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
+                    {CENTER_EFFECT_LABELS[state.config.centerEffect]} — {CENTER_EFFECT_DESCRIPTIONS[state.config.centerEffect]}
+                  </div>
+                )}
               </div>
             );
           }
@@ -529,7 +596,15 @@ function Hand({
   );
 }
 
-function PlayerTable({ label, cards }: { label: string; cards: ResolvedCard[] }) {
+function PlayerTable({
+  label,
+  cards,
+  extraRow,
+}: {
+  label: string;
+  cards: ResolvedCard[];
+  extraRow?: { label: string; value: number };
+}) {
   return (
     <div className="min-w-[11rem] flex-1">
       <h3 className="mb-1 text-sm font-semibold">{label}</h3>
@@ -551,6 +626,14 @@ function PlayerTable({ label, cards }: { label: string; cards: ResolvedCard[] })
               <td className="py-1 pr-2 font-semibold">{c.finalValue}</td>
             </tr>
           ))}
+          {extraRow && (
+            <tr className="border-b border-zinc-100 italic dark:border-zinc-800">
+              <td className="py-1 pr-2 text-zinc-500">—</td>
+              <td className="py-1 pr-2">{extraRow.label}</td>
+              <td className="py-1 pr-2">—</td>
+              <td className="py-1 pr-2 font-semibold">{extraRow.value}</td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
@@ -559,7 +642,14 @@ function PlayerTable({ label, cards }: { label: string; cards: ResolvedCard[] })
 
 function EndScreen({ state }: { state: GameState }) {
   const result = state.result!;
-  const { cards } = resolveBoard(state.board, state.config.boardBounds, state.round);
+  const playerIds = state.players.map((p) => p.id);
+  const { cards, centerAward, kingslayerZeroed } = resolveBoard(
+    state.board,
+    state.config.boardBounds,
+    state.round,
+    state.config.centerEffect,
+    playerIds
+  );
 
   const orderIndex = new Map(state.placementOrder.map((id, i) => [id, i]));
   const byTurnPlayed = (ownerId: string) =>
@@ -584,9 +674,30 @@ function EndScreen({ state }: { state: GameState }) {
           </span>
         ))}
       </div>
+      {centerAward && (
+        <p className="-mb-2 text-xs text-zinc-500">
+          Champion of the Weak: the center (value {centerAward.value}) went to {ownerDisplayName(state, centerAward.ownerId)}.
+        </p>
+      )}
+      {kingslayerZeroed.length > 0 && (
+        <p className="-mb-2 text-xs text-zinc-500">
+          Kingslayer zeroed:{" "}
+          {kingslayerZeroed
+            .map((id) => {
+              const c = cards.find((cc) => cc.instanceId === id)!;
+              return `${CARD_DEFS[c.cardId].name} (${ownerDisplayName(state, c.ownerId)})`;
+            })
+            .join(", ")}
+        </p>
+      )}
       <div className="flex flex-wrap gap-6">
         {state.players.map((p) => (
-          <PlayerTable key={p.id} label={ownerDisplayName(state, p.id)} cards={byTurnPlayed(p.id)} />
+          <PlayerTable
+            key={p.id}
+            label={ownerDisplayName(state, p.id)}
+            cards={byTurnPlayed(p.id)}
+            extraRow={centerAward && centerAward.ownerId === p.id ? { label: "Center", value: centerAward.value } : undefined}
+          />
         ))}
       </div>
     </div>

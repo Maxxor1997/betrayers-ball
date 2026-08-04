@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CARD_DEFS } from "../cards";
 import { applyAction, createGame } from "../game";
 import { getLegalPlacementCells } from "../turns";
 import { GameConfig, GameState } from "../types";
@@ -211,5 +212,44 @@ describe("applyAction — voting", () => {
   it("rejects voting twice", () => {
     const state = playRound1(() => 0.99); // AI votes no, human still pending
     expect(() => applyAction(state, { type: "castVote", playerId: "bot", vote: true })).toThrow();
+  });
+});
+
+describe("applyAction — centerEffect threads through to a real end-of-game result", () => {
+  it("No Man's Land measurably reduces a card's contribution to the final score", () => {
+    const config: GameConfig = {
+      boardBounds: { width: 7, height: 7, center: { x: 3, y: 3 } },
+      handSize: 1,
+      roundCap: 1,
+      flipUnlockRound: 2,
+      centerEffect: "noMansLand",
+      minRoundFloor: 10, // keep voting out of the way
+    };
+    // Manually constructed (known Footman hands) rather than createGame's random deal,
+    // so the expected score math doesn't depend on which cards happen to be dealt.
+    let state: GameState = {
+      config,
+      board: new Map(),
+      players: [
+        { id: "p1", hand: [{ instanceId: "h1", cardId: "Footman", ownerId: "p1", faceUp: false }], isAI: false },
+        { id: "p2", hand: [{ instanceId: "h2", cardId: "Footman", ownerId: "p2", faceUp: false }], isAI: false },
+      ],
+      currentPlayerIndex: 0,
+      round: 1,
+      passedPlayerIds: new Set(),
+      hasFlippedThisTurn: false,
+      votes: {},
+      placementOrder: [],
+      phase: "playing",
+      result: null,
+    };
+
+    // (3,2) is directly above center (3,3) -> same column -> on the cross.
+    state = applyAction(state, { type: "place", playerId: "p1", instanceId: "h1", position: { x: 3, y: 2 } });
+    // (3,4) is also adjacent to center, so it's a legal round-1 placement too.
+    state = applyAction(state, { type: "place", playerId: "p2", instanceId: "h2", position: { x: 3, y: 4 } });
+
+    expect(state.phase).toBe("ended");
+    expect(state.result?.scores.p1).toBe(CARD_DEFS.Footman.base - 2);
   });
 });

@@ -1,5 +1,5 @@
 import { dealNewGame, Rng } from "./deck";
-import { aiVoteProbability, computeGameResult, shouldEndGame } from "./endgame";
+import { computeAiVote, computeGameResult, shouldEndGame } from "./endgame";
 import { applyFlip, applyPass, applyPlace, currentPlayerId, mustPass } from "./turns";
 import { BoardBounds, CastVoteAction, GameAction, GameConfig, GameState } from "./types";
 
@@ -73,7 +73,7 @@ function advanceTurn(state: GameState, rng: Rng): GameState {
 
   if (shouldEndGame(state.board, state.config.boardBounds, completedRound, state.config.roundCap)) {
     const playerIds = state.players.map((p) => p.id);
-    const result = computeGameResult(state.board, state.config.boardBounds, completedRound, playerIds);
+    const result = computeGameResult(state.board, state.config.boardBounds, completedRound, playerIds, state.config.centerEffect);
     return { ...state, phase: "ended", result, currentPlayerIndex: nextIndex, hasFlippedThisTurn: false };
   }
 
@@ -82,7 +82,7 @@ function advanceTurn(state: GameState, rng: Rng): GameState {
     // pending in `votes` until cast via a castVote action.
     const votes: Record<string, boolean> = {};
     for (const player of state.players) {
-      if (player.isAI) votes[player.id] = rng() < aiVoteProbability(completedRound, state.config.roundCap);
+      if (player.isAI) votes[player.id] = computeAiVote(state, player.id, rng);
     }
     return { ...state, phase: "voting", votes, currentPlayerIndex: nextIndex, hasFlippedThisTurn: false };
   }
@@ -109,7 +109,7 @@ function applyCastVote(state: GameState, action: CastVoteAction): GameState {
 
   if (passes) {
     const playerIds = state.players.map((p) => p.id);
-    const result = computeGameResult(state.board, state.config.boardBounds, state.round, playerIds);
+    const result = computeGameResult(state.board, state.config.boardBounds, state.round, playerIds, state.config.centerEffect);
     return { ...state, phase: "ended", result, votes };
   }
 

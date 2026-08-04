@@ -135,6 +135,42 @@ describe("flipping", () => {
   });
 });
 
+describe("flipping — Shadowlands", () => {
+  const SHADOWLANDS_CONFIG: GameConfig = { ...CONFIG, centerEffect: "shadowlands" };
+
+  function stateAtRound(round: number): GameState {
+    const board: Board = new Map();
+    board.set("2,1", handCard("Footman", "p1"));
+    return makeState({ board, round, config: SHADOWLANDS_CONFIG });
+  }
+
+  it("allows flipping on rounds 2, 4, 6", () => {
+    for (const round of [2, 4, 6]) {
+      expect(getLegalFlipTargets(stateAtRound(round))).toHaveLength(1);
+    }
+  });
+
+  it("blocks flipping on rounds 1, 3, 5", () => {
+    for (const round of [1, 3, 5]) {
+      expect(getLegalFlipTargets(stateAtRound(round))).toHaveLength(0);
+      const state = stateAtRound(round);
+      const target = state.board.get("2,1")!;
+      expect(() => applyFlip(state, { type: "flip", playerId: "p1", instanceId: target.instanceId })).toThrow();
+    }
+  });
+
+  it("still respects the once-per-turn limit on an unlocked round", () => {
+    const board: Board = new Map();
+    board.set("2,1", handCard("Footman", "p1"));
+    board.set("2,3", handCard("Footman", "p1"));
+    const state = makeState({ board, round: 2, config: SHADOWLANDS_CONFIG });
+    const c1 = state.board.get("2,1")!;
+    const c2 = state.board.get("2,3")!;
+    const next = applyFlip(state, { type: "flip", playerId: "p1", instanceId: c1.instanceId });
+    expect(() => applyFlip(next, { type: "flip", playerId: "p1", instanceId: c2.instanceId })).toThrow();
+  });
+});
+
 describe("mustPass / applyPass", () => {
   it("is false when a legal move exists", () => {
     const state = makeState();

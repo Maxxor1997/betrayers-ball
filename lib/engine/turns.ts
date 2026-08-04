@@ -1,5 +1,5 @@
 import { getLegalPlacementPositions, isCenterPosition } from "./board";
-import { CardInstance, FlipAction, GameState, PlaceAction, Position, posKey } from "./types";
+import { CardInstance, FlipAction, GameConfig, GameState, PlaceAction, Position, posKey } from "./types";
 
 export function currentPlayerId(state: GameState): string {
   return state.players[state.currentPlayerIndex].id;
@@ -10,10 +10,22 @@ function requireCurrentPlayer(state: GameState, playerId: string): void {
   if (playerId !== currentPlayerId(state)) throw new Error(`It is not ${playerId}'s turn`);
 }
 
+/**
+ * Whether flipping is allowed on this round. Normally any round from
+ * `flipUnlockRound` on; under Shadowlands, only every other round from there
+ * (rounds 2, 4, 6 for the default flipUnlockRound of 2) — a rule-toggle center
+ * effect, not a scoring effect.
+ */
+export function isFlipUnlocked(round: number, config: GameConfig): boolean {
+  if (round < config.flipUnlockRound) return false;
+  if (config.centerEffect === "shadowlands") return (round - config.flipUnlockRound) % 2 === 0;
+  return true;
+}
+
 /** Any face-down card on the board, any owner — the legal flip targets right now. */
 export function getLegalFlipTargets(state: GameState): CardInstance[] {
   if (state.phase !== "playing") return [];
-  if (state.round < state.config.flipUnlockRound) return [];
+  if (!isFlipUnlocked(state.round, state.config)) return [];
   if (state.hasFlippedThisTurn) return [];
   return [...state.board.values()].filter((c) => !c.faceUp);
 }
@@ -33,8 +45,8 @@ export function mustPass(state: GameState): boolean {
 
 export function applyFlip(state: GameState, action: FlipAction): GameState {
   requireCurrentPlayer(state, action.playerId);
-  if (state.round < state.config.flipUnlockRound) {
-    throw new Error(`Flipping unlocks at round ${state.config.flipUnlockRound}`);
+  if (!isFlipUnlocked(state.round, state.config)) {
+    throw new Error(`Flipping is not allowed on round ${state.round}`);
   }
   if (state.hasFlippedThisTurn) throw new Error("Already flipped a card this turn");
 
