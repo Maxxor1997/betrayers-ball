@@ -66,6 +66,8 @@ export interface GameConfig {
   roundCap: number;
   flipUnlockRound: number;
   centerEffect: CenterEffectId;
+  /** Earliest round an end-game request is allowed, per the spec's min-round floor. */
+  minRoundFloor: number;
 }
 
 export interface GameResult {
@@ -82,6 +84,10 @@ export interface GameState {
   /** Players who had no legal placement and are passing for the rest of the game. */
   passedPlayerIds: Set<string>;
   hasFlippedThisTurn: boolean;
+  /** True once someone has asked to end the game — takes effect at the next round boundary. */
+  endRequested: boolean;
+  /** instanceIds in the order they were placed on the board — for turn-order UI/history. */
+  placementOrder: string[];
   phase: "playing" | "ended";
   result: GameResult | null;
 }
@@ -104,7 +110,18 @@ export interface PassAction {
   playerId: string;
 }
 
-export type GameAction = FlipAction | PlaceAction | PassAction;
+/**
+ * A simplified stand-in for the spec's full voting protocol (simultaneous private
+ * commit, tally, tie->continue — deferred, see plan). Any player may request the
+ * game end; it takes effect at the next round boundary, honoring the min-round floor
+ * and the "never end mid-round" fairness rule.
+ */
+export interface RequestEndAction {
+  type: "requestEnd";
+  playerId: string;
+}
+
+export type GameAction = FlipAction | PlaceAction | PassAction | RequestEndAction;
 
 export function posKey(pos: Position): string {
   return `${pos.x},${pos.y}`;

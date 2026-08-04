@@ -72,7 +72,7 @@ export function applyPlace(state: GameState, action: PlaceAction): GameState {
     i === state.currentPlayerIndex ? { ...p, hand: [...p.hand.slice(0, handIndex), ...p.hand.slice(handIndex + 1)] } : p
   );
 
-  return { ...state, board, players };
+  return { ...state, board, players, placementOrder: [...state.placementOrder, card.instanceId] };
 }
 
 export function applyPass(state: GameState, playerId: string): GameState {

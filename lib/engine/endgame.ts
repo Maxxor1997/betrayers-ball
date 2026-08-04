@@ -10,9 +10,18 @@ export function isRoundCapHit(completedRound: number, roundCap: number): boolean
   return completedRound >= roundCap;
 }
 
-/** Whichever-first endgame triggers, checked only at a round boundary (vote is deferred — see plan). */
-export function shouldEndGame(board: Board, bounds: BoardBounds, completedRound: number, roundCap: number): boolean {
-  return isBoardFull(board, bounds) || isRoundCapHit(completedRound, roundCap);
+/**
+ * Whichever-first endgame triggers, checked only at a round boundary. `endRequested`
+ * stands in for the spec's full voting protocol (see RequestEndAction in types.ts).
+ */
+export function shouldEndGame(
+  board: Board,
+  bounds: BoardBounds,
+  completedRound: number,
+  roundCap: number,
+  endRequested: boolean
+): boolean {
+  return endRequested || isBoardFull(board, bounds) || isRoundCapHit(completedRound, roundCap);
 }
 
 /**

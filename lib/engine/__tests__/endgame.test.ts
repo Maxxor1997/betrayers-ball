@@ -36,11 +36,15 @@ describe("isBoardFull", () => {
 
 describe("shouldEndGame", () => {
   it("triggers on cap even with an empty board", () => {
-    expect(shouldEndGame(new Map(), BOUNDS, 6, 6)).toBe(true);
+    expect(shouldEndGame(new Map(), BOUNDS, 6, 6, false)).toBe(true);
   });
 
-  it("does not trigger below cap on a non-full board", () => {
-    expect(shouldEndGame(new Map(), BOUNDS, 3, 6)).toBe(false);
+  it("does not trigger below cap on a non-full board without a request", () => {
+    expect(shouldEndGame(new Map(), BOUNDS, 3, 6, false)).toBe(false);
+  });
+
+  it("triggers when endRequested is true, regardless of cap/board state", () => {
+    expect(shouldEndGame(new Map(), BOUNDS, 3, 6, true)).toBe(true);
   });
 });
 

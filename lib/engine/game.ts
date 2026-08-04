@@ -9,6 +9,7 @@ export const DEFAULT_2P_CONFIG: GameConfig = {
   roundCap: 6,
   flipUnlockRound: 2,
   centerEffect: "none",
+  minRoundFloor: 3,
 };
 
 export function createGame(playerIds: string[], config: GameConfig = DEFAULT_2P_CONFIG, rng?: () => number): GameState {
@@ -21,9 +22,16 @@ export function createGame(playerIds: string[], config: GameConfig = DEFAULT_2P_
     round: 1,
     passedPlayerIds: new Set(),
     hasFlippedThisTurn: false,
+    endRequested: false,
+    placementOrder: [],
     phase: "playing",
     result: null,
   };
+}
+
+/** Earliest round an end-game request is allowed, and whether one hasn't already landed. */
+export function canRequestEnd(state: GameState): boolean {
+  return state.phase === "playing" && !state.endRequested && state.round >= state.config.minRoundFloor;
 }
 
 /**
@@ -40,7 +48,7 @@ function advanceTurn(state: GameState): GameState {
   }
 
   const completedRound = state.round;
-  if (shouldEndGame(state.board, state.config.boardBounds, completedRound, state.config.roundCap)) {
+  if (shouldEndGame(state.board, state.config.boardBounds, completedRound, state.config.roundCap, state.endRequested)) {
     const playerIds = state.players.map((p) => p.id);
     const result = computeGameResult(state.board, state.config.boardBounds, completedRound, playerIds);
     return { ...state, phase: "ended", result, currentPlayerIndex: nextIndex, hasFlippedThisTurn: false };
@@ -49,9 +57,23 @@ function advanceTurn(state: GameState): GameState {
   return { ...state, currentPlayerIndex: nextIndex, round: completedRound + 1, hasFlippedThisTurn: false };
 }
 
+function applyRequestEnd(state: GameState, playerId: string): GameState {
+  if (!state.players.some((p) => p.id === playerId)) throw new Error(`Unknown player ${playerId}`);
+  if (state.round < state.config.minRoundFloor) {
+    throw new Error(`Cannot request end before round ${state.config.minRoundFloor}`);
+  }
+  if (state.endRequested) return state;
+  return { ...state, endRequested: true };
+}
+
 /** Pure reducer: applyAction(state, action) -> state. Throws on illegal actions. */
 export function applyAction(state: GameState, action: GameAction): GameState {
   if (state.phase !== "playing") throw new Error("Game has already ended");
+
+  // requestEnd isn't tied to turn order -- any player can ask for the game to end at
+  // the next round boundary, independent of whose turn it currently is.
+  if (action.type === "requestEnd") return applyRequestEnd(state, action.playerId);
+
   if (action.playerId !== currentPlayerId(state)) throw new Error(`It is not ${action.playerId}'s turn`);
 
   switch (action.type) {

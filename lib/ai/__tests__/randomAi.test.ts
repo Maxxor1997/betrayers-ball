@@ -44,6 +44,7 @@ describe("chooseAiAction", () => {
       roundCap: 6,
       flipUnlockRound: 2,
       centerEffect: "none",
+      minRoundFloor: 1,
     };
     for (let seed = 1; seed <= 10; seed++) {
       const finalState = playFullAiGame(config, seed);

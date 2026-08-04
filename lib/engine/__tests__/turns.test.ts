@@ -8,6 +8,7 @@ const CONFIG: GameConfig = {
   roundCap: 6,
   flipUnlockRound: 2,
   centerEffect: "none",
+  minRoundFloor: 1,
 };
 
 let counter = 0;
@@ -28,6 +29,8 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     round: 1,
     passedPlayerIds: new Set(),
     hasFlippedThisTurn: false,
+    endRequested: false,
+    placementOrder: [],
     phase: "playing",
     result: null,
     ...overrides,
@@ -68,6 +71,14 @@ describe("getLegalPlacementCells / applyPlace", () => {
     const next = applyPlace(state, { type: "place", playerId: "p1", instanceId: cardId, position: { x: 2, y: 1 } });
     expect(next.players[0].hand).toHaveLength(0);
     expect(next.board.get("2,1")?.instanceId).toBe(cardId);
+  });
+
+  it("appends to placementOrder in the order cards are placed", () => {
+    const state = makeState();
+    const cardId = state.players[0].hand[0].instanceId;
+    expect(state.placementOrder).toEqual([]);
+    const next = applyPlace(state, { type: "place", playerId: "p1", instanceId: cardId, position: { x: 2, y: 1 } });
+    expect(next.placementOrder).toEqual([cardId]);
   });
 
   it("forces Giant to be placed face-up", () => {
