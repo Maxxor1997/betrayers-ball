@@ -1,6 +1,6 @@
 import { CardId, CardInstance, DeckCard, PlayerState } from "./types";
 
-/** Copy counts per game_spec.md v2 deck table. Totals 68 (Slam 26 / Engine 25 / Control 17). */
+/** Copy counts per game_spec.md v2 deck table, +4 Truthseeker. Totals 72 (Slam 26 / Engine 25 / Control 21). */
 export const DECK_COPY_COUNTS: Record<CardId, number> = {
   Footman: 12,
   Warlord: 5,
@@ -18,6 +18,7 @@ export const DECK_COPY_COUNTS: Record<CardId, number> = {
   PlagueBearer: 3,
   Suppressor: 2,
   Headsman: 2,
+  Truthseeker: 4,
 };
 
 export type Rng = () => number;

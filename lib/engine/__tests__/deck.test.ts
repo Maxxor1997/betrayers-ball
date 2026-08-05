@@ -4,8 +4,8 @@ import { ALL_CARD_IDS, CARD_DEFS } from "../cards";
 import { CardId, CardInstance, DeckCard, PlayerState } from "../types";
 
 describe("cards", () => {
-  it("has all 16 cards from the spec", () => {
-    expect(ALL_CARD_IDS).toHaveLength(16);
+  it("has all 17 cards (the spec's 16 + Truthseeker)", () => {
+    expect(ALL_CARD_IDS).toHaveLength(17);
   });
 
   it("Footman is the base-value benchmark", () => {
@@ -14,8 +14,8 @@ describe("cards", () => {
 });
 
 describe("buildDeck", () => {
-  it("totals 68 cards", () => {
-    expect(buildDeck()).toHaveLength(68);
+  it("totals 72 cards", () => {
+    expect(buildDeck()).toHaveLength(72);
   });
 
   it("matches the spec's per-card copy counts", () => {
@@ -27,12 +27,12 @@ describe("buildDeck", () => {
     }
   });
 
-  it("bucket totals match spec (Slam 26 / Engine 25 / Control 17)", () => {
+  it("bucket totals match spec + Truthseeker (Slam 26 / Engine 25 / Control 21)", () => {
     const totals = { Slam: 0, Engine: 0, Control: 0 };
     for (const cardId of ALL_CARD_IDS) {
       totals[CARD_DEFS[cardId].bucket] += DECK_COPY_COUNTS[cardId];
     }
-    expect(totals).toEqual({ Slam: 26, Engine: 25, Control: 17 });
+    expect(totals).toEqual({ Slam: 26, Engine: 25, Control: 21 });
   });
 
   it("assigns every card a unique instanceId", () => {
@@ -91,7 +91,7 @@ describe("dealNewGame", () => {
     const { players, remainingDeck } = dealNewGame(["p1", "p2"], 7, () => 0.42);
     expect(players).toHaveLength(2);
     expect(players[0].hand).toHaveLength(7);
-    expect(remainingDeck).toHaveLength(68 - 14);
+    expect(remainingDeck).toHaveLength(72 - 14);
   });
 });
 

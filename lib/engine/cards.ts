@@ -1,6 +1,6 @@
 import { CardDef, CardId } from "./types";
 
-/** The 16-card set, per game_spec.md v2. Base values and buckets only — effect logic lives in resolution.ts. */
+/** The 17-card set, per game_spec.md v2 (+Truthseeker). Base values and buckets only — effect logic lives in resolution.ts/turns.ts. */
 export const CARD_DEFS: Record<CardId, CardDef> = {
   Footman: {
     id: "Footman",
@@ -130,6 +130,15 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Control",
     text: "−4 to adj. face-up base≥6",
     fullText: "−4 to each adjacent face-up card with base ≥6 (any owner).",
+  },
+  Truthseeker: {
+    id: "Truthseeker",
+    name: "Truthseeker",
+    base: 4,
+    bucket: "Control",
+    text: "On placement, flips all adjacent",
+    fullText:
+      "Immediately flips every adjacent card face-up when placed (any owner, including your own). Not affected by flip-lock rules or Suppressor negation.",
   },
 };
 

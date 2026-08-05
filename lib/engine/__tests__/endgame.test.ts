@@ -16,6 +16,7 @@ const MARGIN_CONFIG: GameConfig = {
   flipUnlockRound: 2,
   centerEffect: "none",
   minRoundFloor: 3,
+  playerCount: 2,
 };
 
 function makeState(overrides: Partial<GameState> = {}): GameState {

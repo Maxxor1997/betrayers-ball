@@ -1,4 +1,4 @@
-import { getLegalPlacementPositions, isCenterPosition } from "./board";
+import { adjacentPositions, getLegalPlacementPositions, isCenterPosition } from "./board";
 import { CardInstance, FlipAction, GameConfig, GameState, PlaceAction, Position, posKey } from "./types";
 
 export function currentPlayerId(state: GameState): string {
@@ -12,22 +12,36 @@ function requireCurrentPlayer(state: GameState, playerId: string): void {
 
 /**
  * Whether flipping is allowed on this round. Normally any round from
- * `flipUnlockRound` on; under Shadowlands, only every other round from there
- * (rounds 2, 4, 6 for the default flipUnlockRound of 2) — a rule-toggle center
- * effect, not a scoring effect.
+ * `flipUnlockRound` on (2p delays this to round 3 -- see configForPlayerCount); under
+ * Shadowlands, only every other round from there (rounds 2, 4, 6 for the default
+ * flipUnlockRound of 2) -- except at 2p, where Shadowlands disables flipping for the
+ * whole game instead, since a single flip removes all "unknown" for that card with
+ * only one opponent. Under Prying Eyes, unlocked from round 1 regardless of
+ * `flipUnlockRound`. All rule-toggle center effects, not scoring effects.
  */
 export function isFlipUnlocked(round: number, config: GameConfig): boolean {
+  if (config.centerEffect === "shadowlands" && config.playerCount === 2) return false;
+  if (config.centerEffect === "pryingEyes") return true;
   if (round < config.flipUnlockRound) return false;
   if (config.centerEffect === "shadowlands") return (round - config.flipUnlockRound) % 2 === 0;
   return true;
 }
 
-/** Any face-down card on the board, any owner — the legal flip targets right now. */
+/**
+ * Any face-down card on the board, any owner — the legal flip targets right now.
+ * Under Prying Eyes, the acting player's own cards are excluded: you can flip anyone
+ * else's, never your own.
+ */
 export function getLegalFlipTargets(state: GameState): CardInstance[] {
   if (state.phase !== "playing") return [];
   if (!isFlipUnlocked(state.round, state.config)) return [];
   if (state.hasFlippedThisTurn) return [];
-  return [...state.board.values()].filter((c) => !c.faceUp);
+  const targets = [...state.board.values()].filter((c) => !c.faceUp);
+  if (state.config.centerEffect === "pryingEyes") {
+    const playerId = currentPlayerId(state);
+    return targets.filter((c) => c.ownerId !== playerId);
+  }
+  return targets;
 }
 
 /** Empty board cells a card could legally be placed on right now. */
@@ -54,6 +68,9 @@ export function applyFlip(state: GameState, action: FlipAction): GameState {
   if (!entry) throw new Error(`No card ${action.instanceId} on the board`);
   const [key, target] = entry;
   if (target.faceUp) throw new Error("Card is already face-up");
+  if (state.config.centerEffect === "pryingEyes" && target.ownerId === action.playerId) {
+    throw new Error("Prying Eyes: you cannot flip your own cards");
+  }
 
   const board = new Map(state.board);
   board.set(key, { ...target, faceUp: true });
@@ -79,6 +96,23 @@ export function applyPlace(state: GameState, action: PlaceAction): GameState {
   // Giant can't be played face-down — a placement/state rule, not a scoring effect.
   const faceUp = card.cardId === "Giant" ? true : card.faceUp;
   board.set(posKey(action.position), { ...card, faceUp });
+
+  // Truthseeker: immediately flip every adjacent card face-up (any owner, including
+  // your own). A placement-time trigger, distinct from the turn's normal optional
+  // flip action -- it doesn't consume hasFlippedThisTurn and ignores the flip-lock
+  // rules above (Shadowlands/Prying Eyes/flipUnlockRound all gate the *player's*
+  // flip action, not a card's own printed effect). Also unaffected by Suppressor
+  // negation, which in this engine is a resolution-time-only concept, not something
+  // computed mid-game during turns.
+  if (card.cardId === "Truthseeker") {
+    for (const neighborPos of adjacentPositions(action.position, bounds)) {
+      const key = posKey(neighborPos);
+      const neighbor = board.get(key);
+      if (neighbor && !neighbor.faceUp) {
+        board.set(key, { ...neighbor, faceUp: true });
+      }
+    }
+  }
 
   const players = state.players.map((p, i) =>
     i === state.currentPlayerIndex ? { ...p, hand: [...p.hand.slice(0, handIndex), ...p.hand.slice(handIndex + 1)] } : p

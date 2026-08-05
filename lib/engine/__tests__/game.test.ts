@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CARD_DEFS } from "../cards";
-import { applyAction, createGame } from "../game";
+import { applyAction, configForPlayerCount, createGame } from "../game";
 import { getLegalFlipTargets, getLegalPlacementCells } from "../turns";
 import { GameConfig, GameState } from "../types";
 
@@ -20,7 +20,8 @@ describe("createGame", () => {
       roundCap: 6,
       flipUnlockRound: 2,
       centerEffect: "none",
-    minRoundFloor: 1,
+      minRoundFloor: 1,
+      playerCount: 2,
     };
     const state = createGame(["p1", "p2"], config, deterministicRng(1));
     expect(state.players[0].hand).toHaveLength(7);
@@ -38,6 +39,7 @@ describe("createGame", () => {
       flipUnlockRound: 2,
       centerEffect: "none",
       minRoundFloor: 1,
+      playerCount: 3,
     };
     const defaultState = createGame(["p1", "p2", "p3"], config, deterministicRng(1));
     expect(defaultState.currentPlayerIndex).toBe(0);
@@ -55,6 +57,7 @@ describe("applyAction — round-boundary-only endgame (cap)", () => {
     flipUnlockRound: 2,
     centerEffect: "none",
     minRoundFloor: 1,
+    playerCount: 2,
   };
 
   it("does not end mid-round even though the cap is already met", () => {
@@ -93,6 +96,7 @@ describe("applyAction — board-fill endgame trigger", () => {
     flipUnlockRound: 2,
     centerEffect: "none",
     minRoundFloor: 10, // above where the board fills (round 4), so voting doesn't interfere here
+    playerCount: 2,
   };
 
   it("ends when the board fills, before the (much higher) round cap", () => {
@@ -132,6 +136,7 @@ describe("applyAction — turn ownership", () => {
     flipUnlockRound: 2,
     centerEffect: "none",
     minRoundFloor: 1,
+    playerCount: 2,
   };
 
   it("rejects an action from a player who is not current", () => {
@@ -161,6 +166,7 @@ describe("applyAction — voting", () => {
     flipUnlockRound: 2,
     centerEffect: "none",
     minRoundFloor: 1,
+    playerCount: 2,
   };
 
   function playRound1(rngForBoundary: () => number) {
@@ -240,6 +246,7 @@ describe("applyAction — centerEffect threads through to a real end-of-game res
       flipUnlockRound: 2,
       centerEffect: "noMansLand",
       minRoundFloor: 10, // keep voting out of the way
+      playerCount: 2,
     };
     // Manually constructed (known Footman hands) rather than createGame's random deal,
     // so the expected score math doesn't depend on which cards happen to be dealt.
@@ -280,6 +287,7 @@ describe("advanceTurn — round boundary respects a non-zero starting player", (
     flipUnlockRound: 2,
     centerEffect: "none",
     minRoundFloor: 10, // keep voting out of the way
+    playerCount: 3,
   };
 
   it("does not advance the round (or unlock flipping) until every player, not just the first mover, has acted", () => {
@@ -315,6 +323,7 @@ describe("Reckoning center effect — discard & redraw hands at round 4", () => 
     flipUnlockRound: 2,
     centerEffect: "reckoning",
     minRoundFloor: 3,
+    playerCount: 2,
   };
 
   function placeCurrentPlayersFirstCard(state: GameState): GameState {
@@ -377,5 +386,22 @@ describe("Reckoning center effect — discard & redraw hands at round 4", () => 
     const p2After = state.players.find((p) => p.id === p2.id)!;
     expect(p2After.hand).toHaveLength(4);
     expect(p2After.hand.map((c) => c.instanceId).sort()).not.toEqual(handWithoutRedraw);
+  });
+});
+
+describe("configForPlayerCount — 2p flip delay", () => {
+  it("delays the flip unlock to round 3 for 2 players", () => {
+    expect(configForPlayerCount(2).flipUnlockRound).toBe(3);
+  });
+
+  it("uses the normal round-2 unlock for every other player count", () => {
+    for (const count of [3, 4, 5, 6]) {
+      expect(configForPlayerCount(count).flipUnlockRound).toBe(2);
+    }
+  });
+
+  it("sets playerCount to match", () => {
+    expect(configForPlayerCount(2).playerCount).toBe(2);
+    expect(configForPlayerCount(4).playerCount).toBe(4);
   });
 });

@@ -17,9 +17,9 @@ Everything here is a **config constant / parked tuning knob** unless flagged **L
 
 ---
 
-## The 16-card set
+## The 17-card set
 
-All numbers parked. **(v2 — grew from 12 to 16 this session. See "What changed in v2" below.)**
+All numbers parked. **(v2 — grew from 12 to 16 this session; Truthseeker added afterward. See "What changed in v2" below.)**
 
 | Card | Base | Effect | Bucket |
 |---|---|---|---|
@@ -39,8 +39,9 @@ All numbers parked. **(v2 — grew from 12 to 16 this session. See "What changed
 | Plague Bearer | 3 | If 2+ adjacent Footmen (any owner), those Footmen score 0; keeps own base | Control |
 | Suppressor | 3 | If 3+ adjacent cards (center counts): each adjacent non-Suppressor card is treated as vanilla — base value only, printed text negated (any owner). Suppressors immune to negation. | Control |
 | Headsman | 3 | Each adjacent **face-up** card with base ≥ 6 scores −4 (any owner) | Control |
+| Truthseeker | 4 | **Placement-time trigger** (not a scoring effect): immediately flips every adjacent card face-up (any owner, including your own). Bypasses flip-lock rules (Shadowlands/Prying Eyes/round gate) and Suppressor negation, and doesn't consume the turn's normal flip. | Control |
 
-Balance: **5 slam / 5 engine / 6 control** (card count). Copy-count buckets are more even — see deck.
+Balance: **5 slam / 5 engine / 7 control** (card count). Copy-count buckets are more even — see deck.
 
 ### Chronicler value curve (base 2, +1/round)
 
@@ -79,9 +80,9 @@ The growing set of meta/conditional effects needs a defined order. Two-phase mod
 
 ---
 
-## Deck (68 cards, tune for variety)
+## Deck (72 cards, tune for variety)
 
-Deliberately much bigger than any single deal so hands vary game to game. At 4p × 7-card hands you deal 28; 68 leaves **~59% unseen** per game.
+Deliberately much bigger than any single deal so hands vary game to game. At 4p × 7-card hands you deal 28; 72 leaves **~61% unseen** per game.
 
 | Card | Copies | Bucket |
 |---|---|---|
@@ -101,10 +102,11 @@ Deliberately much bigger than any single deal so hands vary game to game. At 4p 
 | Plague Bearer | 3 | Control |
 | Suppressor | 2 | Control |
 | Headsman | 2 | Control |
+| Truthseeker | 4 | Control |
 
-**Total: 68.** Copy buckets: **Slam 26 / Engine 25 / Control 17.**
+**Total: 72.** Copy buckets: **Slam 26 / Engine 25 / Control 21.**
 
-Weighting logic: Footman is the backbone (bluff layer + Commander/Bannerman fuel + Plague Bearer target + line-bonus payoff) — 12. Berserker held at 8 (second pillar; cross-owner bet must stay reliably live — *usually* live, occasionally not). Commander/Champion at 5 (present at the larger deal; Champion is the main flip payoff). Darkspawn 4 (swingy, don't flood). **Control kept scarce by copies (17) despite being 6 cards** — the doc's "don't make the board a demolition derby" rule; lots of *kinds* of control, few copies each. **Suppressor & Headsman rarest at 2** — high-impact "your card did nothing" swings, so lurking threats not staples (each appears in ~half of 4p deals). Chronicler 3 — scarce so catch-up swings games rather than becoming uniform inflation. Deck size is the variety dial; scale toward ~60 for tighter balance-testing.
+Weighting logic: Footman is the backbone (bluff layer + Commander/Bannerman fuel + Plague Bearer target + line-bonus payoff) — 12. Berserker held at 8 (second pillar; cross-owner bet must stay reliably live — *usually* live, occasionally not). Commander/Champion at 5 (present at the larger deal; Champion is the main flip payoff). Darkspawn 4 (swingy, don't flood). **Control kept scarce by copies despite being the biggest bucket** — the doc's "don't make the board a demolition derby" rule; lots of *kinds* of control, few copies each. **Suppressor & Headsman rarest at 2** — high-impact "your card did nothing" swings, so lurking threats not staples (each appears in ~half of 4p deals). Chronicler 3 — scarce so catch-up swings games rather than becoming uniform inflation. Truthseeker at 4 — a placement-time information swing (see the 17-card table), kept modest since it bypasses flip-lock rules entirely. Deck size is the variety dial; scale toward ~60 for tighter balance-testing.
 
 ---
 
@@ -143,7 +145,9 @@ Weighting logic: Footman is the backbone (bluff layer + Commander/Bannerman fuel
 - **Mirror Pool** *(scoring-time)* — each card has one mirror position (same column, opposite side of center row). If occupied, both cards +1; +2 each if same card type. Any owner.
 - **Champion of the Weak** *(post-resolution)* — center is a scorable card worth 5 (modifiable by adjacent buffs/dents at resolution). After freeze, transfers to the *unique* last-place player (its value then counts for them). Tie for last → goes to no one. Strong catch-up.
 - **Kingslayer** *(post-resolution)* — highest frozen card(s) on the board set to 0. Ties → all zeroed. Anti-value-concentration.
-- **Shadowlands** *(rule-toggle)* — flipping allowed only on rounds 2, 4, 6. Throttles info; hidden info stays sticky. Nerfs Champion, shrinks Darkspawn's late face-down pool. Rule-toggle only — no direct score effect / no center card transfer.
+- **Shadowlands** *(rule-toggle)* — flipping allowed only on rounds 2, 4, 6. Throttles info; hidden info stays sticky. Nerfs Champion, shrinks Darkspawn's late face-down pool. Rule-toggle only — no direct score effect / no center card transfer. **At 2p, disables flipping for the entire game instead** (see Flipping below).
+- **The Reckoning** *(rule-toggle)* — at the start of round 4, every player discards their hand and draws the same number of fresh cards from a shared reshuffled pool (their own discards included, so there's always enough regardless of player count). Resets any built-up hand read; punishes over-committing to a hand plan early.
+- **Prying Eyes** *(rule-toggle)* — flipping unlocked from round 1 (skips the normal round-2/round-3 gate entirely), but you can never flip your own cards — only opponents'. Pure information-race effect: everyone's hidden cards are only ever revealed by someone *else*.
 
 ---
 
@@ -152,11 +156,12 @@ Weighting logic: Footman is the backbone (bluff layer + Commander/Bannerman fuel
 - **Turn order:** (1) optionally flip one card face-up, then (2) place one card. Flip-before-place so the reveal can inform placement.
 - **Placement mandatory** (unless no legal orthogonal spot → pass).
 - **Flipping optional** — flip one card, or none. Never forced.
-- **Flip unlocks at round 2** (round 1 placement-only).
-- **What you can flip:** any face-down card, any owner.
+- **Flip unlocks at round 2** (round 1 placement-only). **At 2p, delayed to round 3** — with only one opponent, a single flip removes all "unknown" for that card faster than in larger games, so 2p games get one extra round of pure placement first.
+- **What you can flip:** any face-down card, any owner (Prying Eyes narrows this to opponents' cards only).
 - **Permanent** — once face-up, stays up.
 - **One flip per turn** max.
-- **Under Shadowlands:** further restricted to rounds 2, 4, 6.
+- **Under Shadowlands:** further restricted to rounds 2, 4, 6 (or the 2p-delayed equivalent) — **except at 2p, where Shadowlands disables flipping for the whole game** rather than shifting the schedule.
+- **Truthseeker is not the flip action** — its placement-time reveal ignores all of the above (round gate, Shadowlands, Prying Eyes) and doesn't consume the turn's one-flip allowance. It's the card's own printed effect, not the player's optional flip.
 
 ---
 

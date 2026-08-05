@@ -21,6 +21,7 @@ const CENTER_EFFECT_LABELS: Record<CenterEffectId, string> = {
   kingslayer: "Kingslayer",
   shadowlands: "Shadowlands",
   reckoning: "The Reckoning",
+  pryingEyes: "Prying Eyes",
 };
 
 const CENTER_EFFECT_DESCRIPTIONS: Record<CenterEffectId, string> = {
@@ -33,17 +34,22 @@ const CENTER_EFFECT_DESCRIPTIONS: Record<CenterEffectId, string> = {
   kingslayer: "After scoring, the highest-value card(s) on the board are set to 0. Ties zero all of them.",
   shadowlands: "Flipping is only allowed on rounds 2, 4, and 6.",
   reckoning: "At the start of round 4, every player discards their hand and draws the same number of fresh cards.",
+  pryingEyes: "Flipping is unlocked from round 1, but you can never flip your own cards -- only opponents'.",
 };
 
-/** The 6 real effects a "Random" draw picks from -- "none" is only reachable by explicit choice. */
-const DRAWABLE_CENTER_EFFECTS: CenterEffectId[] = [
+/** The real effects explicitly selectable in the New Game popup ("None" and "Random" are hardcoded separately). */
+const SELECTABLE_CENTER_EFFECTS: CenterEffectId[] = [
   "noMansLand",
   "mirrorPool",
   "championOfTheWeak",
   "kingslayer",
   "shadowlands",
   "reckoning",
+  "pryingEyes",
 ];
+
+/** What a "Random" draw picks from -- unlike explicit selection, this includes "none". */
+const RANDOM_CENTER_EFFECT_POOL: CenterEffectId[] = ["none", ...SELECTABLE_CENTER_EFFECTS];
 
 const PLAYER_COLOR_CLASSES = [
   "border-blue-500 bg-blue-50 dark:bg-blue-950",
@@ -251,7 +257,7 @@ function Game() {
     if (!newGameSetup) return;
     const centerEffect: CenterEffectId =
       newGameSetup.centerEffect === "random"
-        ? DRAWABLE_CENTER_EFFECTS[Math.floor(Math.random() * DRAWABLE_CENTER_EFFECTS.length)]
+        ? RANDOM_CENTER_EFFECT_POOL[Math.floor(Math.random() * RANDOM_CENTER_EFFECT_POOL.length)]
         : newGameSetup.centerEffect;
     setPlayerCount(newGameSetup.playerCount);
     setState(newGameState(newGameSetup.playerCount, centerEffect));
@@ -276,10 +282,14 @@ function Game() {
           <p className="text-sm text-zinc-500">
             Round {state.round} / {state.config.roundCap} ·{" "}
             {flipUnlocked
-              ? "flipping unlocked"
-              : state.config.centerEffect === "shadowlands"
-                ? "flipping locked this round (Shadowlands)"
-                : "flipping locks at round " + state.config.flipUnlockRound}{" "}
+              ? state.config.centerEffect === "pryingEyes"
+                ? "flipping unlocked (opponents' cards only)"
+                : "flipping unlocked"
+              : state.config.centerEffect === "shadowlands" && state.config.playerCount === 2
+                ? "flipping disabled all game (Shadowlands, 2p)"
+                : state.config.centerEffect === "shadowlands"
+                  ? "flipping locked this round (Shadowlands)"
+                  : "flipping locks at round " + state.config.flipUnlockRound}{" "}
             · Center: {CENTER_EFFECT_LABELS[state.config.centerEffect]}
           </p>
         </div>
@@ -414,7 +424,7 @@ function Game() {
             >
               <option value="random">Random</option>
               <option value="none">None</option>
-              {DRAWABLE_CENTER_EFFECTS.map((id) => (
+              {SELECTABLE_CENTER_EFFECTS.map((id) => (
                 <option key={id} value={id}>
                   {CENTER_EFFECT_LABELS[id]}
                 </option>

@@ -27,9 +27,12 @@ export function configForPlayerCount(playerCount: number): GameConfig {
     boardBounds,
     handSize: 7,
     roundCap: 6,
-    flipUnlockRound: 2,
+    // 2p delays the flip unlock by a round -- with only one opponent, a single flip
+    // removes all "unknown" for that card faster than in larger games.
+    flipUnlockRound: playerCount === 2 ? 3 : 2,
     centerEffect: "none",
     minRoundFloor: 3,
+    playerCount,
   };
 }
 

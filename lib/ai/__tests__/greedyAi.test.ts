@@ -56,6 +56,7 @@ describe("chooseGreedyAiAction — legality", () => {
       flipUnlockRound: 2,
       centerEffect: "none",
       minRoundFloor: 1,
+      playerCount: 2,
     };
     for (let seed = 1; seed <= 10; seed++) {
       const finalState = playFullAiGame(config, seed);
@@ -109,6 +110,7 @@ const CONFIG: GameConfig = {
   flipUnlockRound: 2,
   centerEffect: "none",
   minRoundFloor: 3,
+  playerCount: 2,
 };
 
 let counter = 0;
