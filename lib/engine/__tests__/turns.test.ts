@@ -21,12 +21,14 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
   return {
     config: CONFIG,
     board,
+    deck: [],
     players: [
       { id: "p1", hand: [handCard("Footman", "p1")], isAI: false },
       { id: "p2", hand: [handCard("Footman", "p2")], isAI: false },
     ],
     currentPlayerIndex: 0,
     round: 1,
+    turnsThisRound: 0,
     passedPlayerIds: new Set(),
     hasFlippedThisTurn: false,
     votes: {},

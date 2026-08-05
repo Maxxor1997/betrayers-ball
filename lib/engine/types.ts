@@ -62,7 +62,14 @@ export interface PlayerState {
   isAI: boolean;
 }
 
-export type CenterEffectId = "none" | "noMansLand" | "mirrorPool" | "championOfTheWeak" | "kingslayer" | "shadowlands";
+export type CenterEffectId =
+  | "none"
+  | "noMansLand"
+  | "mirrorPool"
+  | "championOfTheWeak"
+  | "kingslayer"
+  | "shadowlands"
+  | "reckoning";
 
 export interface GameConfig {
   boardBounds: BoardBounds;
@@ -82,9 +89,22 @@ export interface GameResult {
 export interface GameState {
   config: GameConfig;
   board: Board;
+  /**
+   * The undrawn pool left after the initial deal. Unused by most games (hands are
+   * fixed for the game per the spec) -- only consumed by the Reckoning center effect,
+   * which redraws hands at round 4.
+   */
+  deck: DeckCard[];
   players: PlayerState[];
   currentPlayerIndex: number;
   round: number;
+  /**
+   * How many players have taken a turn since this round started. Turn order rotates
+   * continuously through player indices (it does not reset to 0 each round), so this
+   * -- not `currentPlayerIndex === 0` -- is what actually marks a round boundary;
+   * that matters once the starting player can be anyone (see firstPlayerIndex).
+   */
+  turnsThisRound: number;
   /** Players who had no legal placement and are passing for the rest of the game. */
   passedPlayerIds: Set<string>;
   hasFlippedThisTurn: boolean;

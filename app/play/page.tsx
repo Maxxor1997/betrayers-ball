@@ -20,6 +20,7 @@ const CENTER_EFFECT_LABELS: Record<CenterEffectId, string> = {
   championOfTheWeak: "Champion of the Weak",
   kingslayer: "Kingslayer",
   shadowlands: "Shadowlands",
+  reckoning: "The Reckoning",
 };
 
 const CENTER_EFFECT_DESCRIPTIONS: Record<CenterEffectId, string> = {
@@ -31,15 +32,17 @@ const CENTER_EFFECT_DESCRIPTIONS: Record<CenterEffectId, string> = {
     "The center counts as a card worth 5 (modified by adjacent buffs/dents). After scoring, it's transferred to the unique last-place player — a tie for last means no transfer.",
   kingslayer: "After scoring, the highest-value card(s) on the board are set to 0. Ties zero all of them.",
   shadowlands: "Flipping is only allowed on rounds 2, 4, and 6.",
+  reckoning: "At the start of round 4, every player discards their hand and draws the same number of fresh cards.",
 };
 
-/** The 5 real effects a "Random" draw picks from -- "none" is only reachable by explicit choice. */
+/** The 6 real effects a "Random" draw picks from -- "none" is only reachable by explicit choice. */
 const DRAWABLE_CENTER_EFFECTS: CenterEffectId[] = [
   "noMansLand",
   "mirrorPool",
   "championOfTheWeak",
   "kingslayer",
   "shadowlands",
+  "reckoning",
 ];
 
 const PLAYER_COLOR_CLASSES = [
@@ -49,6 +52,26 @@ const PLAYER_COLOR_CLASSES = [
   "border-orange-500 bg-orange-50 dark:bg-orange-950",
   "border-teal-500 bg-teal-50 dark:bg-teal-950",
   "border-pink-500 bg-pink-50 dark:bg-pink-950",
+];
+
+// Same order/palette as PLAYER_COLOR_CLASSES, as plain text colors for the end screen.
+const PLAYER_TEXT_COLOR_CLASSES = [
+  "text-blue-600 dark:text-blue-400",
+  "text-red-600 dark:text-red-400",
+  "text-purple-600 dark:text-purple-400",
+  "text-orange-600 dark:text-orange-400",
+  "text-teal-600 dark:text-teal-400",
+  "text-pink-600 dark:text-pink-400",
+];
+
+// Same order again, as a left-border accent color for the end screen's per-player tables.
+const PLAYER_BORDER_COLOR_CLASSES = [
+  "border-blue-500",
+  "border-red-500",
+  "border-purple-500",
+  "border-orange-500",
+  "border-teal-500",
+  "border-pink-500",
 ];
 
 const DRAG_MIME = "application/x-card-instance-id";
@@ -61,7 +84,8 @@ function newGameState(playerCount: number, centerEffect: CenterEffectId): GameSt
   const playerIds = buildPlayerIds(playerCount);
   const aiPlayerIds = playerIds.filter((id) => id !== HUMAN);
   const config = { ...configForPlayerCount(playerCount), centerEffect };
-  return createGame(playerIds, config, undefined, aiPlayerIds);
+  const firstPlayerIndex = Math.floor(Math.random() * playerIds.length);
+  return createGame(playerIds, config, undefined, aiPlayerIds, firstPlayerIndex);
 }
 
 const AI_NAMES = [
@@ -82,6 +106,16 @@ function ownerDisplayName(state: GameState, ownerId: string): string {
 function ownerColorClass(state: GameState, ownerId: string): string {
   const idx = state.players.findIndex((p) => p.id === ownerId);
   return PLAYER_COLOR_CLASSES[idx] ?? "border-zinc-400";
+}
+
+function ownerTextColorClass(state: GameState, ownerId: string): string {
+  const idx = state.players.findIndex((p) => p.id === ownerId);
+  return PLAYER_TEXT_COLOR_CLASSES[idx] ?? "text-zinc-500";
+}
+
+function ownerBorderColorClass(state: GameState, ownerId: string): string {
+  const idx = state.players.findIndex((p) => p.id === ownerId);
+  return PLAYER_BORDER_COLOR_CLASSES[idx] ?? "border-zinc-300 dark:border-zinc-700";
 }
 
 // Game state includes a random shuffle, so it must never be created during SSR
@@ -289,7 +323,7 @@ function Game() {
         <p className="-mt-3 text-xs text-zinc-500">Faded text = was face-down during play</p>
       )}
 
-      {state.phase === "playing" && (
+      {(state.phase === "playing" || state.phase === "voting") && (
         <div className="flex flex-col items-center gap-3">
           <Hand
             cards={human.hand}
@@ -478,11 +512,12 @@ function BoardGrid({
             // opponent's still-hidden card shows nothing, so no info leaks before a flip.
             // The hover listener lives on the wrapper div (not the button) so it still
             // fires even when the button itself is disabled.
-            const tooltipContent = displayFaceUp
+            const tooltipOwner = ownerDisplayName(state, card.ownerId);
+            const tooltipDetail = displayFaceUp
               ? `${def.name} (${def.base}) — ${def.fullText}`
               : card.ownerId === HUMAN
                 ? `${def.name} (${def.base}) — ${def.fullText} — only visible to you`
-                : null;
+                : "face-down card";
             return (
               <div
                 key={key}
@@ -511,9 +546,10 @@ function BoardGrid({
                     <span className="text-xl">🂠</span>
                   )}
                 </button>
-                {tooltipContent && hoveredKey === key && (
-                  <div className="pointer-events-none absolute -top-9 left-1/2 z-10 w-max max-w-[12rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
-                    {tooltipContent}
+                {hoveredKey === key && (
+                  <div className="pointer-events-none absolute -top-12 left-1/2 z-10 w-max max-w-[12rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-white shadow dark:bg-zinc-100 dark:text-black">
+                    <div className="text-[10px] font-semibold leading-tight">{tooltipOwner}</div>
+                    <div className="text-[10px] leading-tight">{tooltipDetail}</div>
                   </div>
                 )}
               </div>
@@ -598,16 +634,20 @@ function Hand({
 
 function PlayerTable({
   label,
+  colorClass,
+  borderColorClass,
   cards,
   extraRow,
 }: {
   label: string;
+  colorClass: string;
+  borderColorClass: string;
   cards: ResolvedCard[];
   extraRow?: { label: string; value: number };
 }) {
   return (
-    <div className="min-w-[11rem] flex-1">
-      <h3 className="mb-1 text-sm font-semibold">{label}</h3>
+    <div className={`min-w-[11rem] flex-1 border-l-2 pl-2 ${borderColorClass}`}>
+      <h3 className={`mb-1 text-sm font-semibold ${colorClass}`}>{label}</h3>
       <table className="w-full text-left text-xs">
         <thead>
           <tr className="border-b border-zinc-300 dark:border-zinc-700">
@@ -669,7 +709,7 @@ function EndScreen({ state }: { state: GameState }) {
       <h2 className="text-lg font-semibold">Game over — {winnerLabel}</h2>
       <div className="flex flex-wrap gap-6 text-sm">
         {state.players.map((p) => (
-          <span key={p.id}>
+          <span key={p.id} className={`font-semibold ${ownerTextColorClass(state, p.id)}`}>
             {ownerDisplayName(state, p.id)}: {result.scores[p.id]}
           </span>
         ))}
@@ -695,6 +735,8 @@ function EndScreen({ state }: { state: GameState }) {
           <PlayerTable
             key={p.id}
             label={ownerDisplayName(state, p.id)}
+            colorClass={ownerTextColorClass(state, p.id)}
+            borderColorClass={ownerBorderColorClass(state, p.id)}
             cards={byTurnPlayed(p.id)}
             extraRow={centerAward && centerAward.ownerId === p.id ? { label: "Center", value: centerAward.value } : undefined}
           />

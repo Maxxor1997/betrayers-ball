@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CARD_DEFS } from "../cards";
 import { applyAction, createGame } from "../game";
-import { getLegalPlacementCells } from "../turns";
+import { getLegalFlipTargets, getLegalPlacementCells } from "../turns";
 import { GameConfig, GameState } from "../types";
 
 function deterministicRng(seed: number) {
@@ -28,6 +28,22 @@ describe("createGame", () => {
     expect(state.round).toBe(1);
     expect(state.currentPlayerIndex).toBe(0);
     expect(state.phase).toBe("playing");
+  });
+
+  it("defaults to player 0 going first, but honors an explicit firstPlayerIndex", () => {
+    const config: GameConfig = {
+      boardBounds: { width: 5, height: 3, center: { x: 2, y: 1 } },
+      handSize: 7,
+      roundCap: 6,
+      flipUnlockRound: 2,
+      centerEffect: "none",
+      minRoundFloor: 1,
+    };
+    const defaultState = createGame(["p1", "p2", "p3"], config, deterministicRng(1));
+    expect(defaultState.currentPlayerIndex).toBe(0);
+
+    const chosenState = createGame(["p1", "p2", "p3"], config, deterministicRng(1), [], 2);
+    expect(chosenState.currentPlayerIndex).toBe(2);
   });
 });
 
@@ -230,12 +246,14 @@ describe("applyAction — centerEffect threads through to a real end-of-game res
     let state: GameState = {
       config,
       board: new Map(),
+      deck: [],
       players: [
         { id: "p1", hand: [{ instanceId: "h1", cardId: "Footman", ownerId: "p1", faceUp: false }], isAI: false },
         { id: "p2", hand: [{ instanceId: "h2", cardId: "Footman", ownerId: "p2", faceUp: false }], isAI: false },
       ],
       currentPlayerIndex: 0,
       round: 1,
+      turnsThisRound: 0,
       passedPlayerIds: new Set(),
       hasFlippedThisTurn: false,
       votes: {},
@@ -251,5 +269,113 @@ describe("applyAction — centerEffect threads through to a real end-of-game res
 
     expect(state.phase).toBe("ended");
     expect(state.result?.scores.p1).toBe(CARD_DEFS.Footman.base - 2);
+  });
+});
+
+describe("advanceTurn — round boundary respects a non-zero starting player", () => {
+  const config: GameConfig = {
+    boardBounds: { width: 7, height: 7, center: { x: 3, y: 3 } },
+    handSize: 4,
+    roundCap: 10,
+    flipUnlockRound: 2,
+    centerEffect: "none",
+    minRoundFloor: 10, // keep voting out of the way
+  };
+
+  it("does not advance the round (or unlock flipping) until every player, not just the first mover, has acted", () => {
+    // p2 (index 1) goes first -- regression test for a bug where the round boundary
+    // was detected by currentPlayerIndex wrapping to 0, which fired after a single
+    // turn whenever the starting player wasn't index 0.
+    let state = createGame(["p1", "p2", "p3"], config, deterministicRng(6), [], 1);
+    expect(state.currentPlayerIndex).toBe(1);
+
+    let cell = getLegalPlacementCells(state)[0];
+    state = applyAction(state, { type: "place", playerId: "p2", instanceId: state.players[1].hand[0].instanceId, position: cell });
+    expect(state.round).toBe(1); // still round 1 -- only 1 of 3 players has gone
+    expect(state.currentPlayerIndex).toBe(2);
+    expect(getLegalFlipTargets(state)).toHaveLength(0); // flip still locked
+
+    cell = getLegalPlacementCells(state)[0];
+    state = applyAction(state, { type: "place", playerId: "p3", instanceId: state.players[2].hand[0].instanceId, position: cell });
+    expect(state.round).toBe(1);
+    expect(state.currentPlayerIndex).toBe(0);
+
+    cell = getLegalPlacementCells(state)[0];
+    state = applyAction(state, { type: "place", playerId: "p1", instanceId: state.players[0].hand[0].instanceId, position: cell });
+    expect(state.round).toBe(2); // now every player has gone -- round advances
+    expect(state.currentPlayerIndex).toBe(1); // rotation continues from where it started
+  });
+});
+
+describe("Reckoning center effect — discard & redraw hands at round 4", () => {
+  const config: GameConfig = {
+    boardBounds: { width: 9, height: 9, center: { x: 4, y: 4 } },
+    handSize: 7,
+    roundCap: 10,
+    flipUnlockRound: 2,
+    centerEffect: "reckoning",
+    minRoundFloor: 3,
+  };
+
+  function placeCurrentPlayersFirstCard(state: GameState): GameState {
+    const player = state.players[state.currentPlayerIndex];
+    const cell = getLegalPlacementCells(state)[0];
+    return applyAction(state, { type: "place", playerId: player.id, instanceId: player.hand[0].instanceId, position: cell });
+  }
+
+  function continueAnyPendingVotes(state: GameState): GameState {
+    let next = state;
+    while (next.phase === "voting") {
+      const voter = next.players.find((p) => !(p.id in next.votes))!;
+      next = applyAction(next, { type: "castVote", playerId: voter.id, vote: false });
+    }
+    return next;
+  }
+
+  it("redraws every hand at round 4 via the default vote-continue path, preserving hand size but not card identity", () => {
+    // No AI players -- every vote is cast explicitly below, so the outcome is fully deterministic.
+    let state = createGame(["p1", "p2"], config, deterministicRng(6));
+
+    // Rounds 1 and 2: no vote yet (minRoundFloor is 3).
+    for (let i = 0; i < 4; i++) state = placeCurrentPlayersFirstCard(state);
+    expect(state.round).toBe(3);
+
+    // Round 3: both placements -- completing it opens a vote (round 3 >= minRoundFloor).
+    state = placeCurrentPlayersFirstCard(state);
+    state = placeCurrentPlayersFirstCard(state);
+    expect(state.phase).toBe("voting");
+    expect(state.round).toBe(3); // still round 3 -- the vote hasn't resolved yet
+
+    const beforeHandIds = state.players.map((p) => p.hand.map((c) => c.instanceId).sort());
+    const beforeHandSizes = state.players.map((p) => p.hand.length);
+
+    state = continueAnyPendingVotes(state); // both vote to continue -> round 4, Reckoning fires
+
+    expect(state.round).toBe(4);
+    const afterHandSizes = state.players.map((p) => p.hand.length);
+    const afterHandIds = state.players.map((p) => p.hand.map((c) => c.instanceId).sort());
+
+    expect(afterHandSizes).toEqual(beforeHandSizes);
+    expect(afterHandIds).not.toEqual(beforeHandIds);
+  });
+
+  it("also redraws via the plain continue path when minRoundFloor is raised above 4", () => {
+    const highFloorConfig: GameConfig = { ...config, minRoundFloor: 10 };
+    let state = createGame(["p1", "p2"], highFloorConfig, deterministicRng(6));
+
+    // Rounds 1-2 (4 placements) plus p1's round-3 placement.
+    for (let i = 0; i < 5; i++) state = placeCurrentPlayersFirstCard(state);
+    expect(state.round).toBe(3);
+
+    // p2's round-3 placement is the one that completes the round and triggers Reckoning.
+    const p2 = state.players[state.currentPlayerIndex];
+    const handWithoutRedraw = p2.hand.slice(1).map((c) => c.instanceId).sort(); // what p2's hand would be if only the placement happened
+
+    state = placeCurrentPlayersFirstCard(state);
+
+    expect(state.round).toBe(4);
+    const p2After = state.players.find((p) => p.id === p2.id)!;
+    expect(p2After.hand).toHaveLength(4);
+    expect(p2After.hand.map((c) => c.instanceId).sort()).not.toEqual(handWithoutRedraw);
   });
 });

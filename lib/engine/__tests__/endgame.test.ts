@@ -22,12 +22,14 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
   return {
     config: MARGIN_CONFIG,
     board: new Map(),
+    deck: [],
     players: [
       { id: "p1", hand: [], isAI: true },
       { id: "p2", hand: [], isAI: true },
     ],
     currentPlayerIndex: 0,
     round: 1,
+    turnsThisRound: 0,
     passedPlayerIds: new Set(),
     hasFlippedThisTurn: false,
     votes: {},
