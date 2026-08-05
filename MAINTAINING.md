@@ -185,14 +185,17 @@ reacts to another card being flipped, not just placed), you'll need to:
 ### Change board sizing, player count bounds, or AI names/colors
 
 - Board dimensions by player count: `lib/config/boardSizing.ts`
-  (`BOARD_BOUNDS_BY_PLAYER_COUNT`) — currently defines 2p through 8p (`MAX_PLAYERS`).
+  (`BOARD_SIZE_BY_PLAYER_COUNT`) — currently defines 2p through 8p (`MAX_PLAYERS`).
+  Only `width`/`height` are configured; the center tile position is always derived
+  from them (`makeBoardBounds()`) as the true middle, rounding down on an even axis —
+  there's no `center` field to hand-edit or accidentally desync from the dimensions.
 - Min/max player count, AI display names, player color palettes:
   `lib/config/players.ts`.
 - These are plain data — edit and re-run tests/build, no logic changes needed unless
   you're changing the *shape* of the data (e.g. adding a field), in which case update
   the type in `lib/engine/types.ts` and every call site that constructs one.
-- **Raising `MAX_PLAYERS` further:** add a matching entry to
-  `BOARD_BOUNDS_BY_PLAYER_COUNT` (`configForPlayerCount()` in `lib/engine/game.ts`
+- **Raising `MAX_PLAYERS` further:** add a matching `{ width, height }` entry to
+  `BOARD_SIZE_BY_PLAYER_COUNT` (`configForPlayerCount()` in `lib/engine/game.ts`
   throws if a player count has none), and extend `AI_NAMES`/`PLAYER_COLOR_CLASSES`/
   `PLAYER_TEXT_COLOR_CLASSES`/`PLAYER_BORDER_COLOR_CLASSES` in `lib/config/players.ts`
   so the new player slots get real names/colors instead of falling back to generic

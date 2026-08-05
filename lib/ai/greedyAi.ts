@@ -20,9 +20,14 @@ function pickBest<T>(options: T[], score: (option: T) => number, rng: Rng): T {
   return best[Math.floor(rng() * best.length)];
 }
 
-/** Baseline chance of flipping an opponent's card speculatively, when no own-card
- * flip is worth it -- see the note in chooseFlip on why this can't be value-ranked. */
-const OPPONENT_FLIP_EXPLORATION_PROBABILITY = 0.2;
+/**
+ * Baseline chance of flipping an opponent's card speculatively, when no own-card flip
+ * is worth it -- see the note in chooseFlip on why this can't be value-ranked. Set
+ * high, not 50/50: only Champion clearly wants to stay hidden for its owner (+3 face-
+ * up), so revealing is very rarely a gift to them, and the information is otherwise
+ * free -- a real player grabs it almost every time rather than passing on a free look.
+ */
+const OPPONENT_FLIP_EXPLORATION_PROBABILITY = 0.85;
 
 function hypotheticalFlipMargin(state: GameState, playerId: string, target: { instanceId: string }): number {
   const board = new Map(state.board);

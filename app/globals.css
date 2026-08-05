@@ -24,3 +24,11 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+html {
+  /* Always reserve the scrollbar's width instead of toggling it on/off as content
+     height crosses the viewport boundary during play -- without this, elements sized
+     off `100%` (like the board grid) visibly shift/resize whenever the scrollbar
+     appears or disappears mid-game. */
+  scrollbar-gutter: stable;
+}

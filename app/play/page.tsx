@@ -228,12 +228,10 @@ function Game() {
 
       {showInstructions && <InstructionsModal onClose={() => setShowInstructions(false)} />}
 
-      {state.phase === "playing" && (
+      {state.phase === "playing" && (isHumanTurn ? selectedInstanceId : true) && (
         <p className="text-sm">
           {isHumanTurn
-            ? selectedInstanceId
-              ? "Tap a highlighted cell to place the selected card (or just drag it there)."
-              : "Your turn — optionally tap a face-down card on the board to flip it first, then drag a hand card onto a highlighted cell to place it."
+            ? "Tap a highlighted cell to place the selected card (or just drag it there)."
             : `${ownerDisplayName(state, currentPlayerId(state))} is thinking…`}
         </p>
       )}
@@ -406,20 +404,35 @@ function BoardGrid({
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
 
   // Cells are sized to fill their grid column (aspect-square, no fixed px) rather than
-  // a fixed h-20 w-20 -- with wider boards (7-8p can be 13-15 columns) a fixed cell
-  // size would force the grid past the available width and cells would overlap/clip.
-  // The container's own max-width caps cells at a comfortable 5rem when there's room,
-  // but is otherwise bounded by `w-full`, so minmax(0, 1fr) columns (and their
-  // w-full children) shrink together to fit whatever space is actually available.
+  // a fixed h-20 w-20 -- with wider/taller boards (7-8p can be 11+ columns or rows) a
+  // fixed cell size would push the grid past the available width or height. Rows are
+  // implicit and auto-sized purely off each cell's own rendered width (aspect-square),
+  // so the grid's total footprint is entirely determined by ITS width -- there's no
+  // separate row-height constraint to satisfy. That means the whole "fit both
+  // dimensions" problem reduces to picking one width, which we compute directly as the
+  // smallest of: the available horizontal space (100%), a comfortable 5rem/cell cap,
+  // and whatever width keeps the resulting height (at 5rem/cell) within a viewport
+  // budget. Setting `width` (not `max-width`) to that precomputed value means there's
+  // nothing left for the browser to reflow or overflow -- unlike relying on `aspect-
+  // ratio` + `max-height` to shrink an already-definite `width: 100%`, which it won't.
   const CELL_SIZE_PX = 80;
   const GAP_PX = 6;
+  const VERTICAL_BUDGET_VH = 90;
+  const naturalWidthPx = width * CELL_SIZE_PX + (width - 1) * GAP_PX;
+  // `svh` (small viewport height), not `vh` -- `vh` tracks the browser's live visible
+  // viewport, which shrinks/grows as mobile browser chrome (address bar) collapses or
+  // expands during scrolling/interaction. For a near-square board (8p is ~11x11) this
+  // height budget is almost always the binding constraint, so a plain `vh` here meant
+  // the board visibly resized mid-game any time the toolbar changed. `svh` always
+  // assumes the toolbar is visible (the smallest possible viewport), so it's stable.
+  const widthForHeightBudget = `calc(${VERTICAL_BUDGET_VH}svh * ${width / height})`;
 
   return (
     <div
-      className="grid w-full gap-1.5"
+      className="grid gap-1.5"
       style={{
         gridTemplateColumns: `repeat(${width}, minmax(0, 1fr))`,
-        maxWidth: `${width * CELL_SIZE_PX + (width - 1) * GAP_PX}px`,
+        width: `min(100%, ${naturalWidthPx}px, ${widthForHeightBudget})`,
       }}
     >
       {rows.map((y) =>
