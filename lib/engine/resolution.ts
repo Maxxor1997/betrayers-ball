@@ -3,6 +3,20 @@ import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { Board, BoardBounds, CardId, CenterEffectId, Position } from "./types";
 
+/** One line of a card's scoring breakdown -- `label` names the source, `amount` its contribution. */
+export interface ScoreContribution {
+  label: string;
+  amount: number;
+}
+
+/**
+ * Breakdown label for a card's own printed floor (Warlord/Exile) hitting 0. Exported
+ * so a breakdown UI can filter this one out if it wants to -- unlike "Zeroed by Plague
+ * Bearer" or "Kingslayer", it's not a surprise interaction with another card, just the
+ * card's own known rule, so it's often redundant with the Final value already shown.
+ */
+export const FLOORED_AT_ZERO_LABEL = "Floored at 0";
+
 export interface ResolvedCard {
   instanceId: string;
   cardId: CardId;
@@ -12,6 +26,8 @@ export interface ResolvedCard {
   baseValue: number;
   finalValue: number;
   negated: boolean;
+  /** Every contribution that adds up to `finalValue`, starting with "Base" -- for a scoring-breakdown UI. */
+  breakdown: ScoreContribution[];
 }
 
 export interface ResolutionResult {
@@ -19,8 +35,8 @@ export interface ResolutionResult {
   totalsByOwner: Record<string, number>;
   /** Champion of the Weak: who the center card went to and for how much, if anyone. */
   centerAward: { value: number; ownerId: string } | null;
-  /** Kingslayer: instanceIds of the highest-value card(s), zeroed out. */
-  kingslayerZeroed: string[];
+  /** Kingslayer: instanceIds of the highest-value face-up card(s) hit. */
+  kingslayerHit: string[];
 }
 
 /**
@@ -54,6 +70,9 @@ function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Set<strin
  * card's own modifiers and outgoing effects, not its identity/base/flip-state as read
  * by others (a negated Footman still links its neighbors' line; a negated Warlord
  * still counts toward other Warlords' penalty). See lib/content/cards.ts.
+ *
+ * Returns each card's contributions (not just their sum) so a scoring breakdown UI can
+ * show exactly where the points came from.
  */
 function computeValueModifiers(
   board: Board,
@@ -61,10 +80,12 @@ function computeValueModifiers(
   round: number,
   negated: Set<string>,
   centerEffect: CenterEffectId
-): Map<string, number> {
-  const deltas = new Map<string, number>();
-  const addDelta = (instanceId: string, amount: number) => {
-    deltas.set(instanceId, (deltas.get(instanceId) ?? 0) + amount);
+): Map<string, ScoreContribution[]> {
+  const contributions = new Map<string, ScoreContribution[]>();
+  const addDelta = (instanceId: string, amount: number, label: string) => {
+    const list = contributions.get(instanceId);
+    if (list) list.push({ label, amount });
+    else contributions.set(instanceId, [{ label, amount }]);
   };
 
   for (const [key, c] of board.entries()) {
@@ -77,28 +98,36 @@ function computeValueModifiers(
   // so they apply regardless of negation. See lib/content/centerEffects.ts.
   CENTER_EFFECTS[centerEffect].valueModifiers?.(board, bounds, addDelta);
 
-  return deltas;
+  return contributions;
 }
 
-/** Step 3 — Zeroing pass. Non-negated cards with a `zeroesAdjacentIf` hook (Plague Bearer) zero the cards it returns. */
-function applyZeroingPass(board: Board, bounds: BoardBounds, negated: Set<string>, values: Map<string, number>): void {
+/** Step 3 — Zeroing pass. Non-negated cards with a `zeroesAdjacentIf` hook (Plague Bearer) zero the cards it returns. Returns the zeroed instanceIds. */
+function applyZeroingPass(board: Board, bounds: BoardBounds, negated: Set<string>, values: Map<string, number>): Set<string> {
+  const zeroed = new Set<string>();
   for (const [key, c] of board.entries()) {
     const zeroesAdjacentIf = CARD_DEFS[c.cardId].zeroesAdjacentIf;
     if (!zeroesAdjacentIf || negated.has(c.instanceId)) continue;
     const pos = parsePosKey(key);
     for (const instanceId of zeroesAdjacentIf({ board, bounds, pos })) {
       values.set(instanceId, 0);
+      zeroed.add(instanceId);
     }
   }
+  return zeroed;
 }
 
-/** Step 4 — Floors. Cards with `floorAtZero` (Warlord, Exile) floor at 0. */
-function applyFloors(board: Board, values: Map<string, number>): void {
+/** Step 4 — Floors. Cards with `floorAtZero` (Warlord, Exile) floor at 0. Returns the instanceIds actually floored. */
+function applyFloors(board: Board, values: Map<string, number>): Set<string> {
+  const floored = new Set<string>();
   for (const c of board.values()) {
     if (!CARD_DEFS[c.cardId].floorAtZero) continue;
     const v = values.get(c.instanceId) ?? 0;
-    if (v < 0) values.set(c.instanceId, 0);
+    if (v < 0) {
+      values.set(c.instanceId, 0);
+      floored.add(c.instanceId);
+    }
   }
+  return floored;
 }
 
 /**
@@ -119,14 +148,15 @@ export function resolveBoard(
   playerIds?: string[]
 ): ResolutionResult {
   const negated = computeNegatedInstanceIds(board, bounds);
-  const deltas = computeValueModifiers(board, bounds, round, negated, centerEffect);
+  const contributions = computeValueModifiers(board, bounds, round, negated, centerEffect);
 
   const values = new Map<string, number>();
   for (const c of board.values()) {
-    values.set(c.instanceId, CARD_DEFS[c.cardId].base + (deltas.get(c.instanceId) ?? 0));
+    const rawTotal = CARD_DEFS[c.cardId].base + (contributions.get(c.instanceId) ?? []).reduce((sum, d) => sum + d.amount, 0);
+    values.set(c.instanceId, rawTotal);
   }
 
-  applyZeroingPass(board, bounds, negated, values);
+  const plagueBearerZeroed = applyZeroingPass(board, bounds, negated, values);
   applyFloors(board, values);
 
   const cards: ResolvedCard[] = [];
@@ -134,16 +164,27 @@ export function resolveBoard(
   if (playerIds) for (const id of playerIds) totalsByOwner[id] = 0;
 
   for (const [key, c] of board.entries()) {
-    const finalValue = values.get(c.instanceId) ?? CARD_DEFS[c.cardId].base;
+    const base = CARD_DEFS[c.cardId].base;
+    const cardContributions = contributions.get(c.instanceId) ?? [];
+    const finalValue = values.get(c.instanceId) ?? base;
+
+    const breakdown: ScoreContribution[] = [{ label: "Base", amount: base }, ...cardContributions];
+    const rawTotal = base + cardContributions.reduce((sum, d) => sum + d.amount, 0);
+    if (finalValue !== rawTotal) {
+      const label = plagueBearerZeroed.has(c.instanceId) ? "Zeroed by Plague Bearer" : FLOORED_AT_ZERO_LABEL;
+      breakdown.push({ label, amount: finalValue - rawTotal });
+    }
+
     cards.push({
       instanceId: c.instanceId,
       cardId: c.cardId,
       ownerId: c.ownerId,
       position: parsePosKey(key),
       faceUp: c.faceUp,
-      baseValue: CARD_DEFS[c.cardId].base,
+      baseValue: base,
       finalValue,
       negated: negated.has(c.instanceId),
+      breakdown,
     });
     totalsByOwner[c.ownerId] = (totalsByOwner[c.ownerId] ?? 0) + finalValue;
   }
@@ -154,6 +195,6 @@ export function resolveBoard(
     cards,
     totalsByOwner,
     centerAward: postResult?.centerAward ?? null,
-    kingslayerZeroed: postResult?.kingslayerZeroed ?? [],
+    kingslayerHit: postResult?.kingslayerHit ?? [],
   };
 }

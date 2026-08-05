@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { aiVoteProbability, computeAiVote, computeGameResult, estimateMargin, isBoardFull, isRoundCapHit, shouldEndGame } from "../endgame";
 import { Board, BoardBounds, CardInstance, GameConfig, GameState, posKey } from "../types";
+import { CARD_DEFS } from "@/lib/content/cards";
 
 const BOUNDS: BoardBounds = { width: 3, height: 3, center: { x: 1, y: 1 } };
 
@@ -34,6 +35,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     passedPlayerIds: new Set(),
     hasFlippedThisTurn: false,
     votes: {},
+    voteHistory: [],
     placementOrder: [],
     phase: "playing",
     result: null,
@@ -91,10 +93,10 @@ describe("aiVoteProbability", () => {
 describe("computeGameResult", () => {
   it("sums owned card values and picks the highest as winner", () => {
     const board: Board = new Map();
-    board.set(posKey({ x: 0, y: 0 }), card("Footman", "p1")); // 5
-    board.set(posKey({ x: 0, y: 1 }), card("Giant", "p2")); // 6
+    board.set(posKey({ x: 0, y: 0 }), card("Footman", "p1"));
+    board.set(posKey({ x: 0, y: 1 }), card("Giant", "p2"));
     const result = computeGameResult(board, BOUNDS, 3, ["p1", "p2"]);
-    expect(result.scores).toEqual({ p1: 5, p2: 6 });
+    expect(result.scores).toEqual({ p1: CARD_DEFS.Footman.base, p2: CARD_DEFS.Giant.base });
     expect(result.winnerIds).toEqual(["p2"]);
   });
 
@@ -117,38 +119,39 @@ describe("computeGameResult", () => {
 describe("estimateMargin — fair, per-viewer evaluation", () => {
   it("values the viewer's own hidden card at its true effect", () => {
     const board: Board = new Map();
-    board.set(posKey({ x: 0, y: 0 }), card("Exile", "p1", false)); // isolated -> true value 9
-    expect(estimateMargin(makeState({ board }), "p1")).toBe(9);
+    board.set(posKey({ x: 0, y: 0 }), card("Exile", "p1", false)); // isolated -> no neighbor penalty
+    expect(estimateMargin(makeState({ board }), "p1")).toBe(CARD_DEFS.Exile.base);
   });
 
   it("does NOT apply an opponent's hidden card's true effect -- uses the neutral placeholder instead", () => {
     const board: Board = new Map();
-    board.set(posKey({ x: 0, y: 0 }), card("Exile", "p2", false)); // hidden from p1; true value would be 9
-    // p1 can't see it's an Exile, so it's valued as the Footman placeholder (base 5), not 9.
-    expect(estimateMargin(makeState({ board }), "p1")).toBe(0 - 5);
+    board.set(posKey({ x: 0, y: 0 }), card("Exile", "p2", false)); // hidden from p1; true value would be Exile.base
+    // p1 can't see it's an Exile, so it's valued as the Footman placeholder instead.
+    expect(estimateMargin(makeState({ board }), "p1")).toBe(0 - CARD_DEFS.Footman.base);
   });
 
   it("applies the opponent's true effect once the same card is face-up", () => {
     const board: Board = new Map();
     board.set(posKey({ x: 0, y: 0 }), card("Exile", "p2", true));
-    expect(estimateMargin(makeState({ board }), "p1")).toBe(0 - 9);
+    expect(estimateMargin(makeState({ board }), "p1")).toBe(0 - CARD_DEFS.Exile.base);
   });
 
   it("resolveBoard (ground truth) and estimateMargin (viewer's estimate) genuinely diverge on hidden multi-card effects", () => {
     const board: Board = new Map();
-    // 3 isolated, hidden, same-owner Warlords: true value 8-3*2=2 each -> p2 total 6.
+    // 3 isolated, hidden, same-owner Warlords: each takes the -3-per-other-Warlord penalty twice.
     board.set(posKey({ x: 0, y: 0 }), card("Warlord", "p2", false));
     board.set(posKey({ x: 2, y: 0 }), card("Warlord", "p2", false));
     board.set(posKey({ x: 0, y: 2 }), card("Warlord", "p2", false));
     const state = makeState({ board });
 
     const trueResult = computeGameResult(board, BOUNDS, state.round, ["p1", "p2"]);
-    expect(trueResult.scores.p2).toBe(6);
+    const trueWarlordValue = CARD_DEFS.Warlord.base - 3 * 2;
+    expect(trueResult.scores.p2).toBe(3 * trueWarlordValue);
 
     // p1 can't see any of them are Warlords -- each is estimated as an isolated
-    // Footman placeholder (base 5, no line), so p1's own estimate is way off from the
-    // ground truth. That's the point: the estimate never leaks the hidden identity.
-    expect(estimateMargin(state, "p1")).toBe(0 - 15);
+    // Footman placeholder (base only, no line), so p1's own estimate is way off from
+    // the ground truth. That's the point: the estimate never leaks the hidden identity.
+    expect(estimateMargin(state, "p1")).toBe(0 - 3 * CARD_DEFS.Footman.base);
   });
 });
 

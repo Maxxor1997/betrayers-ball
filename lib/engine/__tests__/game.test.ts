@@ -218,6 +218,21 @@ describe("applyAction — voting", () => {
     expect(state.currentPlayerIndex).toBe(0);
   });
 
+  it("logs a completed round's tally to voteHistory even when it doesn't end the game", () => {
+    let state = playRound1(() => 0.01); // AI votes yes
+    state = applyAction(state, { type: "castVote", playerId: "human", vote: false });
+    expect(state.voteHistory).toEqual([{ round: 1, votes: { bot: true, human: false } }]);
+    // votes itself is cleared for the next round, but the history entry persists.
+    expect(state.votes).toEqual({});
+  });
+
+  it("logs the decisive round's tally to voteHistory when the vote ends the game", () => {
+    let state = playRound1(() => 0.01); // AI votes yes
+    state = applyAction(state, { type: "castVote", playerId: "human", vote: true });
+    expect(state.phase).toBe("ended");
+    expect(state.voteHistory).toEqual([{ round: 1, votes: { bot: true, human: true } }]);
+  });
+
   it("continues if the AI itself voted no", () => {
     let state = playRound1(() => 0.99); // well over 1/10 -> AI votes no
     expect(state.votes.bot).toBe(false);
@@ -238,13 +253,13 @@ describe("applyAction — voting", () => {
 });
 
 describe("applyAction — centerEffect threads through to a real end-of-game result", () => {
-  it("No Man's Land measurably reduces a card's contribution to the final score", () => {
+  it("Shadowlands measurably increases a face-down card's contribution to the final score", () => {
     const config: GameConfig = {
       boardBounds: { width: 7, height: 7, center: { x: 3, y: 3 } },
       handSize: 1,
       roundCap: 1,
       flipUnlockRound: 2,
-      centerEffect: "noMansLand",
+      centerEffect: "shadowlands",
       minRoundFloor: 10, // keep voting out of the way
       playerCount: 2,
     };
@@ -264,18 +279,19 @@ describe("applyAction — centerEffect threads through to a real end-of-game res
       passedPlayerIds: new Set(),
       hasFlippedThisTurn: false,
       votes: {},
+      voteHistory: [],
       placementOrder: [],
       phase: "playing",
       result: null,
     };
 
-    // (3,2) is directly above center (3,3) -> same column -> on the cross.
+    // (3,2) and (3,4) are both adjacent to center (3,3) -- legal round-1 placements.
     state = applyAction(state, { type: "place", playerId: "p1", instanceId: "h1", position: { x: 3, y: 2 } });
-    // (3,4) is also adjacent to center, so it's a legal round-1 placement too.
     state = applyAction(state, { type: "place", playerId: "p2", instanceId: "h2", position: { x: 3, y: 4 } });
 
     expect(state.phase).toBe("ended");
-    expect(state.result?.scores.p1).toBe(CARD_DEFS.Footman.base - 2);
+    // Both cards stayed face-down (no flip occurred) -> +1 each from Shadowlands.
+    expect(state.result?.scores.p1).toBe(CARD_DEFS.Footman.base + 1);
   });
 });
 

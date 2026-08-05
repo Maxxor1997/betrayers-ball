@@ -15,6 +15,10 @@ Stack: Next.js (App Router), TypeScript, Tailwind, Socket.IO.
 - Scoring: end-only, simultaneous, off BASE values (never resolved values) — loop-free
 - Two-phase: resolve → freeze → post-resolution layer
 - Every card carries ownerId; center = ownerless neighbor (base 0)
+- Ownerless tiles (center, and any extra tiles a location adds, e.g. Three Headed
+  Dragon's heads) count as permanently face-up for any effect that keys off a
+  neighbor's face state — they hold no hidden info, so there's nothing to be face-down
+  about
 - Server holds authoritative state; clients render slices by role
 
 Numbers (bases, counts, board size) are tuning knobs, not fixed. When something

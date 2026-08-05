@@ -33,6 +33,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     passedPlayerIds: new Set(),
     hasFlippedThisTurn: false,
     votes: {},
+    voteHistory: [],
     placementOrder: [],
     phase: "playing",
     result: null,
@@ -97,6 +98,24 @@ describe("getLegalPlacementCells / applyPlace", () => {
   });
 });
 
+describe("getLegalPlacementCells / applyPlace — The Free Cities", () => {
+  const FREE_CITIES_CONFIG: GameConfig = { ...CONFIG, centerEffect: "freeCities" };
+
+  it("makes every empty non-center cell legal, even on an empty board", () => {
+    const state = makeState({ config: FREE_CITIES_CONFIG });
+    const cells = getLegalPlacementCells(state).map(posKey);
+    expect(cells).toContain("0,0"); // far corner, not adjacent to anything
+    expect(cells).not.toContain("2,2"); // center still excluded
+  });
+
+  it("allows placing on a cell not adjacent to anything", () => {
+    const state = makeState({ config: FREE_CITIES_CONFIG });
+    const cardId = state.players[0].hand[0].instanceId;
+    const next = applyPlace(state, { type: "place", playerId: "p1", instanceId: cardId, position: { x: 0, y: 0 } });
+    expect(next.board.get("0,0")?.instanceId).toBe(cardId);
+  });
+});
+
 describe("flipping", () => {
   it("is locked before flipUnlockRound", () => {
     const board: Board = new Map();
@@ -139,9 +158,10 @@ describe("flipping", () => {
 });
 
 describe("flipping — Shadowlands", () => {
-  // 3p here (not 2p) deliberately -- Shadowlands at 2p is a full lockout instead of
-  // this shifted schedule; see the "Shadowlands at 2p" block below.
-  const SHADOWLANDS_CONFIG: GameConfig = { ...CONFIG, centerEffect: "shadowlands", playerCount: 3 };
+  // Shadowlands no longer gates the flip action at all -- it's a scoring effect now
+  // (face-down +1 / face-up -1, see resolution.test.ts), so flipping should follow the
+  // plain default gate (round >= flipUnlockRound), same as "none".
+  const SHADOWLANDS_CONFIG: GameConfig = { ...CONFIG, centerEffect: "shadowlands" };
 
   function stateAtRound(round: number): GameState {
     const board: Board = new Map();
@@ -149,19 +169,17 @@ describe("flipping — Shadowlands", () => {
     return makeState({ board, round, config: SHADOWLANDS_CONFIG });
   }
 
-  it("allows flipping on rounds 2, 4, 6", () => {
-    for (const round of [2, 4, 6]) {
+  it("allows flipping from flipUnlockRound on, every round -- not just 2, 4, 6", () => {
+    for (const round of [2, 3, 4, 5, 6]) {
       expect(getLegalFlipTargets(stateAtRound(round))).toHaveLength(1);
     }
   });
 
-  it("blocks flipping on rounds 1, 3, 5", () => {
-    for (const round of [1, 3, 5]) {
-      expect(getLegalFlipTargets(stateAtRound(round))).toHaveLength(0);
-      const state = stateAtRound(round);
-      const target = state.board.get("2,1")!;
-      expect(() => applyFlip(state, { type: "flip", playerId: "p1", instanceId: target.instanceId })).toThrow();
-    }
+  it("blocks flipping before flipUnlockRound", () => {
+    const state = stateAtRound(1);
+    expect(getLegalFlipTargets(state)).toHaveLength(0);
+    const target = state.board.get("2,1")!;
+    expect(() => applyFlip(state, { type: "flip", playerId: "p1", instanceId: target.instanceId })).toThrow();
   });
 
   it("still respects the once-per-turn limit on an unlocked round", () => {
@@ -173,67 +191,6 @@ describe("flipping — Shadowlands", () => {
     const c2 = state.board.get("2,3")!;
     const next = applyFlip(state, { type: "flip", playerId: "p1", instanceId: c1.instanceId });
     expect(() => applyFlip(next, { type: "flip", playerId: "p1", instanceId: c2.instanceId })).toThrow();
-  });
-});
-
-describe("flipping — Shadowlands at 2p (full lockout)", () => {
-  const SHADOWLANDS_2P_CONFIG: GameConfig = { ...CONFIG, centerEffect: "shadowlands", playerCount: 2 };
-
-  it("blocks flipping on every round, including rounds that would otherwise be unlocked", () => {
-    for (const round of [1, 2, 3, 4, 5, 6, 10]) {
-      const board: Board = new Map();
-      board.set("2,1", handCard("Footman", "p1"));
-      const state = makeState({ board, round, config: SHADOWLANDS_2P_CONFIG });
-      expect(getLegalFlipTargets(state)).toHaveLength(0);
-      const target = state.board.get("2,1")!;
-      expect(() => applyFlip(state, { type: "flip", playerId: "p1", instanceId: target.instanceId })).toThrow();
-    }
-  });
-});
-
-describe("flipping — Prying Eyes", () => {
-  const PRYING_EYES_CONFIG: GameConfig = { ...CONFIG, centerEffect: "pryingEyes" };
-
-  it("unlocks flipping from round 1, unlike the default (round 2)", () => {
-    const board: Board = new Map();
-    const opponentCard = handCard("Footman", "p2");
-    board.set("2,1", opponentCard);
-    const state = makeState({ board, round: 1, config: PRYING_EYES_CONFIG });
-    expect(getLegalFlipTargets(state)).toHaveLength(1);
-    expect(() =>
-      applyFlip(state, { type: "flip", playerId: "p1", instanceId: opponentCard.instanceId })
-    ).not.toThrow();
-  });
-
-  it("excludes the acting player's own cards from legal flip targets", () => {
-    const board: Board = new Map();
-    const ownCard = handCard("Footman", "p1");
-    const opponentCard = handCard("Footman", "p2");
-    board.set("2,1", ownCard);
-    board.set("2,3", opponentCard);
-    const state = makeState({ board, round: 1, config: PRYING_EYES_CONFIG });
-
-    const targetIds = getLegalFlipTargets(state).map((c) => c.instanceId);
-    expect(targetIds).toEqual([opponentCard.instanceId]);
-  });
-
-  it("rejects flipping your own card even if attempted directly", () => {
-    const board: Board = new Map();
-    const ownCard = handCard("Footman", "p1");
-    board.set("2,1", ownCard);
-    const state = makeState({ board, round: 1, config: PRYING_EYES_CONFIG });
-    expect(() => applyFlip(state, { type: "flip", playerId: "p1", instanceId: ownCard.instanceId })).toThrow();
-  });
-
-  it("still respects the once-per-turn limit", () => {
-    const board: Board = new Map();
-    const a = handCard("Footman", "p2");
-    const b = handCard("Footman", "p2");
-    board.set("2,1", a);
-    board.set("2,3", b);
-    const state = makeState({ board, round: 1, config: PRYING_EYES_CONFIG });
-    const next = applyFlip(state, { type: "flip", playerId: "p1", instanceId: a.instanceId });
-    expect(() => applyFlip(next, { type: "flip", playerId: "p1", instanceId: b.instanceId })).toThrow();
   });
 });
 
@@ -289,12 +246,12 @@ describe("placing — Truthseeker", () => {
 
     expect(next.board.get("2,0")?.faceUp).toBe(true);
     expect(next.board.get("1,1")?.faceUp).toBe(true);
-    expect(next.board.get("2,1")?.faceUp).toBe(false); // Truthseeker itself stays face-down
+    expect(next.board.get("2,1")?.faceUp).toBe(true); // Truthseeker is always placed face-up
   });
 
   it("leaves already-face-up neighbors untouched", () => {
     const board: Board = new Map();
-    const alreadyUp = { ...handCard("Champion", "p2"), faceUp: true };
+    const alreadyUp = { ...handCard("Gloryseeker", "p2"), faceUp: true };
     board.set("2,0", alreadyUp);
     const truthseeker = handCard("Truthseeker", "p1");
     const state = makeState({

@@ -3,11 +3,16 @@ import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { dealNewGame, Rng } from "./deck";
 import { computeAiVote, computeGameResult, shouldEndGame } from "./endgame";
 import { applyFlip, applyPass, applyPlace, currentPlayerId, mustPass } from "./turns";
-import { CastVoteAction, GameAction, GameConfig, GameState } from "./types";
+import { CastVoteAction, CenterEffectId, GameAction, GameConfig, GameState } from "./types";
 
-export function configForPlayerCount(playerCount: number): GameConfig {
-  const boardBounds = BOARD_BOUNDS_BY_PLAYER_COUNT[playerCount];
-  if (!boardBounds) throw new Error(`No board sizing configured for ${playerCount} players (supported: 2-6)`);
+export function configForPlayerCount(playerCount: number, centerEffect: CenterEffectId = "none"): GameConfig {
+  const baseBounds = BOARD_BOUNDS_BY_PLAYER_COUNT[playerCount];
+  if (!baseBounds) throw new Error(`No board sizing configured for ${playerCount} players (supported: 2-6)`);
+  // Effects like Three Headed Dragon or Two Towers override which tiles are ownerless
+  // -- baked into boardBounds here, once, so every downstream board.ts lookup that
+  // only ever took `bounds` (not centerEffect) keeps working unchanged.
+  const ownerlessPositions = CENTER_EFFECTS[centerEffect].ownerlessPositions?.(baseBounds);
+  const boardBounds = ownerlessPositions ? { ...baseBounds, ownerless: ownerlessPositions } : baseBounds;
   return {
     boardBounds,
     handSize: 7,
@@ -15,7 +20,7 @@ export function configForPlayerCount(playerCount: number): GameConfig {
     // 2p delays the flip unlock by a round -- with only one opponent, a single flip
     // removes all "unknown" for that card faster than in larger games.
     flipUnlockRound: playerCount === 2 ? 3 : 2,
-    centerEffect: "none",
+    centerEffect,
     minRoundFloor: 3,
     playerCount,
   };
@@ -43,6 +48,7 @@ export function createGame(
     passedPlayerIds: new Set(),
     hasFlippedThisTurn: false,
     votes: {},
+    voteHistory: [],
     placementOrder: [],
     phase: "playing",
     result: null,
@@ -119,11 +125,15 @@ function applyCastVote(state: GameState, action: CastVoteAction, rng: Rng): Game
 
   const yesCount = Object.values(votes).filter(Boolean).length;
   const passes = yesCount > state.players.length / 2;
+  // Every completed round's tally gets logged here, whether it ended the game or not
+  // -- `votes` itself only ever holds the current round's, since it resets to {} below
+  // once a "continue" result opens the next round.
+  const voteHistory = [...state.voteHistory, { round: state.round, votes }];
 
   if (passes) {
     const playerIds = state.players.map((p) => p.id);
     const result = computeGameResult(state.board, state.config.boardBounds, state.round, playerIds, state.config.centerEffect);
-    return { ...state, phase: "ended", result, votes };
+    return { ...state, phase: "ended", result, votes, voteHistory };
   }
 
   // currentPlayerIndex is left as-is -- advanceTurn already set it to the correct next
@@ -132,7 +142,7 @@ function applyCastVote(state: GameState, action: CastVoteAction, rng: Rng): Game
   // the same Reckoning check as advanceTurn's plain continue-branch.
   const nextRound = state.round + 1;
   const roundStart = applyRoundStart(state, nextRound, rng);
-  return { ...state, ...roundStart, phase: "playing", votes: {}, round: nextRound, hasFlippedThisTurn: false };
+  return { ...state, ...roundStart, phase: "playing", votes: {}, voteHistory, round: nextRound, hasFlippedThisTurn: false };
 }
 
 /** Pure reducer: applyAction(state, action) -> state. Throws on illegal actions. */

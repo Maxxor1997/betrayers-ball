@@ -6,7 +6,7 @@ export type CardId =
   | "Pretender"
   | "Berserker"
   | "Commander"
-  | "Champion"
+  | "Gloryseeker"
   | "Darkspawn"
   | "Chronicler"
   | "Earthshaker"
@@ -45,6 +45,14 @@ export interface BoardBounds {
   height: number;
   /** Position of the center tile, pinned at the true middle. */
   center: Position;
+  /**
+   * The full set of ownerless, unplaceable tiles for the active center effect --
+   * counts as occupied neighbors for adjacency purposes. Defaults to `[center]` when
+   * absent (the common case). An effect can override this entirely: Three Headed
+   * Dragon adds two extra tiles alongside center, Two Towers moves the tiles off
+   * center altogether.
+   */
+  ownerless?: Position[];
 }
 
 export interface PlayerState {
@@ -55,13 +63,14 @@ export interface PlayerState {
 
 export type CenterEffectId =
   | "none"
-  | "noMansLand"
   | "mirrorPool"
   | "championOfTheWeak"
   | "kingslayer"
   | "shadowlands"
   | "reckoning"
-  | "pryingEyes";
+  | "threeHeadedDragon"
+  | "twoTowers"
+  | "freeCities";
 
 export interface GameConfig {
   boardBounds: BoardBounds;
@@ -111,6 +120,11 @@ export interface GameState {
    * human vote(s) stay pending until a castVote action arrives.
    */
   votes: Record<string, boolean>;
+  /** Every completed voting round's tally, oldest first -- `votes` only holds the
+   * current/most recent round, so this is what a post-game "how did each round's vote
+   * go" summary reads from. A round is appended here as soon as its tally resolves
+   * (everyone's voted), whether it passed or not. */
+  voteHistory: { round: number; votes: Record<string, boolean> }[];
   /** instanceIds in the order they were placed on the board — for turn-order UI/history. */
   placementOrder: string[];
   phase: "playing" | "voting" | "ended";

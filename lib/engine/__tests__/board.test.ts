@@ -81,6 +81,15 @@ describe("getLegalPlacementPositions", () => {
     expect(legal).toContain("1,0");
     expect(legal).toContain("3,0");
   });
+
+  it("with anywhere: true (Freelands), every empty non-center cell is legal, even on an empty board", () => {
+    const board: Board = new Map();
+    const legal = getLegalPlacementPositions(board, BOUNDS, { anywhere: true }).map(posKey);
+    const allCells = 5 * 3 - 1; // width * height, minus the center tile
+    expect(legal).toHaveLength(allCells);
+    expect(legal).not.toContain("2,1"); // center still excluded
+    expect(legal).toContain("0,0"); // far corner, not adjacent to anything -- still legal
+  });
 });
 
 describe("isInFootmanLine", () => {

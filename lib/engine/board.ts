@@ -15,6 +15,16 @@ export function isCenterPosition(pos: Position, bounds: BoardBounds): boolean {
   return pos.x === bounds.center.x && pos.y === bounds.center.y;
 }
 
+/**
+ * True for any of the active center effect's ownerless tiles -- unplaceable, and
+ * counts as an occupied neighbor for adjacency purposes. See `BoardBounds.ownerless`
+ * (defaults to just the center tile).
+ */
+export function isOwnerlessPosition(pos: Position, bounds: BoardBounds): boolean {
+  const ownerless = bounds.ownerless ?? [bounds.center];
+  return ownerless.some((p) => p.x === pos.x && p.y === pos.y);
+}
+
 /** The 4 orthogonal neighbor positions, unfiltered (may be out of bounds). */
 export function orthogonalPositions(pos: Position): Position[] {
   return ORTHOGONAL_DELTAS.map((d) => ({ x: pos.x + d.x, y: pos.y + d.y }));
@@ -36,15 +46,28 @@ export function getAdjacentCards(board: Board, bounds: BoardBounds, pos: Positio
 }
 
 /**
- * Count of orthogonally-adjacent cells that are "occupied" — a placed card, or the
- * center tile itself. Per the locked core invariant, center is a real neighbor for
- * adjacency/trigger/penalty purposes (e.g. Exile's per-neighbor penalty, Suppressor's
- * 3+ trigger) even though it holds no CardInstance and is never placed on.
+ * Whether `pos` reads as "face-up" for an effect that keys off a neighbor's face
+ * state (Headsman, Pretender, PlagueBearer, Darkspawn, ...). An ownerless tile (center,
+ * or an extra tile like Three Headed Dragon's heads) is always face-up -- it holds no
+ * hidden info, so there's nothing to be face-down about (see CLAUDE.md). Returns false
+ * for an empty, non-ownerless cell -- there's no card there to be face-up or -down.
+ */
+export function isPositionFaceUp(board: Board, bounds: BoardBounds, pos: Position): boolean {
+  if (isOwnerlessPosition(pos, bounds)) return true;
+  return board.get(posKey(pos))?.faceUp ?? false;
+}
+
+/**
+ * Count of orthogonally-adjacent cells that are "occupied" — a placed card, or an
+ * ownerless tile (the center, or an extra tile like Three Headed Dragon's heads). Per
+ * the locked core invariant, these are real neighbors for adjacency/trigger/penalty
+ * purposes (e.g. Exile's per-neighbor penalty, Suppressor's 3+ trigger) even though
+ * they hold no CardInstance and are never placed on.
  */
 export function countAdjacentOccupied(board: Board, bounds: BoardBounds, pos: Position): number {
   let count = 0;
   for (const p of adjacentPositions(pos, bounds)) {
-    if (isCenterPosition(p, bounds) || board.has(posKey(p))) count++;
+    if (isOwnerlessPosition(p, bounds) || board.has(posKey(p))) count++;
   }
   return count;
 }
@@ -54,20 +77,27 @@ export function isAdjacentToCenter(pos: Position, bounds: BoardBounds): boolean 
 }
 
 /**
- * Legal placement cells: empty, in bounds, not the center (not placeable-on), and
- * orthogonally adjacent to an existing card OR the center tile. On an empty board the
- * only legal cells are those adjacent to center — the "forced round-1 placement" the
- * spec describes.
+ * Legal placement cells: empty, in bounds, not an ownerless tile (not placeable-on),
+ * and orthogonally adjacent to an existing card OR an ownerless tile. On an empty
+ * board the only legal cells are those adjacent to center — the "forced round-1
+ * placement" the spec describes.
+ *
+ * `anywhere` (Freelands) drops the adjacency requirement entirely -- every empty,
+ * non-ownerless cell is legal regardless of what's already on the board.
  */
-export function getLegalPlacementPositions(board: Board, bounds: BoardBounds): Position[] {
+export function getLegalPlacementPositions(board: Board, bounds: BoardBounds, opts: { anywhere?: boolean } = {}): Position[] {
   const legal: Position[] = [];
   for (let y = 0; y < bounds.height; y++) {
     for (let x = 0; x < bounds.width; x++) {
       const pos = { x, y };
-      if (isCenterPosition(pos, bounds)) continue;
+      if (isOwnerlessPosition(pos, bounds)) continue;
       if (board.has(posKey(pos))) continue;
+      if (opts.anywhere) {
+        legal.push(pos);
+        continue;
+      }
       const hasOccupiedNeighbor = adjacentPositions(pos, bounds).some(
-        (p) => isCenterPosition(p, bounds) || board.has(posKey(p))
+        (p) => isOwnerlessPosition(p, bounds) || board.has(posKey(p))
       );
       if (hasOccupiedNeighbor) legal.push(pos);
     }

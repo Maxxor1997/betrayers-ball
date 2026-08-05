@@ -9,7 +9,8 @@ export interface CardEffectContext {
   round: number;
   pos: Position;
   self: CardInstance;
-  addDelta: (instanceId: string, amount: number) => void;
+  /** `label` identifies the source in a per-card scoring breakdown (e.g. "Bannerman (neighbor)"). */
+  addDelta: (instanceId: string, amount: number, label: string) => void;
 }
 
 /** Context passed to a card's board-position-only hooks (negation, zeroing, placement). */
@@ -91,7 +92,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     fullText: "+1 to itself if part of a line of 3+ consecutive same-owner Footmen (row or column).",
     count: flatCount(12),
     valueModifier: ({ board, pos, self, addDelta }) => {
-      if (isInFootmanLine(board, pos)) addDelta(self.instanceId, 1);
+      if (isInFootmanLine(board, pos)) addDelta(self.instanceId, 1, "Footman (3+ line)");
     },
   },
   Giant: {
@@ -118,7 +119,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       for (const other of board.values()) {
         if (other.instanceId !== self.instanceId && other.cardId === "Warlord") otherWarlords++;
       }
-      addDelta(self.instanceId, -3 * otherWarlords);
+      if (otherWarlords > 0) addDelta(self.instanceId, -3 * otherWarlords, `Warlord (${otherWarlords} other Warlord${otherWarlords > 1 ? "s" : ""})`);
     },
   },
   Exile: {
@@ -131,7 +132,8 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: flatCount(3),
     floorAtZero: true,
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
-      addDelta(self.instanceId, -2 * countAdjacentOccupied(board, bounds, pos));
+      const neighbors = countAdjacentOccupied(board, bounds, pos);
+      if (neighbors > 0) addDelta(self.instanceId, -2 * neighbors, `Exile (${neighbors} neighbor${neighbors > 1 ? "s" : ""})`);
     },
   },
   Pretender: {
@@ -144,7 +146,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: flatCount(3),
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const dangerousNeighbor = getAdjacentCards(board, bounds, pos).some((n) => n.faceUp && CARD_DEFS[n.cardId].base >= 7);
-      if (dangerousNeighbor) addDelta(self.instanceId, -5);
+      if (dangerousNeighbor) addDelta(self.instanceId, -5, "Pretender (adj. face-up base≥7)");
     },
   },
   Berserker: {
@@ -160,7 +162,9 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       for (const other of board.values()) {
         if (other.cardId === "Berserker" && other.ownerId !== self.ownerId) otherOwnerBerserkers++;
       }
-      addDelta(self.instanceId, 2 * otherOwnerBerserkers);
+      if (otherOwnerBerserkers > 0) {
+        addDelta(self.instanceId, 2 * otherOwnerBerserkers, `Berserker (${otherOwnerBerserkers} rival Berserker${otherOwnerBerserkers > 1 ? "s" : ""})`);
+      }
     },
   },
   Commander: {
@@ -173,24 +177,25 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: flatCount(5),
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const adjFootmen = getAdjacentCards(board, bounds, pos).filter((n) => n.cardId === "Footman").length;
-      addDelta(self.instanceId, 2 * adjFootmen);
+      if (adjFootmen > 0) addDelta(self.instanceId, 2 * adjFootmen, `Commander (${adjFootmen} adj. ${adjFootmen > 1 ? "Footmen" : "Footman"})`);
     },
   },
-  Champion: {
-    id: "Champion",
-    name: "Champion",
+  Gloryseeker: {
+    id: "Gloryseeker",
+    name: "Gloryseeker",
     base: 4,
     bucket: "Engine",
     text: "+3 if face-up",
     fullText: "+3 if this card is face-up at scoring.",
     count: flatCount(5),
     valueModifier: ({ self, addDelta }) => {
-      if (self.faceUp) addDelta(self.instanceId, 3);
+      if (self.faceUp) addDelta(self.instanceId, 3, "Gloryseeker (face-up)");
     },
   },
   Darkspawn: {
     id: "Darkspawn",
     name: "Darkspawn",
+    disabled: true,
     base: 2,
     bucket: "Engine",
     text: "+5 if 2+ adj. face-down",
@@ -198,7 +203,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: flatCount(4),
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const faceDownNeighbors = getAdjacentCards(board, bounds, pos).filter((n) => !n.faceUp).length;
-      if (faceDownNeighbors >= 2) addDelta(self.instanceId, 5);
+      if (faceDownNeighbors >= 2) addDelta(self.instanceId, 5, `Darkspawn (${faceDownNeighbors} face-down neighbors)`);
     },
   },
   Chronicler: {
@@ -210,7 +215,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     fullText: "+1 for every round elapsed when the game ends.",
     count: flatCount(3),
     valueModifier: ({ round, self, addDelta }) => {
-      addDelta(self.instanceId, round);
+      if (round > 0) addDelta(self.instanceId, round, `Chronicler (round ${round} elapsed)`);
     },
   },
   Earthshaker: {
@@ -224,7 +229,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     valueModifier: ({ board, pos, self, addDelta }) => {
       for (const [otherKey, other] of board.entries()) {
         if (other.instanceId === self.instanceId) continue;
-        if (parsePosKey(otherKey).y === pos.y) addDelta(other.instanceId, -1);
+        if (parsePosKey(otherKey).y === pos.y) addDelta(other.instanceId, -1, "Earthshaker (same row)");
       }
     },
   },
@@ -239,8 +244,8 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     valueModifier: ({ board, pos, addDelta }) => {
       const above = board.get(posKey({ x: pos.x, y: pos.y - 1 }));
       const below = board.get(posKey({ x: pos.x, y: pos.y + 1 }));
-      if (above) addDelta(above.instanceId, -3);
-      if (below) addDelta(below.instanceId, -3);
+      if (above) addDelta(above.instanceId, -3, "Skysplitter (vertical neighbor)");
+      if (below) addDelta(below.instanceId, -3, "Skysplitter (vertical neighbor)");
     },
   },
   Bannerman: {
@@ -253,7 +258,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: flatCount(4),
     valueModifier: ({ board, bounds, pos, addDelta }) => {
       for (const n of getAdjacentCards(board, bounds, pos)) {
-        addDelta(n.instanceId, n.cardId === "Footman" ? 2 : 1);
+        addDelta(n.instanceId, n.cardId === "Footman" ? 2 : 1, "Bannerman (neighbor)");
       }
     },
   },
@@ -291,7 +296,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: flatCount(2),
     valueModifier: ({ board, bounds, pos, addDelta }) => {
       for (const n of getAdjacentCards(board, bounds, pos)) {
-        if (n.faceUp && CARD_DEFS[n.cardId].base >= 6) addDelta(n.instanceId, -4);
+        if (n.faceUp && CARD_DEFS[n.cardId].base >= 6) addDelta(n.instanceId, -4, "Headsman (neighbor)");
       }
     },
   },
@@ -300,10 +305,11 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Truthseeker",
     base: 4,
     bucket: "Control",
-    text: "On placement, flips all adjacent",
+    text: "Placed face-up; flips all adjacent",
     fullText:
-      "Immediately flips every adjacent card face-up when placed (any owner, including your own). Not affected by flip-lock rules or Suppressor negation.",
+      "Always placed face-up, and immediately flips every adjacent card face-up too (any owner, including your own). Not affected by flip-lock rules or Suppressor negation.",
     count: flatCount(4),
+    forceFaceUp: true,
     onPlace: ({ board, bounds, pos }) => {
       for (const neighborPos of adjacentPositions(pos, bounds)) {
         const key = posKey(neighborPos);
@@ -324,7 +330,9 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: flatCount(4),
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const differentOwnerNeighbors = getAdjacentCards(board, bounds, pos).filter((n) => n.ownerId !== self.ownerId).length;
-      addDelta(self.instanceId, 2 * differentOwnerNeighbors);
+      if (differentOwnerNeighbors > 0) {
+        addDelta(self.instanceId, 2 * differentOwnerNeighbors, `Mercenary (${differentOwnerNeighbors} different-owner neighbors)`);
+      }
     },
   },
 };

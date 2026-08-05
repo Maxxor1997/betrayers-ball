@@ -1,4 +1,4 @@
-import { getLegalPlacementPositions, isCenterPosition } from "./board";
+import { getLegalPlacementPositions, isOwnerlessPosition } from "./board";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { CardInstance, FlipAction, GameConfig, GameState, PlaceAction, Position, posKey } from "./types";
@@ -14,12 +14,8 @@ function requireCurrentPlayer(state: GameState, playerId: string): void {
 
 /**
  * Whether flipping is allowed on this round. Normally any round from
- * `flipUnlockRound` on (2p delays this to round 3 -- see configForPlayerCount); under
- * Shadowlands, only every other round from there (rounds 2, 4, 6 for the default
- * flipUnlockRound of 2) -- except at 2p, where Shadowlands disables flipping for the
- * whole game instead, since a single flip removes all "unknown" for that card with
- * only one opponent. Under Prying Eyes, unlocked from round 1 regardless of
- * `flipUnlockRound`. All rule-toggle center effects, not scoring effects.
+ * `flipUnlockRound` on (2p delays this to round 3 -- see configForPlayerCount). A
+ * center effect can override via `flipGate` (unused by any current effect).
  */
 export function isFlipUnlocked(round: number, config: GameConfig): boolean {
   const flipGate = CENTER_EFFECTS[config.centerEffect].flipGate;
@@ -28,9 +24,8 @@ export function isFlipUnlocked(round: number, config: GameConfig): boolean {
 }
 
 /**
- * Any face-down card on the board, any owner — the legal flip targets right now.
- * Under Prying Eyes, the acting player's own cards are excluded: you can flip anyone
- * else's, never your own.
+ * Any face-down card on the board, any owner — the legal flip targets right now. A
+ * center effect can narrow this via `flipTargetFilter` (unused by any current effect).
  */
 export function getLegalFlipTargets(state: GameState): CardInstance[] {
   if (state.phase !== "playing") return [];
@@ -45,7 +40,8 @@ export function getLegalFlipTargets(state: GameState): CardInstance[] {
 /** Empty board cells a card could legally be placed on right now. */
 export function getLegalPlacementCells(state: GameState): Position[] {
   if (state.phase !== "playing") return [];
-  return getLegalPlacementPositions(state.board, state.config.boardBounds);
+  const anywhere = CENTER_EFFECTS[state.config.centerEffect].placementAnywhere;
+  return getLegalPlacementPositions(state.board, state.config.boardBounds, { anywhere });
 }
 
 /** True if the current player has no legal move and must pass this turn. */
@@ -86,8 +82,9 @@ export function applyPlace(state: GameState, action: PlaceAction): GameState {
   const card = player.hand[handIndex];
 
   const bounds = state.config.boardBounds;
-  if (isCenterPosition(action.position, bounds)) throw new Error("Cannot place on the center tile");
-  const legalCells = getLegalPlacementPositions(state.board, bounds);
+  if (isOwnerlessPosition(action.position, bounds)) throw new Error("Cannot place on the center tile");
+  const anywhere = CENTER_EFFECTS[state.config.centerEffect].placementAnywhere;
+  const legalCells = getLegalPlacementPositions(state.board, bounds, { anywhere });
   const isLegal = legalCells.some((p) => posKey(p) === posKey(action.position));
   if (!isLegal) throw new Error(`Position ${posKey(action.position)} is not a legal placement`);
 
@@ -100,10 +97,10 @@ export function applyPlace(state: GameState, action: PlaceAction): GameState {
 
   // A card's placement-time trigger (e.g. Truthseeker flipping adjacent cards),
   // distinct from the turn's normal optional flip action -- it doesn't consume
-  // hasFlippedThisTurn and ignores the flip-lock rules above (Shadowlands/Prying
-  // Eyes/flipUnlockRound all gate the *player's* flip action, not a card's own
-  // printed effect). Also unaffected by Suppressor negation, which in this engine is
-  // a resolution-time-only concept, not something computed mid-game during turns.
+  // hasFlippedThisTurn and ignores the flip-lock rules above (those gate the
+  // *player's* flip action, not a card's own printed effect). Also unaffected by
+  // Suppressor negation, which in this engine is a resolution-time-only concept,
+  // not something computed mid-game during turns.
   def.onPlace?.({ board, bounds, pos: action.position });
 
   const players = state.players.map((p, i) =>

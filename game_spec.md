@@ -12,7 +12,8 @@ Everything here is a **config constant / parked tuning knob** unless flagged **L
 - **Base value benchmark = Footman 5.** Any card better than a Footman pays for it with a sub-5 base or a real downside. (Chronicler is base 2 but its *effective* value scales past 5 with game length — a conditional payment rather than a flat stat penalty; see flag.)
 - **Scoring is end-only, simultaneous, off base values.** Scoring-time effects read neighbors' base value + the card's own printed modifiers, positions, identities, ownership, or flip-state — **never** other cards' fully-resolved values. Keeps scoring loop-free.
 - **Anything reading a *resolved* value runs as a post-resolution layer** (see two-phase scoring), never during the simultaneous pass.
-- **Center = ownerless neighbor.** Counts as a real orthogonal neighbor for adjacency/trigger/penalty effects, belongs to no one, base 0 / not counted normally, not placeable-on. Owner checks skip it.
+- **Center = ownerless neighbor.** Counts as a real orthogonal neighbor for adjacency/trigger/penalty effects, belongs to no one, base 0 / not counted normally, not placeable-on. Owner checks skip it. Same ruling for any extra ownerless tile a location adds (e.g. Three Headed Dragon's heads).
+- **Ownerless tiles are always face-up.** They hold no hidden info, so an effect that keys off a neighbor's face state (Headsman, Pretender, PlagueBearer, Darkspawn, ...) reads the center (and any extra ownerless tile) as face-up if it ever needs to.
 - **Placement & effect adjacency: orthogonal only.** Every card placed face-to-face adjacent to an existing card, within the bounded box.
 
 ---
@@ -30,7 +31,7 @@ All numbers parked. **(v2 — grew from 12 to 16 this session; Truthseeker added
 | Pretender | 7 | −5 to self if any adjacent **face-up** card has base ≥ 7 (any owner) | Slam |
 | Berserker | 3 | +2 per other Berserker owned by a *different* player | Engine |
 | Commander | 2 | +2 per adjacent Footman (any owner) | Engine |
-| Champion | 4 | +3 if face-up at scoring | Engine |
+| Gloryseeker | 4 | +3 if face-up at scoring | Engine |
 | Darkspawn | 2 | +5 if 2+ adjacent face-down cards (any owner) | Engine |
 | Chronicler | 2 | +1 per round elapsed at game end (global final-round number) | Engine |
 | Earthshaker | 3 | −1 to every other card in its row (any owner, not itself) | Control |
@@ -39,7 +40,7 @@ All numbers parked. **(v2 — grew from 12 to 16 this session; Truthseeker added
 | Plague Bearer | 3 | If 2+ adjacent Footmen (any owner), those Footmen score 0; keeps own base | Control |
 | Suppressor | 3 | If 3+ adjacent cards (center counts): each adjacent non-Suppressor card is treated as vanilla — base value only, printed text negated (any owner). Suppressors immune to negation. | Control |
 | Headsman | 3 | Each adjacent **face-up** card with base ≥ 6 scores −4 (any owner) | Control |
-| Truthseeker | 4 | **Placement-time trigger** (not a scoring effect): immediately flips every adjacent card face-up (any owner, including your own). Bypasses flip-lock rules (Shadowlands/Prying Eyes/round gate) and Suppressor negation, and doesn't consume the turn's normal flip. | Control |
+| Truthseeker | 4 | Always placed face-up itself. **Placement-time trigger** (not a scoring effect): immediately flips every adjacent card face-up too (any owner, including your own). Bypasses flip-lock rules (round gate) and Suppressor negation, and doesn't consume the turn's normal flip. | Control |
 
 Balance: **5 slam / 5 engine / 7 control** (card count). Copy-count buckets are more even — see deck.
 
@@ -70,7 +71,7 @@ The growing set of meta/conditional effects needs a defined order. Two-phase mod
 1. **Suppression pass (first).** For each active Suppressor (3+ adjacent cards, center counts), mark each adjacent non-Suppressor cell as *negated*. A negated card contributes **base value only** — its own modifiers AND its outgoing effects are cancelled. Suppressors are never negated.
    - **Footman-line edge case:** a negated Footman still occupies its cell and still counts as a same-owner Footman *link* for its neighbors' line, but does **not** receive its own +1 (its text is off). ("Still a link, gets no bonus.")
    - **Two adjacent Suppressors:** both remain active; neither negates the other; each negates its own non-Suppressor neighbors.
-2. **Value-modifying pass (simultaneous, base-value reads only).** All non-negated effects compute at once off base values / positions / identities / ownership / flip-state: Footman line bonus, Bannerman, Commander, Berserker, Champion, Darkspawn, Chronicler, Exile, Warlord, Earthshaker, Skysplitter, Pretender, Headsman.
+2. **Value-modifying pass (simultaneous, base-value reads only).** All non-negated effects compute at once off base values / positions / identities / ownership / flip-state: Footman line bonus, Bannerman, Commander, Berserker, Gloryseeker, Darkspawn, Chronicler, Exile, Warlord, Earthshaker, Skysplitter, Pretender, Headsman.
 3. **Zeroing pass.** Plague Bearer sets qualifying Footmen to 0 (a negated Plague Bearer does nothing).
 4. **Floors.** Warlord / Exile floored at 0.
 5. **Freeze.** All card values final and immutable.
@@ -93,7 +94,7 @@ Deliberately much bigger than any single deal so hands vary game to game. At 4p 
 | Pretender | 3 | Slam |
 | Berserker | 8 | Engine |
 | Commander | 5 | Engine |
-| Champion | 5 | Engine |
+| Gloryseeker | 5 | Engine |
 | Darkspawn | 4 | Engine |
 | Chronicler | 3 | Engine |
 | Bannerman | 4 | Control |
@@ -106,7 +107,7 @@ Deliberately much bigger than any single deal so hands vary game to game. At 4p 
 
 **Total: 72.** Copy buckets: **Slam 26 / Engine 25 / Control 21.**
 
-Weighting logic: Footman is the backbone (bluff layer + Commander/Bannerman fuel + Plague Bearer target + line-bonus payoff) — 12. Berserker held at 8 (second pillar; cross-owner bet must stay reliably live — *usually* live, occasionally not). Commander/Champion at 5 (present at the larger deal; Champion is the main flip payoff). Darkspawn 4 (swingy, don't flood). **Control kept scarce by copies despite being the biggest bucket** — the doc's "don't make the board a demolition derby" rule; lots of *kinds* of control, few copies each. **Suppressor & Headsman rarest at 2** — high-impact "your card did nothing" swings, so lurking threats not staples (each appears in ~half of 4p deals). Chronicler 3 — scarce so catch-up swings games rather than becoming uniform inflation. Truthseeker at 4 — a placement-time information swing (see the 17-card table), kept modest since it bypasses flip-lock rules entirely. Deck size is the variety dial; scale toward ~60 for tighter balance-testing.
+Weighting logic: Footman is the backbone (bluff layer + Commander/Bannerman fuel + Plague Bearer target + line-bonus payoff) — 12. Berserker held at 8 (second pillar; cross-owner bet must stay reliably live — *usually* live, occasionally not). Commander/Gloryseeker at 5 (present at the larger deal; Gloryseeker is the main flip payoff). Darkspawn 4 (swingy, don't flood). **Control kept scarce by copies despite being the biggest bucket** — the doc's "don't make the board a demolition derby" rule; lots of *kinds* of control, few copies each. **Suppressor & Headsman rarest at 2** — high-impact "your card did nothing" swings, so lurking threats not staples (each appears in ~half of 4p deals). Chronicler 3 — scarce so catch-up swings games rather than becoming uniform inflation. Truthseeker at 4 — a placement-time information swing (see the 17-card table), kept modest since it bypasses flip-lock rules entirely. Deck size is the variety dial; scale toward ~60 for tighter balance-testing.
 
 ---
 
@@ -141,13 +142,14 @@ Weighting logic: Footman is the backbone (bluff layer + Commander/Bannerman fuel
 
 ## Center pool (one drawn at game start)
 
-- **No Man's Land** *(scoring-time)* — every placed card on the center's row or column scores −2. Plus-sign; center exempt. Taxes only the opening card per cluster (others can step off the cross).
 - **Mirror Pool** *(scoring-time)* — each card has one mirror position (same column, opposite side of center row). If occupied, both cards +1; +2 each if same card type. Any owner.
-- **Champion of the Weak** *(post-resolution)* — center is a scorable card worth 5 (modifiable by adjacent buffs/dents at resolution). After freeze, transfers to the *unique* last-place player (its value then counts for them). Tie for last → goes to no one. Strong catch-up.
-- **Kingslayer** *(post-resolution)* — highest frozen card(s) on the board set to 0. Ties → all zeroed. Anti-value-concentration.
-- **Shadowlands** *(rule-toggle)* — flipping allowed only on rounds 2, 4, 6. Throttles info; hidden info stays sticky. Nerfs Champion, shrinks Darkspawn's late face-down pool. Rule-toggle only — no direct score effect / no center card transfer. **At 2p, disables flipping for the entire game instead** (see Flipping below).
+- **Champion of the Weak** *(post-resolution)* — center is a scorable card worth 3 (modifiable by adjacent buffs/dents at resolution). After freeze, transfers to the owner of the single lowest-valued card on the board (its value then counts for them) — easier to play around than a total-score comparison, since it keys off one card instead of your whole board. Tie for lowest card value → goes to no one. A player with no cards has nothing to compare and can't win it.
+- **Kingslayer** *(post-resolution)* — Kingslayer itself is a scorable "card" worth 3 (modified by adjacent buffs/dents, same mechanism as Champion of the Weak's center). After freeze, its value is subtracted from the highest-value **face-up** card(s) on the board (ties → all hit). Only targeting face-up cards means it's a real decision, not a random end-of-game snap: your biggest card is safe as long as it stays hidden, but a flip (yours or an opponent's) exposes it. Slots into the same "punish revealed big cards" family as Headsman/Pretender.
+- **Shadowlands** *(scoring-time)* — face-down cards score +1; face-up cards are untouched. Rewards staying hidden without touching the flip action itself (when/who/how often) — purely a value effect now, no rule-toggle.
 - **The Reckoning** *(rule-toggle)* — at the start of round 4, every player discards their hand and draws the same number of fresh cards from a shared reshuffled pool (their own discards included, so there's always enough regardless of player count). Resets any built-up hand read; punishes over-committing to a hand plan early.
-- **Prying Eyes** *(rule-toggle)* — flipping unlocked from round 1 (skips the normal round-2/round-3 gate entirely), but you can never flip your own cards — only opponents'. Pure information-race effect: everyone's hidden cards are only ever revealed by someone *else*.
+- **Three Headed Dragon** *(structural)* — two extra ownerless tiles flank the center, two cells out along its row (one-cell gap). Same adjacency/occupied rules as the center, no scoring effect of their own — just more of the board worth building toward.
+- **Two Towers** *(structural)* — the center is freed up for normal placement; instead, two ownerless tiles sit at the far left and right ends of its row. Pulls play toward two separated hubs instead of one.
+- **The Free Cities** *(structural)* — no adjacency requirement at all; any empty tile is a legal placement from round 1 on, so the board doesn't grow from a single seed.
 
 ---
 
@@ -157,11 +159,10 @@ Weighting logic: Footman is the backbone (bluff layer + Commander/Bannerman fuel
 - **Placement mandatory** (unless no legal orthogonal spot → pass).
 - **Flipping optional** — flip one card, or none. Never forced.
 - **Flip unlocks at round 2** (round 1 placement-only). **At 2p, delayed to round 3** — with only one opponent, a single flip removes all "unknown" for that card faster than in larger games, so 2p games get one extra round of pure placement first.
-- **What you can flip:** any face-down card, any owner (Prying Eyes narrows this to opponents' cards only).
+- **What you can flip:** any face-down card, any owner.
 - **Permanent** — once face-up, stays up.
 - **One flip per turn** max.
-- **Under Shadowlands:** further restricted to rounds 2, 4, 6 (or the 2p-delayed equivalent) — **except at 2p, where Shadowlands disables flipping for the whole game** rather than shifting the schedule.
-- **Truthseeker is not the flip action** — its placement-time reveal ignores all of the above (round gate, Shadowlands, Prying Eyes) and doesn't consume the turn's one-flip allowance. It's the card's own printed effect, not the player's optional flip.
+- **Truthseeker is not the flip action** — its placement-time reveal ignores the round gate above and doesn't consume the turn's one-flip allowance. It's the card's own printed effect, not the player's optional flip.
 
 ---
 
@@ -219,7 +220,7 @@ Weighting logic: Footman is the backbone (bluff layer + Commander/Bannerman fuel
 
 ## Card ideas (in workshop)
 
-- Location: "Three Headed Dragon" 2 additional center blocks with no effect on the sides of the center with a gap, only for larger boards
+- ~~Location: "Three Headed Dragon" 2 additional center blocks with no effect on the sides of the center with a gap, only for larger boards~~ **Implemented** (`lib/content/centerEffects.ts`) — not player-count-gated; the two extra heads sit 2 cells out along the center's row (1-cell gap) and are clipped if that would fall off a small board.
 - Infiltrator: rewards card itself for staying hidden but does some kind of sabotage
 - Card that immunes neighbors to being flipped?
 - Card that rewards neiboring multiple players (only for larger groups)

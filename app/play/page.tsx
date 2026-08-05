@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
-import { inBounds, isCenterPosition } from "@/lib/engine/board";
+import { inBounds, isOwnerlessPosition } from "@/lib/engine/board";
 import {
   CENTER_EFFECTS,
   centerEffectDescription,
@@ -11,9 +12,9 @@ import {
   selectableCenterEffects,
 } from "@/lib/content/centerEffects";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
-import { resolveBoard } from "@/lib/engine/resolution";
+import { FLOORED_AT_ZERO_LABEL, ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
-import { CardBucket, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
+import { CardBucket, CardId, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, PLAYER_BORDER_COLOR_CLASSES, PLAYER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 import { BoardGridProps, HandProps, NewGameSetup, PendingFlip, PlayerTableProps } from "./types";
@@ -29,9 +30,17 @@ function buildPlayerIds(playerCount: number): string[] {
 function newGameState(playerCount: number, centerEffect: CenterEffectId): GameState {
   const playerIds = buildPlayerIds(playerCount);
   const aiPlayerIds = playerIds.filter((id) => id !== HUMAN);
-  const config = { ...configForPlayerCount(playerCount), centerEffect };
+  const config = configForPlayerCount(playerCount, centerEffect);
   const firstPlayerIndex = Math.floor(Math.random() * playerIds.length);
   return createGame(playerIds, config, undefined, aiPlayerIds, firstPlayerIndex);
+}
+
+/** A card's own printed floor (Warlord/Exile) is rarely worth a breakdown line -- it's
+ * not a surprise interaction, just the card's known rule, and is redundant with the
+ * Final value already shown. Zeroed-by-Plague-Bearer/Kingslayer stay, since those ARE
+ * a surprise interaction with another card worth calling out. */
+function visibleBreakdown(breakdown: { label: string; amount: number }[]) {
+  return breakdown.filter((d) => d.label !== FLOORED_AT_ZERO_LABEL);
 }
 
 function ownerDisplayName(state: GameState, ownerId: string): string {
@@ -53,6 +62,111 @@ function ownerTextColorClass(state: GameState, ownerId: string): string {
 function ownerBorderColorClass(state: GameState, ownerId: string): string {
   const idx = state.players.findIndex((p) => p.id === ownerId);
   return PLAYER_BORDER_COLOR_CLASSES[idx] ?? "border-zinc-300 dark:border-zinc-700";
+}
+
+/**
+ * Dumps the current game state as Markdown for pasting elsewhere (bug reports, asking
+ * for help, sharing an interesting board). Respects the same hidden-info rule as the
+ * rendered UI -- an opponent's still-face-down card never reveals its identity, even
+ * though this is a single-device debug UI, so a copied board matches what you can
+ * actually see. Once the game has ended, `endResult` is non-null and its per-card
+ * breakdown (see resolution.ts) is included too, same data as the on-screen tooltips.
+ */
+function buildBoardStateMarkdown(state: GameState, endResult: ResolutionResult | null): string {
+  const bounds = state.config.boardBounds;
+  const revealAll = state.phase === "ended";
+  const lines: string[] = [];
+
+  lines.push("# Board Game State", "");
+  lines.push(`- **Round:** ${state.round} / ${state.config.roundCap}`);
+  lines.push(`- **Phase:** ${state.phase}`);
+  lines.push(`- **Players:** ${state.config.playerCount}`);
+  lines.push(`- **Center effect:** ${CENTER_EFFECTS[state.config.centerEffect].label}`);
+  lines.push(`- **Board size:** ${bounds.width}×${bounds.height}, center at (${bounds.center.x},${bounds.center.y})`);
+  if (state.phase === "playing") lines.push(`- **Current turn:** ${ownerDisplayName(state, currentPlayerId(state))}`);
+  lines.push("");
+
+  lines.push("## Board", "", "| Position | Owner | Card | Base | Final |", "|---|---|---|---|---|");
+  const placed = [...state.board.entries()]
+    .map(([key, card]) => {
+      const [x, y] = key.split(",").map(Number);
+      return { x, y, card };
+    })
+    .sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const { x, y, card } of placed) {
+    const known = revealAll || card.faceUp || card.ownerId === HUMAN;
+    const def = known ? CARD_DEFS[card.cardId] : null;
+    const cardCell = def ? `${def.name}${card.faceUp || revealAll ? "" : " (face-down)"}` : "🂠 (face-down)";
+    const base = def ? String(def.base) : "?";
+    const resolved = endResult?.cards.find((c) => c.instanceId === card.instanceId);
+    const final = resolved ? String(resolved.finalValue) : "—";
+    lines.push(`| (${x},${y}) | ${ownerDisplayName(state, card.ownerId)} | ${cardCell} | ${base} | ${final} |`);
+  }
+  lines.push("");
+
+  const human = state.players.find((p) => p.id === HUMAN);
+  if (human) {
+    lines.push("## Your hand", "");
+    if (human.hand.length === 0) lines.push("_(empty)_");
+    for (const card of human.hand) {
+      const def = CARD_DEFS[card.cardId];
+      lines.push(`- ${def.name} (${def.base}) — ${def.text}`);
+    }
+    lines.push("");
+  }
+
+  if (revealAll && endResult) {
+    const gameResult = state.result!;
+    const winnerLabel =
+      gameResult.winnerIds.length > 1
+        ? "Tie"
+        : gameResult.winnerIds[0] === HUMAN
+          ? "You"
+          : ownerDisplayName(state, gameResult.winnerIds[0]);
+
+    lines.push(`## Result — ${winnerLabel} win${gameResult.winnerIds.length > 1 ? "" : "s"}`, "");
+    lines.push("| Player | Score |", "|---|---|");
+    for (const p of state.players) lines.push(`| ${ownerDisplayName(state, p.id)} | ${gameResult.scores[p.id]} |`);
+    lines.push("");
+
+    if (endResult.centerAward) {
+      lines.push(
+        `Champion of the Weak: the center (value ${endResult.centerAward.value}) went to ${ownerDisplayName(state, endResult.centerAward.ownerId)}.`,
+        ""
+      );
+    }
+    if (endResult.kingslayerHit.length > 0) {
+      const hit = endResult.kingslayerHit
+        .map((id) => {
+          const c = endResult.cards.find((cc) => cc.instanceId === id)!;
+          return `${CARD_DEFS[c.cardId].name} (${ownerDisplayName(state, c.ownerId)})`;
+        })
+        .join(", ");
+      lines.push(`Kingslayer hit: ${hit}.`, "");
+    }
+
+    const orderIndex = new Map(state.placementOrder.map((id, i) => [id, i]));
+    for (const p of state.players) {
+      const cards = endResult.cards
+        .filter((c) => c.ownerId === p.id)
+        .sort((a, b) => (orderIndex.get(a.instanceId) ?? 0) - (orderIndex.get(b.instanceId) ?? 0));
+      if (cards.length === 0) continue;
+      const votesByRound = new Map(state.voteHistory.filter(({ votes }) => p.id in votes).map(({ round, votes }) => [round, votes[p.id]]));
+      lines.push(`### Scoring breakdown — ${ownerDisplayName(state, p.id)} (${gameResult.scores[p.id]})`, "");
+      lines.push("| # | Card | Base | Final | Vote | Breakdown |", "|---|---|---|---|---|---|");
+      cards.forEach((c, i) => {
+        const breakdown = visibleBreakdown(c.breakdown)
+          .map((d) => `${d.label} ${d.amount > 0 ? "+" : ""}${d.amount}`)
+          .join(", ");
+        const vote = votesByRound.get(i + 1);
+        const voteText = vote === undefined ? "—" : vote ? "end" : "continue";
+        lines.push(`| ${i + 1} | ${CARD_DEFS[c.cardId].name} | ${c.baseValue} | ${c.finalValue} | ${voteText} | ${breakdown} |`);
+      });
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n").trimEnd() + "\n";
 }
 
 // Game state includes a random shuffle, so it must never be created during SSR
@@ -80,6 +194,7 @@ function Game() {
   // by "New game"), never editable while a game is in progress.
   const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(null);
   const [showInstructions, setShowInstructions] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(false);
 
   const dispatch = (action: GameAction) => {
     setState((prev) => {
@@ -97,7 +212,12 @@ function Game() {
   const isVoting = state.phase === "voting";
   const humanVotePending = isVoting && !(HUMAN in state.votes);
 
-  const legalCells = isHumanTurn ? getLegalPlacementCells(state) : [];
+  // Legal placement cells don't depend on whose turn it is (any player could place at
+  // any of them) -- computed whenever the game is in "playing" phase so the highlight
+  // stays visible while an AI is thinking, not just on the human's turn. Actually
+  // clicking/dragging into one is still gated separately by isHumanTurn (see the cell
+  // handlers below), so this alone can't let the human act out of turn.
+  const legalCells = getLegalPlacementCells(state);
   const legalCellKeys = new Set(legalCells.map(posKey));
   const flipTargetIds = new Set((isHumanTurn ? getLegalFlipTargets(state) : []).map((c) => c.instanceId));
   const flipUnlocked = isFlipUnlocked(state.round, state.config);
@@ -202,10 +322,42 @@ function Game() {
   }
 
   const human = state.players.find((p) => p.id === HUMAN)!;
+  const handCardIds = new Set(human.hand.map((c) => c.cardId));
+  // Only cards visible to the human -- face-up (any owner) or face-down but their own
+  // -- never an opponent's still-hidden card, same redaction rule as getVisibleBoard.
+  const visibleBoardCardIds = new Set(
+    [...state.board.values()].filter((c) => c.faceUp || c.ownerId === HUMAN).map((c) => c.cardId)
+  );
+
+  // Computed once here (not inside EndScreen) so BoardGrid can also show each card's
+  // scoring breakdown on hover, not just the end-of-game summary table.
+  const endResult: ResolutionResult | null =
+    state.phase === "ended"
+      ? resolveBoard(
+          state.board,
+          state.config.boardBounds,
+          state.round,
+          state.config.centerEffect,
+          state.players.map((p) => p.id)
+        )
+      : null;
+  const resolvedCards = endResult ? new Map(endResult.cards.map((c) => [c.instanceId, c])) : undefined;
+
+  function copyBoardState() {
+    navigator.clipboard.writeText(buildBoardStateMarkdown(state, endResult)).then(() => {
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 1500);
+    });
+  }
 
   return (
     <div className="flex flex-1 flex-col gap-6 px-4 py-8 lg:flex-row lg:items-start lg:justify-center">
-      <CardCatalog playerCount={state.config.playerCount} />
+      <CardCatalog
+        playerCount={state.config.playerCount}
+        handCardIds={handCardIds}
+        visibleBoardCardIds={visibleBoardCardIds}
+        currentCenterEffect={state.config.centerEffect}
+      />
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">
       <header className="flex w-full max-w-4xl flex-wrap items-center justify-between gap-4">
         <h1 className="text-xl font-semibold">Board Game — engine playtest</h1>
@@ -228,15 +380,18 @@ function Game() {
 
       {showInstructions && <InstructionsModal onClose={() => setShowInstructions(false)} />}
 
-      {state.phase === "playing" && (isHumanTurn ? selectedInstanceId : true) && (
-        <p className="text-sm">
-          {isHumanTurn
-            ? "Tap a highlighted cell to place the selected card (or just drag it there)."
-            : `${ownerDisplayName(state, currentPlayerId(state))} is thinking…`}
-        </p>
-      )}
-
-      {isVoting && !humanVotePending && <p className="text-sm">Tallying votes…</p>}
+      {/* Always mounted with a reserved min-height, even when empty -- this line's
+          text changes on almost every turn transition (human selects a card, AI's
+          turn starts/ends, voting begins), and conditionally mounting/unmounting the
+          element entirely made the board visibly jump each time as its height came
+          and went. */}
+      <p className="min-h-[1.25rem] text-sm">
+        {state.phase === "playing"
+          ? isHumanTurn
+            ? selectedInstanceId && "Tap a highlighted cell to place the selected card (or just drag it there)."
+            : `${ownerDisplayName(state, currentPlayerId(state))} is thinking…`
+          : isVoting && !humanVotePending && "Tallying votes…"}
+      </p>
 
       <BoardGrid
         state={state}
@@ -245,6 +400,7 @@ function Game() {
         selectedInstanceId={selectedInstanceId}
         dragOverKey={dragOverKey}
         revealAll={state.phase === "ended"}
+        resolvedCards={resolvedCards}
         onCellClick={handleBoardCellClick}
         onCellDragOver={handleCellDragOver}
         onCellDragLeave={() => setDragOverKey(null)}
@@ -256,7 +412,7 @@ function Game() {
       )}
 
       {(state.phase === "playing" || state.phase === "voting") && (
-        <div className="flex flex-col items-center gap-3">
+        <div className="flex w-full flex-col items-center gap-3">
           <Hand
             cards={human.hand}
             selectedInstanceId={selectedInstanceId}
@@ -272,7 +428,7 @@ function Game() {
         </div>
       )}
 
-      {state.phase === "ended" && <EndScreen state={state} />}
+      {state.phase === "ended" && endResult && <EndScreen state={state} result={endResult} />}
 
       {humanVotePending && (
         <div className="fixed top-20 left-1/2 z-50 w-[min(90vw,20rem)] -translate-x-1/2 rounded-lg border border-zinc-300 bg-white p-3 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
@@ -381,7 +537,14 @@ function Game() {
         </div>
       )}
       </div>
-      <GameStatusPanel state={state} flipUnlocked={flipUnlocked} isHumanTurn={isHumanTurn} humanMustPass={humanMustPass} />
+      <GameStatusPanel
+        state={state}
+        flipUnlocked={flipUnlocked}
+        isHumanTurn={isHumanTurn}
+        humanMustPass={humanMustPass}
+        onCopyState={copyBoardState}
+        copyFeedback={copyFeedback}
+      />
     </div>
   );
 }
@@ -393,6 +556,7 @@ function BoardGrid({
   selectedInstanceId,
   dragOverKey,
   revealAll,
+  resolvedCards,
   onCellClick,
   onCellDragOver,
   onCellDragLeave,
@@ -440,11 +604,14 @@ function BoardGrid({
           const pos = { x, y };
           if (!inBounds(pos, state.config.boardBounds)) return null;
           const key = posKey(pos);
-          const isCenter = isCenterPosition(pos, state.config.boardBounds);
+          const isOwnerless = isOwnerlessPosition(pos, state.config.boardBounds);
           const card = state.board.get(key);
           const isLegal = legalCellKeys.has(key);
 
-          if (isCenter) {
+          if (isOwnerless) {
+            const effect = CENTER_EFFECTS[state.config.centerEffect];
+            const label = effect.ownerlessLabel ?? effect.label;
+            const detail = centerEffectDescription(state.config.centerEffect, state.config);
             return (
               <div
                 key={key}
@@ -453,12 +620,11 @@ function BoardGrid({
                 onMouseLeave={() => setHoveredKey((prev) => (prev === key ? null : prev))}
               >
                 <div className="flex aspect-square w-full items-center justify-center rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400">
-                  {CENTER_EFFECTS[state.config.centerEffect].label}
+                  {label}
                 </div>
                 {hoveredKey === key && (
                   <div className="pointer-events-none absolute -top-9 left-1/2 z-10 w-max max-w-[14rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
-                    {CENTER_EFFECTS[state.config.centerEffect].label} —{" "}
-                    {centerEffectDescription(state.config.centerEffect, state.config)}
+                    {label} — {detail}
                   </div>
                 )}
               </div>
@@ -483,6 +649,9 @@ function BoardGrid({
               : card.ownerId === HUMAN
                 ? `${def.name} (${def.base}) — ${def.fullText} — only visible to you`
                 : "face-down card";
+            // Only once the game has ended does a score breakdown exist -- see Game()'s
+            // `resolvedCards`, computed once and shared with EndScreen's summary table.
+            const resolvedCard = resolvedCards?.get(card.instanceId);
             return (
               <div
                 key={key}
@@ -494,27 +663,48 @@ function BoardGrid({
                   onClick={() => onCellClick(pos)}
                   disabled={!clickable}
                   title={clickable ? "Tap to flip face-up" : undefined}
-                  className={`flex aspect-square w-full flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${ownerColorClass(state, card.ownerId)} ${
+                  className={`@container flex aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 p-1 text-center ${ownerColorClass(state, card.ownerId)} ${
                     clickable ? "cursor-pointer ring-2 ring-amber-400" : ""
                   }`}
                 >
                   {displayFaceUp ? (
                     <>
-                      <span className={`text-[10px] leading-tight break-words ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}>
+                      <span
+                        className={`w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
+                      >
                         {def.name}
                       </span>
-                      <span className={`text-lg font-bold leading-none ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}>
+                      <span
+                        className={`text-[length:clamp(11px,34cqw,18px)] leading-none font-bold ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
+                      >
                         {def.base}
                       </span>
                     </>
                   ) : (
-                    <span className="text-xl">🂠</span>
+                    <span className="text-[length:clamp(12px,40cqw,20px)]">🂠</span>
                   )}
                 </button>
                 {hoveredKey === key && (
                   <div className="pointer-events-none absolute -top-12 left-1/2 z-10 w-max max-w-[12rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-white shadow dark:bg-zinc-100 dark:text-black">
                     <div className="text-[10px] font-semibold leading-tight">{tooltipOwner}</div>
                     <div className="text-[10px] leading-tight">{tooltipDetail}</div>
+                    {resolvedCard && (
+                      <div className="mt-1 border-t border-white/20 pt-1 text-left dark:border-black/20">
+                        {visibleBreakdown(resolvedCard.breakdown).map((d, j) => (
+                          <div key={j} className="flex justify-between gap-3 text-[10px] whitespace-nowrap">
+                            <span>{d.label}</span>
+                            <span>
+                              {d.amount > 0 ? "+" : ""}
+                              {d.amount}
+                            </span>
+                          </div>
+                        ))}
+                        <div className="mt-0.5 flex justify-between gap-3 border-t border-white/20 pt-0.5 text-[10px] font-semibold whitespace-nowrap dark:border-black/20">
+                          <span>Final</span>
+                          <span>{resolvedCard.finalValue}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -541,6 +731,26 @@ function BoardGrid({
         })
       )}
     </div>
+  );
+}
+
+/**
+ * A tooltip rendered into document.body via a portal, positioned with `fixed` from
+ * the anchor's real screen coordinates -- unlike a plain `absolute` tooltip nested
+ * inside a scrollable ancestor, this can't get clipped by that ancestor's overflow
+ * (CSS forces overflow-x to clip too whenever overflow-y is scrollable, so any
+ * tooltip meant to extend sideways out of a vertically-scrolling sidebar needs this).
+ */
+function FixedTooltip({ rect, children }: { rect: DOMRect; children: React.ReactNode }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      className="pointer-events-none fixed z-50 w-max max-w-[14rem] rounded bg-zinc-900 px-2 py-1 text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black"
+      style={{ top: rect.top, left: rect.right + 4 }}
+    >
+      {children}
+    </div>,
+    document.body
   );
 }
 
@@ -629,11 +839,15 @@ function GameStatusPanel({
   flipUnlocked,
   isHumanTurn,
   humanMustPass,
+  onCopyState,
+  copyFeedback,
 }: {
   state: GameState;
   flipUnlocked: boolean;
   isHumanTurn: boolean;
   humanMustPass: boolean;
+  onCopyState: () => void;
+  copyFeedback: boolean;
 }) {
   // Flip: label + either a round number (when there's a specific round to wait for)
   // or a text pill (already-resolved states with no single round to point at).
@@ -642,13 +856,7 @@ function GameStatusPanel({
   let flipText: string | undefined;
   if (flipUnlocked) {
     flipLabel = "Flip unlocked";
-    flipText = state.config.centerEffect === "pryingEyes" ? "opp. only" : "now";
-  } else if (state.config.centerEffect === "shadowlands" && state.config.playerCount === 2) {
-    flipLabel = "Flip locked";
-    flipText = "all game";
-  } else if (state.config.centerEffect === "shadowlands") {
-    flipLabel = "Flip locked";
-    flipText = "this rnd";
+    flipText = "now";
   } else {
     flipLabel = "Flip unlocks";
     flipNumber = state.config.flipUnlockRound;
@@ -672,8 +880,9 @@ function GameStatusPanel({
         </div>
         <div className="flex w-full flex-col items-center gap-1 text-center">
           <span className="text-[10px] font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">Center</span>
-          <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-            {CENTER_EFFECTS[state.config.centerEffect].label}
+          <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{CENTER_EFFECTS[state.config.centerEffect].label}</span>
+          <span className="text-[10px] leading-snug text-zinc-500 dark:text-zinc-400">
+            {centerEffectDescription(state.config.centerEffect, state.config)}
           </span>
         </div>
         {state.phase === "playing" && (
@@ -687,12 +896,32 @@ function GameStatusPanel({
             />
           </>
         )}
+        <div className="h-px w-full shrink-0 bg-zinc-300 dark:bg-zinc-700" />
+        <button
+          onClick={onCopyState}
+          className="w-full rounded-full border border-zinc-300 px-3 py-1.5 text-xs whitespace-nowrap hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          {copyFeedback ? "Copied!" : "Copy board state"}
+        </button>
       </div>
     </aside>
   );
 }
 
 const BUCKET_ORDER: CardBucket[] = ["Slam", "Engine", "Control"];
+
+/** Locations sidebar order, simplest rule to understand first -- not alphabetical or insertion order. */
+const LOCATION_COMPLEXITY_ORDER: CenterEffectId[] = [
+  "none",
+  "twoTowers",
+  "threeHeadedDragon",
+  "freeCities",
+  "reckoning",
+  "shadowlands",
+  "mirrorPool",
+  "championOfTheWeak",
+  "kingslayer",
+];
 
 const BUCKET_DESCRIPTIONS: Record<CardBucket, string> = {
   Slam: "High base value with a built-in downside or condition that can cut it back down -- big numbers, but risky.",
@@ -707,11 +936,24 @@ const BUCKET_DESCRIPTIONS: Record<CardBucket, string> = {
  * regardless of count (a card disabled or absent at this player count still appears,
  * just annotated "x0 in deck").
  */
-function CardCatalog({ playerCount }: { playerCount: number }) {
-  const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
-  const [hoveredBucket, setHoveredBucket] = useState<CardBucket | null>(null);
+function CardCatalog({
+  playerCount,
+  handCardIds,
+  visibleBoardCardIds,
+  currentCenterEffect,
+}: {
+  playerCount: number;
+  handCardIds: Set<CardId>;
+  visibleBoardCardIds: Set<CardId>;
+  currentCenterEffect: CenterEffectId;
+}) {
+  const [hoveredCard, setHoveredCard] = useState<{ id: CardId; rect: DOMRect } | null>(null);
+  const [hoveredBucket, setHoveredBucket] = useState<{ bucket: CardBucket; rect: DOMRect } | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<CardBucket>>(new Set());
+  // Collapsed by default, unlike the card buckets -- center effects are secondary
+  // reference info, not something a new player needs open by default.
+  const [locationsCollapsed, setLocationsCollapsed] = useState(true);
 
   function toggleBucket(bucket: CardBucket) {
     setCollapsedBuckets((prev) => {
@@ -749,6 +991,14 @@ function CardCatalog({ playerCount }: { playerCount: number }) {
           ◀
         </button>
       </div>
+      <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-zinc-500 dark:text-zinc-400">
+        <span className="flex items-center gap-1">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" /> My Cards
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" /> Cards on Board
+        </span>
+      </div>
       <div className="flex flex-col gap-4 overflow-x-hidden lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
         {BUCKET_ORDER.map((bucket) => {
           const ids = ALL_CARD_IDS.filter((id) => CARD_DEFS[id].bucket === bucket).sort((a, b) => {
@@ -761,8 +1011,8 @@ function CardCatalog({ playerCount }: { playerCount: number }) {
               <div className="relative mb-1.5">
                 <button
                   onClick={() => toggleBucket(bucket)}
-                  onMouseEnter={() => setHoveredBucket(bucket)}
-                  onMouseLeave={() => setHoveredBucket((prev) => (prev === bucket ? null : prev))}
+                  onMouseEnter={(e) => setHoveredBucket({ bucket, rect: e.currentTarget.getBoundingClientRect() })}
+                  onMouseLeave={() => setHoveredBucket((prev) => (prev?.bucket === bucket ? null : prev))}
                   className="flex w-full items-center gap-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
                 >
                   <span className="inline-block w-3 shrink-0">{bucketCollapsed ? "▶" : "▼"}</span>
@@ -771,10 +1021,8 @@ function CardCatalog({ playerCount }: { playerCount: number }) {
                     i
                   </span>
                 </button>
-                {hoveredBucket === bucket && (
-                  <div className="pointer-events-none absolute top-full left-0 z-10 mt-1 w-full rounded bg-zinc-900 px-2 py-1 text-[10px] leading-tight normal-case text-white shadow dark:bg-zinc-100 dark:text-black">
-                    {BUCKET_DESCRIPTIONS[bucket]}
-                  </div>
+                {hoveredBucket?.bucket === bucket && (
+                  <FixedTooltip rect={hoveredBucket.rect}>{BUCKET_DESCRIPTIONS[bucket]}</FixedTooltip>
                 )}
               </div>
               {!bucketCollapsed && (
@@ -782,19 +1030,25 @@ function CardCatalog({ playerCount }: { playerCount: number }) {
                   {ids.map((id) => {
                     const def = CARD_DEFS[id];
                     const copies = copiesForPlayerCount(def, playerCount);
+                    const inHand = handCardIds.has(id);
+                    const onBoard = visibleBoardCardIds.has(id);
+                    const boxToneClass =
+                      copies === 0
+                        ? "border-zinc-200 opacity-50 dark:border-zinc-800"
+                        : inHand
+                          ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
+                          : onBoard
+                            ? "border-emerald-300/70 bg-emerald-50/50 dark:border-emerald-800/70 dark:bg-emerald-950/40"
+                            : "border-zinc-300 dark:border-zinc-700";
                     return (
                       <div
                         key={id}
                         className="relative flex min-w-0 items-center gap-2"
-                        onMouseEnter={() => setHoveredCardId(id)}
-                        onMouseLeave={() => setHoveredCardId((prev) => (prev === id ? null : prev))}
+                        onMouseEnter={(e) => setHoveredCard({ id, rect: e.currentTarget.getBoundingClientRect() })}
+                        onMouseLeave={() => setHoveredCard((prev) => (prev?.id === id ? null : prev))}
                       >
                         <div
-                          className={`flex h-16 w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${
-                            copies === 0
-                              ? "border-zinc-200 opacity-50 dark:border-zinc-800"
-                              : "border-zinc-300 dark:border-zinc-700"
-                          }`}
+                          className={`relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${boxToneClass}`}
                         >
                           <span className="text-[8px] font-semibold leading-tight break-words">{def.name}</span>
                           <span className="text-base font-bold leading-none">{def.base}</span>
@@ -805,11 +1059,7 @@ function CardCatalog({ playerCount }: { playerCount: number }) {
                           </div>
                           <div className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">{def.text}</div>
                         </div>
-                        {hoveredCardId === id && (
-                          <div className="pointer-events-none absolute top-full left-0 z-10 mt-1 w-full rounded bg-zinc-900 px-2 py-1 text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
-                            {def.fullText}
-                          </div>
-                        )}
+                        {hoveredCard?.id === id && <FixedTooltip rect={hoveredCard.rect}>{def.fullText}</FixedTooltip>}
                       </div>
                     );
                   })}
@@ -818,6 +1068,59 @@ function CardCatalog({ playerCount }: { playerCount: number }) {
             </div>
           );
         })}
+        <div>
+          <button
+            onClick={() => setLocationsCollapsed((prev) => !prev)}
+            className="flex w-full items-center gap-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+          >
+            <span className="inline-block w-3 shrink-0">{locationsCollapsed ? "▶" : "▼"}</span>
+            Locations
+          </button>
+          {!locationsCollapsed && (
+            <div className="mt-1.5 flex flex-col gap-2">
+              {LOCATION_COMPLEXITY_ORDER
+                .slice()
+                .sort((a, b) => Number(!!CENTER_EFFECTS[a].disabled) - Number(!!CENTER_EFFECTS[b].disabled))
+                .map((id) => {
+                const def = CENTER_EFFECTS[id];
+                const available = isAvailableAtPlayerCount(id, playerCount);
+                const isCurrent = id === currentCenterEffect;
+                const config = configForPlayerCount(playerCount, id);
+                const restriction =
+                  def.minPlayerCount && def.maxPlayerCount
+                    ? `${def.minPlayerCount}-${def.maxPlayerCount}p only`
+                    : def.minPlayerCount
+                      ? `${def.minPlayerCount}p+ only`
+                      : def.maxPlayerCount
+                        ? `up to ${def.maxPlayerCount}p only`
+                        : null;
+                return (
+                  <div
+                    key={id}
+                    className={`rounded-md border p-1.5 ${
+                      isCurrent
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
+                        : available
+                          ? "border-zinc-300 dark:border-zinc-700"
+                          : "border-zinc-200 opacity-50 dark:border-zinc-800"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-xs font-medium">{def.label}</span>
+                      {isCurrent && (
+                        <span className="shrink-0 rounded-full bg-blue-500 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                          Current
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-zinc-500 dark:text-zinc-400">{centerEffectDescription(id, config)}</div>
+                    {restriction && <div className="mt-0.5 text-[9px] text-zinc-400 dark:text-zinc-500">{restriction}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </aside>
   );
@@ -827,8 +1130,15 @@ function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disable
   const sortedCards = [...cards].sort((a, b) => CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name));
   const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(null);
 
+  // Cards shrink in width together (flex-basis 7rem down to a 4rem floor) to try to
+  // fit one row without wrapping, but height stays fixed rather than tracking width
+  // (no aspect-square) so the full name/value/effect text always has room to wrap and
+  // show completely instead of truncating as the card narrows. No overflow-x-auto on
+  // purpose: setting overflow-x to anything but "visible" forces the browser to also
+  // clip overflow-y (a CSS rule, not a bug), which would cut off these cards' hover
+  // tooltips.
   return (
-    <div className="flex flex-wrap justify-center gap-2">
+    <div className="flex w-full flex-wrap justify-center gap-2 py-1">
       {sortedCards.map((card) => {
         const def = CARD_DEFS[card.cardId];
         const selected = card.instanceId === selectedInstanceId;
@@ -836,6 +1146,7 @@ function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disable
           <div
             key={card.instanceId}
             className="relative"
+            style={{ flex: "1 1 7rem", minWidth: "4rem", maxWidth: "7rem" }}
             onMouseEnter={() => setHoveredInstanceId(card.instanceId)}
             onMouseLeave={() => setHoveredInstanceId((prev) => (prev === card.instanceId ? null : prev))}
           >
@@ -844,16 +1155,18 @@ function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disable
               draggable={!disabled}
               onDragStart={(e) => onCardDragStart(e, card.instanceId)}
               disabled={disabled}
-              className={`flex h-32 w-24 flex-col items-center justify-center gap-1 rounded-md border-2 p-1.5 text-center ${
+              className={`@container flex h-28 w-full flex-col items-center justify-center gap-1 rounded-md border-2 p-1.5 text-center ${
                 disabled ? "cursor-default" : "cursor-grab active:cursor-grabbing"
-              } ${selected ? "border-amber-500 bg-amber-50 dark:bg-amber-950" : "border-zinc-300 dark:border-zinc-700"}`}
+              } ${selected ? "border-amber-500 bg-amber-50 dark:bg-amber-950" : "border-blue-400 dark:border-blue-700"}`}
             >
-              <span className="text-[10px] font-semibold leading-tight break-words">{def.name}</span>
-              <span className="text-xl font-bold leading-none">{def.base}</span>
-              <span className="text-[9px] leading-tight break-words text-zinc-500 dark:text-zinc-400">{def.text}</span>
+              <span className="w-full text-[length:clamp(8px,20cqw,10px)] leading-tight break-words font-semibold">{def.name}</span>
+              <span className="text-[length:clamp(14px,32cqw,20px)] leading-none font-bold">{def.base}</span>
+              <span className="w-full text-[length:clamp(7px,16cqw,9px)] leading-tight break-words text-zinc-500 dark:text-zinc-400">
+                {def.text}
+              </span>
             </button>
             {hoveredInstanceId === card.instanceId && (
-              <div className="pointer-events-none absolute -top-9 left-1/2 z-10 w-max max-w-[12rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
+              <div className="pointer-events-none absolute -top-9 left-1/2 z-20 w-max max-w-[12rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
                 {def.fullText}
               </div>
             )}
@@ -864,7 +1177,9 @@ function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disable
   );
 }
 
-function PlayerTable({ label, score, colorClass, borderColorClass, cards, extraRow }: PlayerTableProps) {
+function PlayerTable({ label, score, colorClass, borderColorClass, cards, extraRow, votesByRound }: PlayerTableProps) {
+  const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(null);
+
   return (
     <div className={`min-w-[11rem] flex-1 border-l-2 pl-2 ${borderColorClass}`}>
       <h3 className={`mb-1 text-sm font-semibold ${colorClass}`}>
@@ -877,23 +1192,54 @@ function PlayerTable({ label, score, colorClass, borderColorClass, cards, extraR
             <th className="py-1 pr-2">Card</th>
             <th className="py-1 pr-2">Initial</th>
             <th className="py-1 pr-2">Final</th>
+            <th className="py-1 pr-2">Vote</th>
           </tr>
         </thead>
         <tbody>
-          {cards.map((c, i) => (
+          {cards.map((c, i) => {
+            const vote = votesByRound.get(i + 1);
+            return (
             <tr key={c.instanceId} className="border-b border-zinc-100 dark:border-zinc-800">
               <td className="py-1 pr-2 text-zinc-500">{i + 1}</td>
-              <td className="py-1 pr-2">{CARD_DEFS[c.cardId].name}</td>
+              <td
+                className="relative py-1 pr-2"
+                onMouseEnter={() => setHoveredInstanceId(c.instanceId)}
+                onMouseLeave={() => setHoveredInstanceId((prev) => (prev === c.instanceId ? null : prev))}
+              >
+                <span className="cursor-help underline decoration-zinc-400 decoration-dotted underline-offset-2">
+                  {CARD_DEFS[c.cardId].name}
+                </span>
+                {hoveredInstanceId === c.instanceId && (
+                  <div className="pointer-events-none absolute top-full left-0 z-20 mt-1 w-max min-w-[9rem] max-w-[16rem] rounded bg-zinc-900 px-2 py-1.5 text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
+                    {visibleBreakdown(c.breakdown).map((d, j) => (
+                      <div key={j} className="flex justify-between gap-3 whitespace-nowrap">
+                        <span>{d.label}</span>
+                        <span>
+                          {d.amount > 0 ? "+" : ""}
+                          {d.amount}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="mt-1 flex justify-between gap-3 border-t border-white/20 pt-1 font-semibold whitespace-nowrap dark:border-black/20">
+                      <span>Final</span>
+                      <span>{c.finalValue}</span>
+                    </div>
+                  </div>
+                )}
+              </td>
               <td className="py-1 pr-2">{c.baseValue}</td>
               <td className="py-1 pr-2 font-semibold">{c.finalValue}</td>
+              <td className="py-1 pr-2 text-zinc-500">{vote === undefined ? "—" : vote ? "end" : "continue"}</td>
             </tr>
-          ))}
+            );
+          })}
           {extraRow && (
             <tr className="border-b border-zinc-100 italic dark:border-zinc-800">
               <td className="py-1 pr-2 text-zinc-500">—</td>
               <td className="py-1 pr-2">{extraRow.label}</td>
               <td className="py-1 pr-2">—</td>
               <td className="py-1 pr-2 font-semibold">{extraRow.value}</td>
+              <td className="py-1 pr-2">—</td>
             </tr>
           )}
         </tbody>
@@ -902,16 +1248,9 @@ function PlayerTable({ label, score, colorClass, borderColorClass, cards, extraR
   );
 }
 
-function EndScreen({ state }: { state: GameState }) {
-  const result = state.result!;
-  const playerIds = state.players.map((p) => p.id);
-  const { cards, centerAward, kingslayerZeroed } = resolveBoard(
-    state.board,
-    state.config.boardBounds,
-    state.round,
-    state.config.centerEffect,
-    playerIds
-  );
+function EndScreen({ state, result }: { state: GameState; result: ResolutionResult }) {
+  const gameResult = state.result!;
+  const { cards, centerAward, kingslayerHit } = result;
 
   const orderIndex = new Map(state.placementOrder.map((id, i) => [id, i]));
   const byTurnPlayed = (ownerId: string) =>
@@ -920,11 +1259,11 @@ function EndScreen({ state }: { state: GameState }) {
       .sort((a, b) => (orderIndex.get(a.instanceId) ?? 0) - (orderIndex.get(b.instanceId) ?? 0));
 
   const winnerLabel =
-    result.winnerIds.length > 1
+    gameResult.winnerIds.length > 1
       ? "tie!"
-      : result.winnerIds[0] === HUMAN
+      : gameResult.winnerIds[0] === HUMAN
         ? "you win!"
-        : `${ownerDisplayName(state, result.winnerIds[0])} wins.`;
+        : `${ownerDisplayName(state, gameResult.winnerIds[0])} wins.`;
 
   return (
     <div className="flex w-full max-w-5xl flex-col gap-4 rounded-lg border border-zinc-300 p-4 dark:border-zinc-700">
@@ -934,10 +1273,10 @@ function EndScreen({ state }: { state: GameState }) {
           Champion of the Weak: the center (value {centerAward.value}) went to {ownerDisplayName(state, centerAward.ownerId)}.
         </p>
       )}
-      {kingslayerZeroed.length > 0 && (
+      {kingslayerHit.length > 0 && (
         <p className="-mb-2 text-xs text-zinc-500">
-          Kingslayer zeroed:{" "}
-          {kingslayerZeroed
+          Kingslayer hit:{" "}
+          {kingslayerHit
             .map((id) => {
               const c = cards.find((cc) => cc.instanceId === id)!;
               return `${CARD_DEFS[c.cardId].name} (${ownerDisplayName(state, c.ownerId)})`;
@@ -945,16 +1284,23 @@ function EndScreen({ state }: { state: GameState }) {
             .join(", ")}
         </p>
       )}
-      <div className="flex flex-wrap gap-6">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {state.players.map((p) => (
           <PlayerTable
             key={p.id}
             label={ownerDisplayName(state, p.id)}
-            score={result.scores[p.id]}
+            score={gameResult.scores[p.id]}
             colorClass={ownerTextColorClass(state, p.id)}
             borderColorClass={ownerBorderColorClass(state, p.id)}
             cards={byTurnPlayed(p.id)}
             extraRow={centerAward && centerAward.ownerId === p.id ? { label: "Center", value: centerAward.value } : undefined}
+            votesByRound={
+              new Map(
+                state.voteHistory
+                  .filter(({ votes }) => p.id in votes)
+                  .map(({ round, votes }) => [round, votes[p.id]])
+              )
+            }
           />
         ))}
       </div>

@@ -4,16 +4,16 @@ import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 
 describe("isAvailableAtPlayerCount", () => {
   it("is available at every player count when no min/max is set", () => {
-    expect(isAvailableAtPlayerCount("kingslayer", MIN_PLAYERS)).toBe(true);
-    expect(isAvailableAtPlayerCount("kingslayer", MAX_PLAYERS)).toBe(true);
+    expect(isAvailableAtPlayerCount("threeHeadedDragon", MIN_PLAYERS)).toBe(true);
+    expect(isAvailableAtPlayerCount("threeHeadedDragon", MAX_PLAYERS)).toBe(true);
   });
 
   it("respects minPlayerCount ('only for larger boards')", () => {
-    const original = CENTER_EFFECTS.noMansLand.minPlayerCount;
-    CENTER_EFFECTS.noMansLand.minPlayerCount = 5;
-    expect(isAvailableAtPlayerCount("noMansLand", 4)).toBe(false);
-    expect(isAvailableAtPlayerCount("noMansLand", 5)).toBe(true);
-    CENTER_EFFECTS.noMansLand.minPlayerCount = original;
+    const original = CENTER_EFFECTS.twoTowers.minPlayerCount;
+    CENTER_EFFECTS.twoTowers.minPlayerCount = 5;
+    expect(isAvailableAtPlayerCount("twoTowers", 4)).toBe(false);
+    expect(isAvailableAtPlayerCount("twoTowers", 5)).toBe(true);
+    CENTER_EFFECTS.twoTowers.minPlayerCount = original;
   });
 
   it("respects maxPlayerCount", () => {
@@ -25,13 +25,13 @@ describe("isAvailableAtPlayerCount", () => {
   });
 
   it("returns false at every player count when disabled, overriding minPlayerCount/maxPlayerCount", () => {
-    const original = { disabled: CENTER_EFFECTS.pryingEyes.disabled, minPlayerCount: CENTER_EFFECTS.pryingEyes.minPlayerCount };
-    CENTER_EFFECTS.pryingEyes.disabled = true;
-    CENTER_EFFECTS.pryingEyes.minPlayerCount = undefined;
-    expect(isAvailableAtPlayerCount("pryingEyes", MIN_PLAYERS)).toBe(false);
-    expect(isAvailableAtPlayerCount("pryingEyes", MAX_PLAYERS)).toBe(false);
-    CENTER_EFFECTS.pryingEyes.disabled = original.disabled;
-    CENTER_EFFECTS.pryingEyes.minPlayerCount = original.minPlayerCount;
+    const original = { disabled: CENTER_EFFECTS.threeHeadedDragon.disabled, minPlayerCount: CENTER_EFFECTS.threeHeadedDragon.minPlayerCount };
+    CENTER_EFFECTS.threeHeadedDragon.disabled = true;
+    CENTER_EFFECTS.threeHeadedDragon.minPlayerCount = undefined;
+    expect(isAvailableAtPlayerCount("threeHeadedDragon", MIN_PLAYERS)).toBe(false);
+    expect(isAvailableAtPlayerCount("threeHeadedDragon", MAX_PLAYERS)).toBe(false);
+    CENTER_EFFECTS.threeHeadedDragon.disabled = original.disabled;
+    CENTER_EFFECTS.threeHeadedDragon.minPlayerCount = original.minPlayerCount;
   });
 });
 

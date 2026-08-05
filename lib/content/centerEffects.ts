@@ -1,7 +1,7 @@
-import { parsePosKey, posKey } from "@/lib/engine/board";
+import { inBounds, parsePosKey, posKey } from "@/lib/engine/board";
 import { redrawHands, Rng } from "@/lib/engine/deck";
 import type { ResolvedCard } from "@/lib/engine/resolution";
-import { Board, BoardBounds, CardInstance, CenterEffectId, GameConfig, GameState } from "@/lib/engine/types";
+import { Board, BoardBounds, CardInstance, CenterEffectId, GameConfig, GameState, Position } from "@/lib/engine/types";
 
 /**
  * One entry per CenterEffectId, holding both its UI copy and every hook the engine
@@ -25,8 +25,8 @@ export interface CenterEffectDef {
   /** If true, this effect is unavailable at every player count -- overrides `minPlayerCount`/`maxPlayerCount`. */
   disabled?: boolean;
 
-  /** Extra per-card value deltas applied during resolution (noMansLand, mirrorPool). */
-  valueModifiers?: (board: Board, bounds: BoardBounds, addDelta: (instanceId: string, amount: number) => void) => void;
+  /** Extra per-card value deltas applied during resolution (mirrorPool, shadowlands). */
+  valueModifiers?: (board: Board, bounds: BoardBounds, addDelta: (instanceId: string, amount: number, label: string) => void) => void;
 
   /**
    * Post-resolution award/zeroing off final totals (championOfTheWeak, kingslayer).
@@ -40,15 +40,28 @@ export interface CenterEffectDef {
     cards: ResolvedCard[];
     totalsByOwner: Record<string, number>;
     playerIds?: string[];
-  }) => { centerAward?: { value: number; ownerId: string } | null; kingslayerZeroed?: string[] };
+  }) => { centerAward?: { value: number; ownerId: string } | null; kingslayerHit?: string[] };
 
-  /** Overrides the default `round >= flipUnlockRound` gate (shadowlands, pryingEyes). */
+  /** Overrides the default `round >= flipUnlockRound` gate. Unused by any current effect -- kept for a future round-gating effect. */
   flipGate?: (round: number, config: GameConfig) => boolean;
-  /** Restricts which face-down cards may be flip targets (pryingEyes: not your own). */
+  /** Restricts which face-down cards may be flip targets. Unused by any current effect -- kept for a future targeting effect. */
   flipTargetFilter?: (targets: CardInstance[], playerId: string) => CardInstance[];
 
   /** Fires when a new round starts; return the (possibly unchanged) players/deck (reckoning). */
   onRoundStart?: (state: GameState, newRound: number, rng: Rng) => Pick<GameState, "players" | "deck">;
+
+  /**
+   * Overrides the full set of ownerless/unplaceable tiles (default: just the center)
+   * -- e.g. Three Headed Dragon adds two extra tiles, Two Towers moves them off
+   * center entirely. Populated into `BoardBounds.ownerless` once, at config-build time
+   * (configForPlayerCount).
+   */
+  ownerlessPositions?: (bounds: BoardBounds) => Position[];
+  /** UI label shown on each ownerless tile when set (e.g. "Dragon Head", "Tower"). Defaults to `label`. */
+  ownerlessLabel?: string;
+
+  /** Drops the normal adjacency requirement -- any empty, non-ownerless cell is a legal placement (freelands). */
+  placementAnywhere?: boolean;
 }
 
 /**
@@ -89,22 +102,18 @@ function computeCenterModifier(board: Board, bounds: BoardBounds, negated: Set<s
 /** Round the Reckoning center effect fires on -- discard & redraw every hand. */
 const RECKONING_TRIGGER_ROUND = 4;
 
+/**
+ * Base "value" of the Champion of the Weak / Kingslayer pseudo-card, before
+ * computeCenterModifier's adjacency adjustments -- exported so tests can compute
+ * expected totals from this instead of duplicating the literal.
+ */
+export const PSEUDO_CARD_BASE_VALUE = 3;
+
 export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
   none: {
     label: "None",
     description: "No special rule this game.",
     selectable: false,
-  },
-
-  noMansLand: {
-    label: "No Man's Land",
-    description: "Every placed card on the center's row or column scores −2. The center tile itself is exempt.",
-    valueModifiers: (board, bounds, addDelta) => {
-      for (const [key, c] of board.entries()) {
-        const pos = parsePosKey(key);
-        if (pos.x === bounds.center.x || pos.y === bounds.center.y) addDelta(c.instanceId, -2);
-      }
-    },
   },
 
   mirrorPool: {
@@ -117,23 +126,21 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
         const mirrorPos = { x: pos.x, y: 2 * bounds.center.y - pos.y };
         if (mirrorPos.y === pos.y) continue; // on the center row itself -- no distinct mirror
         const mirrorCard = board.get(posKey(mirrorPos));
-        if (mirrorCard) addDelta(c.instanceId, mirrorCard.cardId === c.cardId ? 2 : 1);
+        if (mirrorCard) addDelta(c.instanceId, mirrorCard.cardId === c.cardId ? 2 : 1, "Mirror Pool");
       }
     },
   },
 
   championOfTheWeak: {
     label: "Champion of the Weak",
-    description:
-      "The center counts as a card worth 5 (modified by adjacent buffs/dents). After scoring, it's transferred to the unique last-place player — a tie for last means no transfer.",
-    postResolution: ({ board, bounds, negated, totalsByOwner, playerIds }) => {
-      const centerValue = 5 + computeCenterModifier(board, bounds, negated);
-      const ids = playerIds ?? Object.keys(totalsByOwner);
-      if (ids.length === 0) return {};
-      const minTotal = Math.min(...ids.map((id) => totalsByOwner[id] ?? 0));
-      const lowest = ids.filter((id) => (totalsByOwner[id] ?? 0) === minTotal);
+    description: `The center counts as a card worth ${PSEUDO_CARD_BASE_VALUE} (modified by adjacent buffs/dents). After scoring, it's transferred to the owner of the single lowest-valued card on the board — a tie for lowest means no transfer.`,
+    postResolution: ({ board, bounds, negated, cards, totalsByOwner }) => {
+      if (cards.length === 0) return {};
+      const centerValue = PSEUDO_CARD_BASE_VALUE + computeCenterModifier(board, bounds, negated);
+      const minValue = Math.min(...cards.map((c) => c.finalValue));
+      const lowest = cards.filter((c) => c.finalValue === minValue);
       if (lowest.length !== 1) return {};
-      const ownerId = lowest[0];
+      const ownerId = lowest[0].ownerId;
       totalsByOwner[ownerId] = (totalsByOwner[ownerId] ?? 0) + centerValue;
       return { centerAward: { value: centerValue, ownerId } };
     },
@@ -141,32 +148,32 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
 
   kingslayer: {
     label: "Kingslayer",
-    description: "After scoring, the highest-value card(s) on the board are set to 0. Ties zero all of them.",
-    postResolution: ({ cards, totalsByOwner }) => {
-      if (cards.length === 0) return {};
-      const maxValue = Math.max(...cards.map((c) => c.finalValue));
-      const kingslayerZeroed: string[] = [];
-      for (const c of cards) {
+    description: `Kingslayer counts as a card worth ${PSEUDO_CARD_BASE_VALUE} (modified by adjacent buffs/dents, same as the center). After scoring, its value is subtracted from the highest-value face-up card(s) on the board -- ties still all get hit.`,
+    postResolution: ({ board, bounds, negated, cards, totalsByOwner }) => {
+      const faceUpCards = cards.filter((c) => c.faceUp);
+      if (faceUpCards.length === 0) return {};
+      const kingslayerValue = PSEUDO_CARD_BASE_VALUE + computeCenterModifier(board, bounds, negated);
+      const maxValue = Math.max(...faceUpCards.map((c) => c.finalValue));
+      const kingslayerHit: string[] = [];
+      for (const c of faceUpCards) {
         if (c.finalValue === maxValue) {
-          totalsByOwner[c.ownerId] = (totalsByOwner[c.ownerId] ?? 0) - c.finalValue;
-          c.finalValue = 0;
-          kingslayerZeroed.push(c.instanceId);
+          totalsByOwner[c.ownerId] = (totalsByOwner[c.ownerId] ?? 0) - kingslayerValue;
+          c.breakdown.push({ label: "Kingslayer (highest face-up value)", amount: -kingslayerValue });
+          c.finalValue -= kingslayerValue;
+          kingslayerHit.push(c.instanceId);
         }
       }
-      return { kingslayerZeroed };
+      return { kingslayerHit };
     },
   },
 
   shadowlands: {
     label: "Shadowlands",
-    description: (config) =>
-      config.playerCount === 2
-        ? "At 2p, this disables flipping for the entire game instead of the usual rounds 2, 4, and 6."
-        : "Flipping is only allowed on rounds 2, 4, and 6.",
-    flipGate: (round, config) => {
-      if (config.playerCount === 2) return false;
-      if (round < config.flipUnlockRound) return false;
-      return (round - config.flipUnlockRound) % 2 === 0;
+    description: "Face-down cards score +1",
+    valueModifiers: (board, _bounds, addDelta) => {
+      for (const c of board.values()) {
+        addDelta(c.instanceId, c.faceUp ? 0 : 1, "Shadowlands");
+      }
     },
   },
 
@@ -180,11 +187,33 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     },
   },
 
-  pryingEyes: {
-    label: "Prying Eyes",
-    description: "Flipping is unlocked from round 1, but you can never flip your own cards -- only opponents'.",
-    flipGate: () => true,
-    flipTargetFilter: (targets, playerId) => targets.filter((c) => c.ownerId !== playerId),
+  threeHeadedDragon: {
+    label: "Three Headed Dragon",
+    description: "Two extra ownerless tiles flank the center, two cells out along its row.",
+    ownerlessLabel: "Dragon Head",
+    ownerlessPositions: (bounds) => {
+      const { x, y } = bounds.center;
+      return [{ x, y }, { x: x - 2, y }, { x: x + 2, y }].filter((p) => inBounds(p, bounds));
+    },
+  },
+
+  twoTowers: {
+    label: "Two Towers",
+    description: "The center is free to play on. Instead, the ownerless tiles sit at the far left and far right ends of its row.",
+    ownerlessLabel: "Tower",
+    ownerlessPositions: (bounds) => {
+      const { y } = bounds.center;
+      return [
+        { x: 0, y },
+        { x: bounds.width - 1, y },
+      ];
+    },
+  },
+
+  freeCities: {
+    label: "The Free Cities",
+    description: "No adjacency requirement -- any empty tile on the board is a legal placement",
+    placementAnywhere: true,
   },
 };
 

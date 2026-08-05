@@ -134,6 +134,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     passedPlayerIds: new Set(),
     hasFlippedThisTurn: false,
     votes: {},
+    voteHistory: [],
     placementOrder: [],
     phase: "playing",
     result: null,
@@ -218,14 +219,14 @@ describe("chooseGreedyAiAction — placement actually looks ahead", () => {
 });
 
 describe("chooseGreedyAiAction — flip actually looks ahead", () => {
-  it("flips its own face-down Champion face-up for the +3", () => {
+  it("flips its own face-down Gloryseeker face-up for the +3", () => {
     const board: Board = new Map();
-    const champion = card("Champion", "p1", false);
-    board.set(posKey({ x: 3, y: 2 }), champion);
+    const gloryseeker = card("Gloryseeker", "p1", false);
+    board.set(posKey({ x: 3, y: 2 }), gloryseeker);
     const state = makeState({ board, round: 3 });
 
     const action = chooseGreedyAiAction(state, "p1", deterministicRng(2));
-    expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: champion.instanceId });
+    expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: gloryseeker.instanceId });
   });
 
   it("does not flip when nothing on the board would benefit", () => {
@@ -247,24 +248,24 @@ describe("chooseGreedyAiAction — flip actually looks ahead", () => {
   it("picks which opponent card to flip blindly -- never biased toward the more revealing one", () => {
     const board: Board = new Map();
     // Both hidden from p1. If the AI could see through them, it would have a reason
-    // to prefer one (Champion helps p2 if later revealed face-up) -- it shouldn't.
-    const champion = card("Champion", "p2", false);
+    // to prefer one (Gloryseeker helps p2 if later revealed face-up) -- it shouldn't.
+    const gloryseeker = card("Gloryseeker", "p2", false);
     const footman = card("Footman", "p2", false);
-    board.set(posKey({ x: 3, y: 2 }), champion);
+    board.set(posKey({ x: 3, y: 2 }), gloryseeker);
     board.set(posKey({ x: 3, y: 4 }), footman);
     const state = makeState({ board, round: 3 });
 
-    let championPicks = 0;
+    let gloryseekerPicks = 0;
     let footmanPicks = 0;
     const trials = 80;
     for (let seed = 0; seed < trials; seed++) {
       const action = chooseGreedyAiAction(state, "p1", deterministicRng(200 + seed));
       if (action.type !== "flip") continue;
-      if (action.instanceId === champion.instanceId) championPicks++;
+      if (action.instanceId === gloryseeker.instanceId) gloryseekerPicks++;
       if (action.instanceId === footman.instanceId) footmanPicks++;
     }
     // Both should get flipped a comparable number of times -- neither is favored.
-    expect(championPicks).toBeGreaterThan(0);
+    expect(gloryseekerPicks).toBeGreaterThan(0);
     expect(footmanPicks).toBeGreaterThan(0);
   });
 });

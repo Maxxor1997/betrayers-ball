@@ -15,8 +15,8 @@ describe("cards", () => {
 });
 
 describe("buildDeck", () => {
-  it("totals 76 cards at 2 players", () => {
-    expect(buildDeck(2)).toHaveLength(76);
+  it("totals 72 cards at 2 players", () => {
+    expect(buildDeck(2)).toHaveLength(72);
   });
 
   it("matches each card's per-player-count copy count, at every supported player count", () => {
@@ -30,12 +30,12 @@ describe("buildDeck", () => {
     }
   });
 
-  it("bucket totals match current CARD_DEFS bucket assignments at 2 players (Slam 14 / Engine 41 / Control 21)", () => {
+  it("bucket totals match current CARD_DEFS bucket assignments at 2 players (Slam 14 / Engine 37 / Control 21)", () => {
     const totals = { Slam: 0, Engine: 0, Control: 0 };
     for (const cardId of ALL_CARD_IDS) {
       totals[CARD_DEFS[cardId].bucket] += copiesForPlayerCount(CARD_DEFS[cardId], 2);
     }
-    expect(totals).toEqual({ Slam: 14, Engine: 41, Control: 21 });
+    expect(totals).toEqual({ Slam: 14, Engine: 37, Control: 21 });
   });
 
   it("assigns every card a unique instanceId", () => {
@@ -109,7 +109,7 @@ describe("dealNewGame", () => {
     const { players, remainingDeck } = dealNewGame(["p1", "p2"], 7, () => 0.42);
     expect(players).toHaveLength(2);
     expect(players[0].hand).toHaveLength(7);
-    expect(remainingDeck).toHaveLength(76 - 14);
+    expect(remainingDeck).toHaveLength(72 - 14);
   });
 });
 
@@ -134,7 +134,7 @@ describe("redrawHands", () => {
       { id: "p1", hand: [handCard("Footman", "p1"), handCard("Exile", "p1")], isAI: false },
       { id: "p2", hand: [handCard("Warlord", "p2")], isAI: true },
     ];
-    const deck: DeckCard[] = [{ instanceId: "d1", cardId: "Champion" }, { instanceId: "d2", cardId: "Berserker" }];
+    const deck: DeckCard[] = [{ instanceId: "d1", cardId: "Gloryseeker" }, { instanceId: "d2", cardId: "Berserker" }];
 
     const { players: redrawn } = redrawHands(deck, players, () => 0.5);
     expect(redrawn[0].hand).toHaveLength(2);
@@ -153,7 +153,7 @@ describe("redrawHands", () => {
   it("never runs out, even with an empty remaining deck -- discarded hands are recycled first", () => {
     const players: PlayerState[] = [
       { id: "p1", hand: [handCard("Footman", "p1"), handCard("Exile", "p1"), handCard("Warlord", "p1")], isAI: false },
-      { id: "p2", hand: [handCard("Champion", "p2"), handCard("Berserker", "p2")], isAI: false },
+      { id: "p2", hand: [handCard("Gloryseeker", "p2"), handCard("Berserker", "p2")], isAI: false },
     ];
     expect(() => redrawHands([], players, () => 0.5)).not.toThrow();
     const { players: redrawn, remainingDeck } = redrawHands([], players, () => 0.5);
