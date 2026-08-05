@@ -215,3 +215,11 @@ Weighting logic: Footman is the backbone (bluff layer + Commander/Bannerman fuel
 - **Formation/set bonuses** — the Footman line is the first. If it plays well, opens a category (lines, blocks, patterns). Kept minimal (one card) for now.
 - **Exact numbers** — min-round floor, turn cap, board W/H, hand size, all thresholds — constants, tuned by playing.
 - **Final-tie-break rule** — NEEDS DECIDING (see endgame).
+
+
+## Card ideas (in workshop)
+
+- Location: "Three Headed Dragon" 2 additional center blocks with no effect on the sides of the center with a gap, only for larger boards
+- Infiltrator: rewards card itself for staying hidden but does some kind of sabotage
+- Card that immunes neighbors to being flipped?
+- Card that rewards neiboring multiple players (only for larger groups)
