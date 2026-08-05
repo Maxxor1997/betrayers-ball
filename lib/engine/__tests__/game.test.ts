@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CARD_DEFS } from "../cards";
+import { CARD_DEFS } from "@/lib/content/cards";
 import { applyAction, configForPlayerCount, createGame } from "../game";
 import { getLegalFlipTargets, getLegalPlacementCells } from "../turns";
 import { GameConfig, GameState } from "../types";

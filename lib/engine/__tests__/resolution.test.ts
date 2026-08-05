@@ -114,6 +114,25 @@ describe("resolveBoard — Berserker", () => {
   });
 });
 
+describe("resolveBoard — Mercenary", () => {
+  it("gains +2 per adjacent card owned by a different player", () => {
+    const board: Board = new Map();
+    const merc = place(board, 1, 1, "Mercenary", "p1");
+    place(board, 0, 1, "Footman", "p2");
+    place(board, 2, 1, "Footman", "p3");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, merc.instanceId).finalValue).toBe(6); // 2 + 2*2
+  });
+
+  it("does not count same-owner neighbors", () => {
+    const board: Board = new Map();
+    const merc = place(board, 1, 1, "Mercenary", "p1");
+    place(board, 0, 1, "Footman", "p1");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, merc.instanceId).finalValue).toBe(2);
+  });
+});
+
 describe("resolveBoard — Commander", () => {
   it("gains +2 per adjacent Footman (any owner)", () => {
     const board: Board = new Map();

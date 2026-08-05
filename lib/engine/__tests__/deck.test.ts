@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { buildDeck, deal, dealNewGame, redrawHands, shuffle } from "../deck";
-import { ALL_CARD_IDS, CARD_DEFS } from "../cards";
+import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
+import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { CardId, CardInstance, DeckCard, PlayerState } from "../types";
 
 describe("cards", () => {
-  it("has all 17 cards (the spec's 16 + Truthseeker)", () => {
-    expect(ALL_CARD_IDS).toHaveLength(17);
+  it("has all 18 cards (the spec's 16 + Truthseeker + Mercenary)", () => {
+    expect(ALL_CARD_IDS).toHaveLength(18);
   });
 
   it("Footman is the base-value benchmark", () => {
@@ -14,31 +15,48 @@ describe("cards", () => {
 });
 
 describe("buildDeck", () => {
-  it("totals 72 cards", () => {
-    expect(buildDeck()).toHaveLength(72);
+  it("totals 76 cards at 2 players", () => {
+    expect(buildDeck(2)).toHaveLength(76);
   });
 
-  it("matches the spec's per-card copy counts", () => {
-    const deck = buildDeck();
-    const counts: Record<string, number> = {};
-    for (const card of deck) counts[card.cardId] = (counts[card.cardId] ?? 0) + 1;
-    for (const cardId of ALL_CARD_IDS) {
-      expect(counts[cardId]).toBe(CARD_DEFS[cardId].count);
+  it("matches each card's per-player-count copy count, at every supported player count", () => {
+    for (let playerCount = MIN_PLAYERS; playerCount <= MAX_PLAYERS; playerCount++) {
+      const deck = buildDeck(playerCount);
+      const counts: Record<string, number> = {};
+      for (const card of deck) counts[card.cardId] = (counts[card.cardId] ?? 0) + 1;
+      for (const cardId of ALL_CARD_IDS) {
+        expect(counts[cardId] ?? 0).toBe(copiesForPlayerCount(CARD_DEFS[cardId], playerCount));
+      }
     }
   });
 
-  it("bucket totals match spec + Truthseeker (Slam 26 / Engine 25 / Control 21)", () => {
+  it("bucket totals match current CARD_DEFS bucket assignments at 2 players (Slam 14 / Engine 41 / Control 21)", () => {
     const totals = { Slam: 0, Engine: 0, Control: 0 };
     for (const cardId of ALL_CARD_IDS) {
-      totals[CARD_DEFS[cardId].bucket] += CARD_DEFS[cardId].count;
+      totals[CARD_DEFS[cardId].bucket] += copiesForPlayerCount(CARD_DEFS[cardId], 2);
     }
-    expect(totals).toEqual({ Slam: 26, Engine: 25, Control: 21 });
+    expect(totals).toEqual({ Slam: 14, Engine: 41, Control: 21 });
   });
 
   it("assigns every card a unique instanceId", () => {
-    const deck = buildDeck();
+    const deck = buildDeck(2);
     const ids = new Set(deck.map((c) => c.instanceId));
     expect(ids.size).toBe(deck.length);
+  });
+});
+
+describe("copiesForPlayerCount", () => {
+  it("returns 0 regardless of count when disabled is true", () => {
+    const def = { ...CARD_DEFS.Footman, disabled: true };
+    expect(copiesForPlayerCount(def, 2)).toBe(0);
+    expect(copiesForPlayerCount(def, 8)).toBe(0);
+  });
+
+  it("looks up the count for the given player count", () => {
+    const def = { ...CARD_DEFS.Footman, count: [1, 2, 3, 4, 5, 6, 7] };
+    expect(copiesForPlayerCount(def, 2)).toBe(1);
+    expect(copiesForPlayerCount(def, 5)).toBe(4);
+    expect(copiesForPlayerCount(def, 8)).toBe(7);
   });
 });
 
@@ -65,7 +83,7 @@ describe("shuffle", () => {
 
 describe("deal", () => {
   it("deals handSize cards to each player and assigns ownerId", () => {
-    const deck = buildDeck();
+    const deck = buildDeck(2);
     const { hands, remainingDeck } = deal(deck, ["p1", "p2"], 7);
     expect(hands.p1).toHaveLength(7);
     expect(hands.p2).toHaveLength(7);
@@ -75,7 +93,7 @@ describe("deal", () => {
   });
 
   it("deals face-down cards", () => {
-    const deck = buildDeck();
+    const deck = buildDeck(2);
     const { hands } = deal(deck, ["p1"], 7);
     expect(hands.p1.every((c) => c.faceUp === false)).toBe(true);
   });
@@ -91,7 +109,7 @@ describe("dealNewGame", () => {
     const { players, remainingDeck } = dealNewGame(["p1", "p2"], 7, () => 0.42);
     expect(players).toHaveLength(2);
     expect(players[0].hand).toHaveLength(7);
-    expect(remainingDeck).toHaveLength(72 - 14);
+    expect(remainingDeck).toHaveLength(76 - 14);
   });
 });
 

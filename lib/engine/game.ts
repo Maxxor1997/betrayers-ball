@@ -1,5 +1,5 @@
 import { BOARD_BOUNDS_BY_PLAYER_COUNT } from "@/lib/config/boardSizing";
-import { CENTER_EFFECTS } from "./centerEffects";
+import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { dealNewGame, Rng } from "./deck";
 import { computeAiVote, computeGameResult, shouldEndGame } from "./endgame";
 import { applyFlip, applyPass, applyPlace, currentPlayerId, mustPass } from "./turns";

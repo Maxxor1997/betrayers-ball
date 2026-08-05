@@ -1,5 +1,6 @@
-import { adjacentPositions, getLegalPlacementPositions, isCenterPosition } from "./board";
-import { CENTER_EFFECTS } from "./centerEffects";
+import { getLegalPlacementPositions, isCenterPosition } from "./board";
+import { CARD_DEFS } from "@/lib/content/cards";
+import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { CardInstance, FlipAction, GameConfig, GameState, PlaceAction, Position, posKey } from "./types";
 
 export function currentPlayerId(state: GameState): string {
@@ -91,26 +92,19 @@ export function applyPlace(state: GameState, action: PlaceAction): GameState {
   if (!isLegal) throw new Error(`Position ${posKey(action.position)} is not a legal placement`);
 
   const board = new Map(state.board);
-  // Giant can't be played face-down — a placement/state rule, not a scoring effect.
-  const faceUp = card.cardId === "Giant" ? true : card.faceUp;
+  const def = CARD_DEFS[card.cardId];
+  // A card can force itself face-up on placement (e.g. Giant) — a placement/state
+  // rule, not a scoring effect.
+  const faceUp = def.forceFaceUp ? true : card.faceUp;
   board.set(posKey(action.position), { ...card, faceUp });
 
-  // Truthseeker: immediately flip every adjacent card face-up (any owner, including
-  // your own). A placement-time trigger, distinct from the turn's normal optional
-  // flip action -- it doesn't consume hasFlippedThisTurn and ignores the flip-lock
-  // rules above (Shadowlands/Prying Eyes/flipUnlockRound all gate the *player's*
-  // flip action, not a card's own printed effect). Also unaffected by Suppressor
-  // negation, which in this engine is a resolution-time-only concept, not something
-  // computed mid-game during turns.
-  if (card.cardId === "Truthseeker") {
-    for (const neighborPos of adjacentPositions(action.position, bounds)) {
-      const key = posKey(neighborPos);
-      const neighbor = board.get(key);
-      if (neighbor && !neighbor.faceUp) {
-        board.set(key, { ...neighbor, faceUp: true });
-      }
-    }
-  }
+  // A card's placement-time trigger (e.g. Truthseeker flipping adjacent cards),
+  // distinct from the turn's normal optional flip action -- it doesn't consume
+  // hasFlippedThisTurn and ignores the flip-lock rules above (Shadowlands/Prying
+  // Eyes/flipUnlockRound all gate the *player's* flip action, not a card's own
+  // printed effect). Also unaffected by Suppressor negation, which in this engine is
+  // a resolution-time-only concept, not something computed mid-game during turns.
+  def.onPlace?.({ board, bounds, pos: action.position });
 
   const players = state.players.map((p, i) =>
     i === state.currentPlayerIndex ? { ...p, hand: [...p.hand.slice(0, handIndex), ...p.hand.slice(handIndex + 1)] } : p

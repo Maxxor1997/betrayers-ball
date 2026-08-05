@@ -1,4 +1,4 @@
-import { CARD_DEFS } from "./cards";
+import { CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { CardId, CardInstance, DeckCard, PlayerState } from "./types";
 
 export type Rng = () => number;
@@ -11,10 +11,11 @@ function nextInstanceId(): string {
   return `card-${instanceCounter++}`;
 }
 
-export function buildDeck(): DeckCard[] {
+export function buildDeck(playerCount: number): DeckCard[] {
   const deck: DeckCard[] = [];
   for (const cardId of Object.keys(CARD_DEFS) as CardId[]) {
-    for (let i = 0; i < CARD_DEFS[cardId].count; i++) {
+    const copies = copiesForPlayerCount(CARD_DEFS[cardId], playerCount);
+    for (let i = 0; i < copies; i++) {
       deck.push({ instanceId: nextInstanceId(), cardId });
     }
   }
@@ -60,7 +61,7 @@ export function dealNewGame(
   handSize: number,
   rng: Rng = Math.random
 ): { players: PlayerState[]; remainingDeck: DeckCard[] } {
-  const deck = shuffle(buildDeck(), rng);
+  const deck = shuffle(buildDeck(playerIds.length), rng);
   const { hands, remainingDeck } = deal(deck, playerIds, handSize);
   const players: PlayerState[] = playerIds.map((id) => ({
     id,

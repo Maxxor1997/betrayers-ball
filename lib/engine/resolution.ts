@@ -1,6 +1,6 @@
-import { CARD_DEFS } from "./cards";
-import { countAdjacentOccupied, getAdjacentCards, isInFootmanLine, parsePosKey, posKey } from "./board";
-import { CENTER_EFFECTS } from "./centerEffects";
+import { getAdjacentCards, parsePosKey } from "./board";
+import { CARD_DEFS } from "@/lib/content/cards";
+import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { Board, BoardBounds, CardId, CenterEffectId, Position } from "./types";
 
 export interface ResolvedCard {
@@ -24,34 +24,36 @@ export interface ResolutionResult {
 }
 
 /**
- * Step 1 — Suppression pass. Active Suppressors (3+ adjacent occupied cells, center
- * counts) negate adjacent non-Suppressor cards: their own modifiers and outgoing
- * effects are cancelled (base value only). Suppressors are immune to negation, and
- * two adjacent Suppressors never negate each other.
+ * Step 1 — Suppression pass. Cards with a `negatesNeighborsIf` hook (currently just
+ * Suppressor) negate adjacent cards whose hook condition is met: their own modifiers
+ * and outgoing effects are cancelled (base value only). Cards with the hook are immune
+ * to negation themselves (so e.g. two adjacent Suppressors never negate each other).
+ * See lib/content/cards.ts.
  */
 function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Set<string> {
   const negated = new Set<string>();
   for (const [key, c] of board.entries()) {
-    if (c.cardId !== "Suppressor") continue;
+    const negatesNeighborsIf = CARD_DEFS[c.cardId].negatesNeighborsIf;
+    if (!negatesNeighborsIf) continue;
     const pos = parsePosKey(key);
-    if (countAdjacentOccupied(board, bounds, pos) < 3) continue;
+    if (!negatesNeighborsIf({ board, bounds, pos })) continue;
     for (const neighbor of getAdjacentCards(board, bounds, pos)) {
-      if (neighbor.cardId !== "Suppressor") negated.add(neighbor.instanceId);
+      if (!CARD_DEFS[neighbor.cardId].negatesNeighborsIf) negated.add(neighbor.instanceId);
     }
   }
   return negated;
 }
 
 /**
- * Step 2 — Value-modifying pass. Every non-negated card's effect computes
- * simultaneously off base values, positions, identities, ownership, and flip-state —
- * never another card's resolved value. Effects are either "self" (the source card
- * modifies its own value, e.g. Commander) or "outgoing" (the source modifies
- * neighbors, e.g. Bannerman); both are skipped entirely if the source is negated.
- * Incoming effects still land on negated targets — negation only cancels a card's
- * own modifiers and outgoing effects, not its identity/base/flip-state as read by
- * others (a negated Footman still links its neighbors' line; a negated Warlord still
- * counts toward other Warlords' penalty).
+ * Step 2 — Value-modifying pass. Every non-negated card's `valueModifier` hook
+ * computes simultaneously off base values, positions, identities, ownership, and
+ * flip-state — never another card's resolved value. Effects are either "self" (the
+ * source card modifies its own value, e.g. Commander) or "outgoing" (the source
+ * modifies neighbors, e.g. Bannerman); both are skipped entirely if the source is
+ * negated. Incoming effects still land on negated targets — negation only cancels a
+ * card's own modifiers and outgoing effects, not its identity/base/flip-state as read
+ * by others (a negated Footman still links its neighbors' line; a negated Warlord
+ * still counts toward other Warlords' penalty). See lib/content/cards.ts.
  */
 function computeValueModifiers(
   board: Board,
@@ -68,112 +70,32 @@ function computeValueModifiers(
   for (const [key, c] of board.entries()) {
     if (negated.has(c.instanceId)) continue;
     const pos = parsePosKey(key);
-
-    switch (c.cardId) {
-      case "Footman": {
-        if (isInFootmanLine(board, pos)) addDelta(c.instanceId, 1);
-        break;
-      }
-      case "Warlord": {
-        let otherWarlords = 0;
-        for (const other of board.values()) {
-          if (other.instanceId !== c.instanceId && other.cardId === "Warlord") otherWarlords++;
-        }
-        addDelta(c.instanceId, -3 * otherWarlords);
-        break;
-      }
-      case "Exile": {
-        addDelta(c.instanceId, -2 * countAdjacentOccupied(board, bounds, pos));
-        break;
-      }
-      case "Pretender": {
-        const dangerousNeighbor = getAdjacentCards(board, bounds, pos).some(
-          (n) => n.faceUp && CARD_DEFS[n.cardId].base >= 7
-        );
-        if (dangerousNeighbor) addDelta(c.instanceId, -5);
-        break;
-      }
-      case "Berserker": {
-        let otherOwnerBerserkers = 0;
-        for (const other of board.values()) {
-          if (other.cardId === "Berserker" && other.ownerId !== c.ownerId) otherOwnerBerserkers++;
-        }
-        addDelta(c.instanceId, 2 * otherOwnerBerserkers);
-        break;
-      }
-      case "Commander": {
-        const adjFootmen = getAdjacentCards(board, bounds, pos).filter((n) => n.cardId === "Footman").length;
-        addDelta(c.instanceId, 2 * adjFootmen);
-        break;
-      }
-      case "Champion": {
-        if (c.faceUp) addDelta(c.instanceId, 3);
-        break;
-      }
-      case "Darkspawn": {
-        const faceDownNeighbors = getAdjacentCards(board, bounds, pos).filter((n) => !n.faceUp).length;
-        if (faceDownNeighbors >= 2) addDelta(c.instanceId, 5);
-        break;
-      }
-      case "Chronicler": {
-        addDelta(c.instanceId, round);
-        break;
-      }
-      case "Earthshaker": {
-        for (const [otherKey, other] of board.entries()) {
-          if (other.instanceId === c.instanceId) continue;
-          if (parsePosKey(otherKey).y === pos.y) addDelta(other.instanceId, -1);
-        }
-        break;
-      }
-      case "Skysplitter": {
-        const above = board.get(posKey({ x: pos.x, y: pos.y - 1 }));
-        const below = board.get(posKey({ x: pos.x, y: pos.y + 1 }));
-        if (above) addDelta(above.instanceId, -3);
-        if (below) addDelta(below.instanceId, -3);
-        break;
-      }
-      case "Bannerman": {
-        for (const n of getAdjacentCards(board, bounds, pos)) {
-          addDelta(n.instanceId, n.cardId === "Footman" ? 2 : 1);
-        }
-        break;
-      }
-      case "Headsman": {
-        for (const n of getAdjacentCards(board, bounds, pos)) {
-          if (n.faceUp && CARD_DEFS[n.cardId].base >= 6) addDelta(n.instanceId, -4);
-        }
-        break;
-      }
-      // Giant, PlagueBearer, Suppressor: no value-modifying self/outgoing effect here.
-      default:
-        break;
-    }
+    CARD_DEFS[c.cardId].valueModifier?.({ board, bounds, round, pos, self: c, addDelta });
   }
 
   // Center-effect scoring-time passes. These are board rules, not printed card text,
-  // so they apply regardless of negation. See lib/engine/centerEffects.ts.
+  // so they apply regardless of negation. See lib/content/centerEffects.ts.
   CENTER_EFFECTS[centerEffect].valueModifiers?.(board, bounds, addDelta);
 
   return deltas;
 }
 
-/** Step 3 — Zeroing pass. A non-negated Plague Bearer with 2+ adjacent Footmen zeroes those Footmen. */
+/** Step 3 — Zeroing pass. Non-negated cards with a `zeroesAdjacentIf` hook (Plague Bearer) zero the cards it returns. */
 function applyZeroingPass(board: Board, bounds: BoardBounds, negated: Set<string>, values: Map<string, number>): void {
   for (const [key, c] of board.entries()) {
-    if (c.cardId !== "PlagueBearer" || negated.has(c.instanceId)) continue;
+    const zeroesAdjacentIf = CARD_DEFS[c.cardId].zeroesAdjacentIf;
+    if (!zeroesAdjacentIf || negated.has(c.instanceId)) continue;
     const pos = parsePosKey(key);
-    const adjacentFootmen = getAdjacentCards(board, bounds, pos).filter((n) => n.cardId === "Footman");
-    if (adjacentFootmen.length >= 2) {
-      for (const footman of adjacentFootmen) values.set(footman.instanceId, 0);
+    for (const instanceId of zeroesAdjacentIf({ board, bounds, pos })) {
+      values.set(instanceId, 0);
     }
   }
 }
 
-/** Step 4 — Floors. Warlord and Exile floor at 0. */
+/** Step 4 — Floors. Cards with `floorAtZero` (Warlord, Exile) floor at 0. */
 function applyFloors(board: Board, values: Map<string, number>): void {
   for (const c of board.values()) {
-    if (c.cardId !== "Warlord" && c.cardId !== "Exile") continue;
+    if (!CARD_DEFS[c.cardId].floorAtZero) continue;
     const v = values.get(c.instanceId) ?? 0;
     if (v < 0) values.set(c.instanceId, 0);
   }

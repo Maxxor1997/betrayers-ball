@@ -1,7 +1,7 @@
-import { parsePosKey, posKey } from "./board";
-import { redrawHands, Rng } from "./deck";
-import type { ResolvedCard } from "./resolution";
-import { Board, BoardBounds, CardInstance, CenterEffectId, GameConfig, GameState } from "./types";
+import { parsePosKey, posKey } from "@/lib/engine/board";
+import { redrawHands, Rng } from "@/lib/engine/deck";
+import type { ResolvedCard } from "@/lib/engine/resolution";
+import { Board, BoardBounds, CardInstance, CenterEffectId, GameConfig, GameState } from "@/lib/engine/types";
 
 /**
  * One entry per CenterEffectId, holding both its UI copy and every hook the engine
@@ -18,6 +18,12 @@ export interface CenterEffectDef {
   selectable?: boolean;
   /** Eligible for a "Random" draw. Default true. */
   randomPool?: boolean;
+  /** Lowest player count this effect is available at. Default MIN_PLAYERS (no floor). */
+  minPlayerCount?: number;
+  /** Highest player count this effect is available at. Default MAX_PLAYERS (no ceiling). */
+  maxPlayerCount?: number;
+  /** If true, this effect is unavailable at every player count -- overrides `minPlayerCount`/`maxPlayerCount`. */
+  disabled?: boolean;
 
   /** Extra per-card value deltas applied during resolution (noMansLand, mirrorPool). */
   valueModifiers?: (board: Board, bounds: BoardBounds, addDelta: (instanceId: string, amount: number) => void) => void;
@@ -182,15 +188,28 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
   },
 };
 
-/** The real effects explicitly selectable in the New Game popup ("None" and "Random" are hardcoded separately). */
-export const SELECTABLE_CENTER_EFFECTS: CenterEffectId[] = (Object.keys(CENTER_EFFECTS) as CenterEffectId[]).filter(
-  (id) => CENTER_EFFECTS[id].selectable !== false
-);
+/** Whether `id` is available at `playerCount` players, per its `minPlayerCount`/`maxPlayerCount` (e.g. "only for larger boards"). */
+export function isAvailableAtPlayerCount(id: CenterEffectId, playerCount: number): boolean {
+  const def = CENTER_EFFECTS[id];
+  if (def.disabled) return false;
+  if (def.minPlayerCount !== undefined && playerCount < def.minPlayerCount) return false;
+  if (def.maxPlayerCount !== undefined && playerCount > def.maxPlayerCount) return false;
+  return true;
+}
 
-/** What a "Random" draw picks from -- unlike explicit selection, this includes "none". */
-export const RANDOM_CENTER_EFFECT_POOL: CenterEffectId[] = (Object.keys(CENTER_EFFECTS) as CenterEffectId[]).filter(
-  (id) => CENTER_EFFECTS[id].randomPool !== false
-);
+/** The real effects explicitly selectable in the New Game popup at `playerCount` players ("None" and "Random" are hardcoded separately). */
+export function selectableCenterEffects(playerCount: number): CenterEffectId[] {
+  return (Object.keys(CENTER_EFFECTS) as CenterEffectId[]).filter(
+    (id) => CENTER_EFFECTS[id].selectable !== false && isAvailableAtPlayerCount(id, playerCount)
+  );
+}
+
+/** What a "Random" draw at `playerCount` players picks from -- unlike explicit selection, this includes "none". */
+export function randomCenterEffectPool(playerCount: number): CenterEffectId[] {
+  return (Object.keys(CENTER_EFFECTS) as CenterEffectId[]).filter(
+    (id) => CENTER_EFFECTS[id].randomPool !== false && isAvailableAtPlayerCount(id, playerCount)
+  );
+}
 
 export function centerEffectLabel(id: CenterEffectId): string {
   return CENTER_EFFECTS[id].label;

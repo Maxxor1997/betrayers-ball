@@ -1,13 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CARD_DEFS } from "@/lib/engine/cards";
+import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { inBounds, isCenterPosition } from "@/lib/engine/board";
-import { CENTER_EFFECTS, centerEffectDescription, RANDOM_CENTER_EFFECT_POOL, SELECTABLE_CENTER_EFFECTS } from "@/lib/engine/centerEffects";
+import {
+  CENTER_EFFECTS,
+  centerEffectDescription,
+  isAvailableAtPlayerCount,
+  randomCenterEffectPool,
+  selectableCenterEffects,
+} from "@/lib/content/centerEffects";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
-import { CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
+import { CardBucket, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, PLAYER_BORDER_COLOR_CLASSES, PLAYER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 import { BoardGridProps, HandProps, NewGameSetup, PendingFlip, PlayerTableProps } from "./types";
@@ -179,10 +185,9 @@ function Game() {
 
   function confirmNewGame() {
     if (!newGameSetup) return;
+    const pool = randomCenterEffectPool(newGameSetup.playerCount);
     const centerEffect: CenterEffectId =
-      newGameSetup.centerEffect === "random"
-        ? RANDOM_CENTER_EFFECT_POOL[Math.floor(Math.random() * RANDOM_CENTER_EFFECT_POOL.length)]
-        : newGameSetup.centerEffect;
+      newGameSetup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : newGameSetup.centerEffect;
     setPlayerCount(newGameSetup.playerCount);
     setState(newGameState(newGameSetup.playerCount, centerEffect));
     setSelectedInstanceId(null);
@@ -199,25 +204,12 @@ function Game() {
   const human = state.players.find((p) => p.id === HUMAN)!;
 
   return (
-    <div className="flex flex-1 flex-col items-center gap-6 px-4 py-8">
+    <div className="flex flex-1 flex-col gap-6 px-4 py-8 lg:flex-row lg:items-start lg:justify-center">
+      <CardCatalog playerCount={state.config.playerCount} />
+      <div className="flex min-w-0 flex-1 flex-col items-center gap-6">
       <header className="flex w-full max-w-4xl flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Board Game — engine playtest</h1>
-          <p className="text-sm text-zinc-500">
-            Round {state.round} / {state.config.roundCap} ·{" "}
-            {flipUnlocked
-              ? state.config.centerEffect === "pryingEyes"
-                ? "flipping unlocked (opponents' cards only)"
-                : "flipping unlocked"
-              : state.config.centerEffect === "shadowlands" && state.config.playerCount === 2
-                ? "flipping disabled all game (Shadowlands, 2p)"
-                : state.config.centerEffect === "shadowlands"
-                  ? "flipping locked this round (Shadowlands)"
-                  : "flipping locks at round " + state.config.flipUnlockRound}{" "}
-            · Center: {CENTER_EFFECTS[state.config.centerEffect].label}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-xl font-semibold">Board Game — engine playtest</h1>
+        <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-zinc-500">{playerCount} players</span>
           <button
             onClick={() => setShowInstructions(true)}
@@ -241,7 +233,7 @@ function Game() {
           {isHumanTurn
             ? selectedInstanceId
               ? "Tap a highlighted cell to place the selected card (or just drag it there)."
-              : "Your turn — drag a hand card onto a highlighted cell, or tap a face-down card on the board to flip it."
+              : "Your turn — optionally tap a face-down card on the board to flip it first, then drag a hand card onto a highlighted cell to place it."
             : `${ownerDisplayName(state, currentPlayerId(state))} is thinking…`}
         </p>
       )}
@@ -337,7 +329,18 @@ function Game() {
             Players
             <select
               value={newGameSetup.playerCount}
-              onChange={(e) => setNewGameSetup({ ...newGameSetup, playerCount: Number(e.target.value) })}
+              onChange={(e) => {
+                const playerCount = Number(e.target.value);
+                // Reset to "random" if the effect currently picked isn't available at
+                // the new player count -- e.g. an effect that's only for larger boards.
+                const centerEffect =
+                  newGameSetup.centerEffect === "random" ||
+                  newGameSetup.centerEffect === "none" ||
+                  isAvailableAtPlayerCount(newGameSetup.centerEffect, playerCount)
+                    ? newGameSetup.centerEffect
+                    : "random";
+                setNewGameSetup({ ...newGameSetup, playerCount, centerEffect });
+              }}
               className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700"
             >
               {Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i).map((n) => (
@@ -356,7 +359,7 @@ function Game() {
             >
               <option value="random">Random</option>
               <option value="none">None</option>
-              {SELECTABLE_CENTER_EFFECTS.map((id) => (
+              {selectableCenterEffects(newGameSetup.playerCount).map((id) => (
                 <option key={id} value={id}>
                   {CENTER_EFFECTS[id].label}
                 </option>
@@ -379,6 +382,8 @@ function Game() {
           </div>
         </div>
       )}
+      </div>
+      <GameStatusPanel state={state} flipUnlocked={flipUnlocked} isHumanTurn={isHumanTurn} humanMustPass={humanMustPass} />
     </div>
   );
 }
@@ -400,8 +405,23 @@ function BoardGrid({
   const cols = Array.from({ length: width }, (_, x) => x);
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
 
+  // Cells are sized to fill their grid column (aspect-square, no fixed px) rather than
+  // a fixed h-20 w-20 -- with wider boards (7-8p can be 13-15 columns) a fixed cell
+  // size would force the grid past the available width and cells would overlap/clip.
+  // The container's own max-width caps cells at a comfortable 5rem when there's room,
+  // but is otherwise bounded by `w-full`, so minmax(0, 1fr) columns (and their
+  // w-full children) shrink together to fit whatever space is actually available.
+  const CELL_SIZE_PX = 80;
+  const GAP_PX = 6;
+
   return (
-    <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${width}, minmax(0, 1fr))` }}>
+    <div
+      className="grid w-full gap-1.5"
+      style={{
+        gridTemplateColumns: `repeat(${width}, minmax(0, 1fr))`,
+        maxWidth: `${width * CELL_SIZE_PX + (width - 1) * GAP_PX}px`,
+      }}
+    >
       {rows.map((y) =>
         cols.map((x) => {
           const pos = { x, y };
@@ -419,7 +439,7 @@ function BoardGrid({
                 onMouseEnter={() => setHoveredKey(key)}
                 onMouseLeave={() => setHoveredKey((prev) => (prev === key ? null : prev))}
               >
-                <div className="flex h-20 w-20 items-center justify-center rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400">
+                <div className="flex aspect-square w-full items-center justify-center rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400">
                   {CENTER_EFFECTS[state.config.centerEffect].label}
                 </div>
                 {hoveredKey === key && (
@@ -461,7 +481,7 @@ function BoardGrid({
                   onClick={() => onCellClick(pos)}
                   disabled={!clickable}
                   title={clickable ? "Tap to flip face-up" : undefined}
-                  className={`flex h-20 w-20 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${ownerColorClass(state, card.ownerId)} ${
+                  className={`flex aspect-square w-full flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${ownerColorClass(state, card.ownerId)} ${
                     clickable ? "cursor-pointer ring-2 ring-amber-400" : ""
                   }`}
                 >
@@ -496,11 +516,11 @@ function BoardGrid({
               onDragLeave={onCellDragLeave}
               onDrop={(e) => onCellDrop(e, pos)}
               disabled={!isLegal}
-              className={`h-20 w-20 rounded-md border transition-colors ${
+              className={`aspect-square w-full rounded-md border transition-colors ${
                 isLegal
                   ? dragOverKey === key
                     ? "border-emerald-600 bg-emerald-200 dark:bg-emerald-800"
-                    : "border-emerald-500 bg-emerald-50 dark:bg-emerald-950"
+                    : "border-emerald-300/70 bg-emerald-50/50 dark:border-emerald-800/70 dark:bg-emerald-950/40"
                   : "border-zinc-200 dark:border-zinc-800"
               }`}
             />
@@ -508,6 +528,285 @@ function BoardGrid({
         })
       )}
     </div>
+  );
+}
+
+function RoundBadge({ round, roundCap }: { round: number; roundCap: number }) {
+  return (
+    <div className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-full border-2 border-zinc-400 dark:border-zinc-600">
+      <span className="text-base leading-none font-bold">{round}</span>
+      <span className="text-[9px] leading-none text-zinc-500">of {roundCap}</span>
+    </div>
+  );
+}
+
+/**
+ * Label on top, its value in a boxed cell underneath -- `number` renders a compact
+ * square cell (e.g. the round something unlocks/opens on), `text` renders a pill for
+ * values that aren't a round number (e.g. "now").
+ */
+function StatusCell({ label, active, number, text }: { label: string; active: boolean; number?: number; text?: string }) {
+  const toneClass = active
+    ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+    : "border-zinc-300 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400";
+
+  return (
+    <div className="flex w-full flex-col items-center gap-1">
+      <span
+        className={`text-[10px] font-semibold tracking-wide uppercase ${
+          active ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-500 dark:text-zinc-400"
+        }`}
+      >
+        {label}
+      </span>
+      {number !== undefined ? (
+        <span className={`flex h-8 w-8 items-center justify-center rounded-md border-2 text-sm font-bold ${toneClass}`}>
+          {number}
+        </span>
+      ) : (
+        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-medium ${toneClass}`}>{text}</span>
+      )}
+    </div>
+  );
+}
+
+function ChecklistItem({ done, disabled, label }: { done: boolean; disabled?: boolean; label: string }) {
+  return (
+    <div
+      className={`flex items-start gap-1.5 text-xs ${
+        disabled
+          ? "text-zinc-400 line-through dark:text-zinc-600"
+          : done
+            ? "text-emerald-600 dark:text-emerald-400"
+            : "text-zinc-700 dark:text-zinc-300"
+      }`}
+    >
+      <span>{done ? "☑" : "☐"}</span>
+      {label}
+    </div>
+  );
+}
+
+/** Live checklist for the human's current turn -- ticks off the optional flip as soon as it's used. */
+function TurnChecklist({
+  isHumanTurn,
+  hasFlippedThisTurn,
+  flipUnlocked,
+  mustPass,
+}: {
+  isHumanTurn: boolean;
+  hasFlippedThisTurn: boolean;
+  flipUnlocked: boolean;
+  mustPass: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">
+        {isHumanTurn ? "Your turn" : "Waiting"}
+      </span>
+      <ChecklistItem done={hasFlippedThisTurn} disabled={!isHumanTurn || !flipUnlocked} label="Flip a card (optional)" />
+      <ChecklistItem done={false} disabled={!isHumanTurn} label={mustPass ? "Pass (no legal move)" : "Place a card"} />
+    </div>
+  );
+}
+
+/** Compact status readout for the header: round, flip/vote availability, center effect, and the turn checklist. */
+function GameStatusPanel({
+  state,
+  flipUnlocked,
+  isHumanTurn,
+  humanMustPass,
+}: {
+  state: GameState;
+  flipUnlocked: boolean;
+  isHumanTurn: boolean;
+  humanMustPass: boolean;
+}) {
+  // Flip: label + either a round number (when there's a specific round to wait for)
+  // or a text pill (already-resolved states with no single round to point at).
+  let flipLabel: string;
+  let flipNumber: number | undefined;
+  let flipText: string | undefined;
+  if (flipUnlocked) {
+    flipLabel = "Flip unlocked";
+    flipText = state.config.centerEffect === "pryingEyes" ? "opp. only" : "now";
+  } else if (state.config.centerEffect === "shadowlands" && state.config.playerCount === 2) {
+    flipLabel = "Flip locked";
+    flipText = "all game";
+  } else if (state.config.centerEffect === "shadowlands") {
+    flipLabel = "Flip locked";
+    flipText = "this rnd";
+  } else {
+    flipLabel = "Flip unlocks";
+    flipNumber = state.config.flipUnlockRound;
+  }
+
+  const votingOpen = state.round >= state.config.minRoundFloor;
+  const voteLabel = votingOpen ? "Voting open" : "Voting opens";
+
+  return (
+    <aside className="w-full shrink-0 lg:sticky lg:top-8 lg:w-40 lg:self-start">
+      <div className="flex flex-col items-center gap-4 rounded-xl border border-zinc-300 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-950">
+        <RoundBadge round={state.round} roundCap={state.config.roundCap} />
+        <div className="flex w-full flex-col gap-3">
+          <StatusCell label={flipLabel} active={flipUnlocked} number={flipNumber} text={flipText} />
+          <StatusCell
+            label={voteLabel}
+            active={votingOpen}
+            number={votingOpen ? undefined : state.config.minRoundFloor}
+            text={votingOpen ? "now" : undefined}
+          />
+        </div>
+        <div className="flex w-full flex-col items-center gap-1 text-center">
+          <span className="text-[10px] font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">Center</span>
+          <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+            {CENTER_EFFECTS[state.config.centerEffect].label}
+          </span>
+        </div>
+        {state.phase === "playing" && (
+          <>
+            <div className="h-px w-full shrink-0 bg-zinc-300 dark:bg-zinc-700" />
+            <TurnChecklist
+              isHumanTurn={isHumanTurn}
+              hasFlippedThisTurn={state.hasFlippedThisTurn}
+              flipUnlocked={flipUnlocked}
+              mustPass={humanMustPass}
+            />
+          </>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+const BUCKET_ORDER: CardBucket[] = ["Slam", "Engine", "Control"];
+
+const BUCKET_DESCRIPTIONS: Record<CardBucket, string> = {
+  Slam: "High base value with a built-in downside or condition that can cut it back down -- big numbers, but risky.",
+  Engine: "Low base value that grows from board state or synergy with other cards -- value comes from setup, not the printed number.",
+  Control: "Doesn't boost itself -- manipulates neighbors' values or bends the normal rules (negation, forced flips, zeroing).",
+};
+
+/**
+ * Reference sidebar listing every card in the game, grouped by bucket, with its copy
+ * count at the current game's player count -- lets a new player see the whole card
+ * pool up front instead of only discovering cards as they're drawn. Shows every card
+ * regardless of count (a card disabled or absent at this player count still appears,
+ * just annotated "x0 in deck").
+ */
+function CardCatalog({ playerCount }: { playerCount: number }) {
+  const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
+  const [hoveredBucket, setHoveredBucket] = useState<CardBucket | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [collapsedBuckets, setCollapsedBuckets] = useState<Set<CardBucket>>(new Set());
+
+  function toggleBucket(bucket: CardBucket) {
+    setCollapsedBuckets((prev) => {
+      const next = new Set(prev);
+      if (next.has(bucket)) next.delete(bucket);
+      else next.add(bucket);
+      return next;
+    });
+  }
+
+  if (collapsed) {
+    return (
+      <aside className="shrink-0 lg:sticky lg:top-8 lg:self-start">
+        <button
+          onClick={() => setCollapsed(false)}
+          className="rounded-full border border-zinc-300 px-3 py-1.5 text-xs whitespace-nowrap hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          ▶ Cards
+        </button>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="w-full shrink-0 overflow-x-hidden lg:sticky lg:top-8 lg:w-48 lg:self-start lg:border-r-2 lg:border-zinc-400 lg:pr-4 dark:lg:border-zinc-600">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">
+          Card catalog <span className="font-normal text-zinc-500">({playerCount}p)</span>
+        </h2>
+        <button
+          onClick={() => setCollapsed(true)}
+          title="Collapse"
+          className="shrink-0 rounded-full border border-zinc-300 px-2 py-0.5 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          ◀
+        </button>
+      </div>
+      <div className="flex flex-col gap-4 overflow-x-hidden lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+        {BUCKET_ORDER.map((bucket) => {
+          const ids = ALL_CARD_IDS.filter((id) => CARD_DEFS[id].bucket === bucket).sort((a, b) => {
+            const countDiff = copiesForPlayerCount(CARD_DEFS[b], playerCount) - copiesForPlayerCount(CARD_DEFS[a], playerCount);
+            return countDiff !== 0 ? countDiff : CARD_DEFS[a].name.localeCompare(CARD_DEFS[b].name);
+          });
+          const bucketCollapsed = collapsedBuckets.has(bucket);
+          return (
+            <div key={bucket}>
+              <div className="relative mb-1.5">
+                <button
+                  onClick={() => toggleBucket(bucket)}
+                  onMouseEnter={() => setHoveredBucket(bucket)}
+                  onMouseLeave={() => setHoveredBucket((prev) => (prev === bucket ? null : prev))}
+                  className="flex w-full items-center gap-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                >
+                  <span className="inline-block w-3 shrink-0">{bucketCollapsed ? "▶" : "▼"}</span>
+                  {bucket}
+                  <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-400 text-[9px] normal-case text-zinc-400 dark:border-zinc-500 dark:text-zinc-500">
+                    i
+                  </span>
+                </button>
+                {hoveredBucket === bucket && (
+                  <div className="pointer-events-none absolute top-full left-0 z-10 mt-1 w-full rounded bg-zinc-900 px-2 py-1 text-[10px] leading-tight normal-case text-white shadow dark:bg-zinc-100 dark:text-black">
+                    {BUCKET_DESCRIPTIONS[bucket]}
+                  </div>
+                )}
+              </div>
+              {!bucketCollapsed && (
+                <div className="flex flex-col gap-1.5">
+                  {ids.map((id) => {
+                    const def = CARD_DEFS[id];
+                    const copies = copiesForPlayerCount(def, playerCount);
+                    return (
+                      <div
+                        key={id}
+                        className="relative flex min-w-0 items-center gap-2"
+                        onMouseEnter={() => setHoveredCardId(id)}
+                        onMouseLeave={() => setHoveredCardId((prev) => (prev === id ? null : prev))}
+                      >
+                        <div
+                          className={`flex h-16 w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${
+                            copies === 0
+                              ? "border-zinc-200 opacity-50 dark:border-zinc-800"
+                              : "border-zinc-300 dark:border-zinc-700"
+                          }`}
+                        >
+                          <span className="text-[8px] font-semibold leading-tight break-words">{def.name}</span>
+                          <span className="text-base font-bold leading-none">{def.base}</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-medium">
+                            {def.name} <span className="text-zinc-500 dark:text-zinc-400">×{copies}</span>
+                          </div>
+                          <div className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">{def.text}</div>
+                        </div>
+                        {hoveredCardId === id && (
+                          <div className="pointer-events-none absolute top-full left-0 z-10 mt-1 w-full rounded bg-zinc-900 px-2 py-1 text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
+                            {def.fullText}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </aside>
   );
 }
 
@@ -683,7 +982,7 @@ function MiniBoard() {
             key={key}
             className={`h-8 w-8 rounded border ${
               legal.has(key)
-                ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950"
+                ? "border-emerald-300/70 bg-emerald-50/50 dark:border-emerald-800/70 dark:bg-emerald-950/40"
                 : "border-zinc-200 dark:border-zinc-800"
             }`}
           />
@@ -758,8 +1057,9 @@ function InstructionsModal({ onClose }: { onClose: () => void }) {
             <div className="flex flex-wrap items-center gap-4">
               <MiniBoard />
               <p className="max-w-xs text-zinc-600 dark:text-zinc-400">
-                Green cells are legal right now. A placement must be orthogonally adjacent to an existing card or the
-                center tile — nothing goes on the center itself, but it always counts as a neighbor.
+                Faint green cells are empty and legal to place on right now — they're not cards, just open targets. A
+                placement must be orthogonally adjacent to an existing card or the center tile — nothing goes on the
+                center itself, but it always counts as a neighbor.
               </p>
             </div>
           </section>

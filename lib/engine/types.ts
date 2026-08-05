@@ -15,22 +15,10 @@ export type CardId =
   | "PlagueBearer"
   | "Suppressor"
   | "Headsman"
-  | "Truthseeker";
+  | "Truthseeker"
+  | "Mercenary";
 
 export type CardBucket = "Slam" | "Engine" | "Control";
-
-export interface CardDef {
-  id: CardId;
-  name: string;
-  base: number;
-  bucket: CardBucket;
-  /** Short human-readable effect summary, for hand/board UI. */
-  text: string;
-  /** Full effect description, matching game_spec.md's wording -- for hover tooltips. */
-  fullText: string;
-  /** Number of copies of this card in the deck. */
-  count: number;
-}
 
 /** A card before it's been dealt to a player — no owner yet. */
 export interface DeckCard {
