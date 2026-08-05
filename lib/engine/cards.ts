@@ -1,6 +1,10 @@
 import { CardDef, CardId } from "./types";
 
-/** The 17-card set, per game_spec.md v2 (+Truthseeker). Base values and buckets only — effect logic lives in resolution.ts/turns.ts. */
+/**
+ * The 17-card set, per game_spec.md v2 (+Truthseeker) — the single source of truth for
+ * a card's stats, text, and deck quantity. Effect logic lives in resolution.ts/turns.ts.
+ * Deck totals 72 (Slam 26 / Engine 25 / Control 21).
+ */
 export const CARD_DEFS: Record<CardId, CardDef> = {
   Footman: {
     id: "Footman",
@@ -9,6 +13,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Slam",
     text: "+1 if in a 3+ same-owner line",
     fullText: "+1 to itself if part of a line of 3+ consecutive same-owner Footmen (row or column).",
+    count: 12,
   },
   Giant: {
     id: "Giant",
@@ -17,6 +22,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Slam",
     text: "Always face-up",
     fullText: "Always face-up — can't be played or stay face-down.",
+    count: 3,
   },
   Warlord: {
     id: "Warlord",
@@ -25,6 +31,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Slam",
     text: "−3 per other Warlord",
     fullText: "−3 per other Warlord on the board (any owner), floored at 0.",
+    count: 5,
   },
   Exile: {
     id: "Exile",
@@ -33,6 +40,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Slam",
     text: "−2 per neighbor",
     fullText: "−2 per orthogonal neighbor (any owner), floored at 0.",
+    count: 3,
   },
   Pretender: {
     id: "Pretender",
@@ -41,6 +49,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Slam",
     text: "−5 if adj. face-up base≥7",
     fullText: "−5 to itself if any adjacent face-up card has base ≥7 (any owner).",
+    count: 3,
   },
   Berserker: {
     id: "Berserker",
@@ -49,6 +58,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Engine",
     text: "+2 per opposing Berserker",
     fullText: "+2 for each Berserker owned by a different player, anywhere on the board.",
+    count: 8,
   },
   Commander: {
     id: "Commander",
@@ -57,6 +67,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Engine",
     text: "+2 per adjacent Footman",
     fullText: "+2 for each adjacent Footman (any owner).",
+    count: 5,
   },
   Champion: {
     id: "Champion",
@@ -65,6 +76,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Engine",
     text: "+3 if face-up",
     fullText: "+3 if this card is face-up at scoring.",
+    count: 5,
   },
   Darkspawn: {
     id: "Darkspawn",
@@ -73,6 +85,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Engine",
     text: "+5 if 2+ adj. face-down",
     fullText: "+5 if 2+ adjacent cards are face-down (any owner).",
+    count: 4,
   },
   Chronicler: {
     id: "Chronicler",
@@ -81,6 +94,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Engine",
     text: "+1 per round elapsed",
     fullText: "+1 for every round elapsed when the game ends.",
+    count: 3,
   },
   Earthshaker: {
     id: "Earthshaker",
@@ -89,6 +103,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Control",
     text: "−1 to rest of its row",
     fullText: "−1 to every other card in its row (any owner, not itself).",
+    count: 3,
   },
   Skysplitter: {
     id: "Skysplitter",
@@ -97,6 +112,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Control",
     text: "−3 above and below",
     fullText: "−3 to the card directly above and directly below.",
+    count: 3,
   },
   Bannerman: {
     id: "Bannerman",
@@ -105,6 +121,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Control",
     text: "+2 adj. Footmen, +1 others",
     fullText: "+2 to each adjacent Footman, +1 to each other adjacent card (any owner, not itself).",
+    count: 4,
   },
   PlagueBearer: {
     id: "PlagueBearer",
@@ -113,6 +130,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Control",
     text: "2+ adj. Footmen score 0",
     fullText: "If 2+ adjacent Footmen (any owner), those Footmen score 0 — this card keeps its own base.",
+    count: 3,
   },
   Suppressor: {
     id: "Suppressor",
@@ -122,6 +140,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     text: "3+ adj.: negates neighbors",
     fullText:
       "If 3+ adjacent cards (center counts), each adjacent non-Suppressor card is treated as vanilla — base value only, printed text negated.",
+    count: 2,
   },
   Headsman: {
     id: "Headsman",
@@ -130,6 +149,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Control",
     text: "−4 to adj. face-up base≥6",
     fullText: "−4 to each adjacent face-up card with base ≥6 (any owner).",
+    count: 2,
   },
   Truthseeker: {
     id: "Truthseeker",
@@ -139,6 +159,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     text: "On placement, flips all adjacent",
     fullText:
       "Immediately flips every adjacent card face-up when placed (any owner, including your own). Not affected by flip-lock rules or Suppressor negation.",
+    count: 4,
   },
 };
 

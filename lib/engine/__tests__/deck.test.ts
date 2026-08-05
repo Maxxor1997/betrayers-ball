@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDeck, DECK_COPY_COUNTS, deal, dealNewGame, redrawHands, shuffle } from "../deck";
+import { buildDeck, deal, dealNewGame, redrawHands, shuffle } from "../deck";
 import { ALL_CARD_IDS, CARD_DEFS } from "../cards";
 import { CardId, CardInstance, DeckCard, PlayerState } from "../types";
 
@@ -23,14 +23,14 @@ describe("buildDeck", () => {
     const counts: Record<string, number> = {};
     for (const card of deck) counts[card.cardId] = (counts[card.cardId] ?? 0) + 1;
     for (const cardId of ALL_CARD_IDS) {
-      expect(counts[cardId]).toBe(DECK_COPY_COUNTS[cardId]);
+      expect(counts[cardId]).toBe(CARD_DEFS[cardId].count);
     }
   });
 
   it("bucket totals match spec + Truthseeker (Slam 26 / Engine 25 / Control 21)", () => {
     const totals = { Slam: 0, Engine: 0, Control: 0 };
     for (const cardId of ALL_CARD_IDS) {
-      totals[CARD_DEFS[cardId].bucket] += DECK_COPY_COUNTS[cardId];
+      totals[CARD_DEFS[cardId].bucket] += CARD_DEFS[cardId].count;
     }
     expect(totals).toEqual({ Slam: 26, Engine: 25, Control: 21 });
   });

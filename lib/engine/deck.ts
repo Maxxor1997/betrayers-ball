@@ -1,25 +1,5 @@
+import { CARD_DEFS } from "./cards";
 import { CardId, CardInstance, DeckCard, PlayerState } from "./types";
-
-/** Copy counts per game_spec.md v2 deck table, +4 Truthseeker. Totals 72 (Slam 26 / Engine 25 / Control 21). */
-export const DECK_COPY_COUNTS: Record<CardId, number> = {
-  Footman: 12,
-  Warlord: 5,
-  Giant: 3,
-  Exile: 3,
-  Pretender: 3,
-  Berserker: 8,
-  Commander: 5,
-  Champion: 5,
-  Darkspawn: 4,
-  Chronicler: 3,
-  Bannerman: 4,
-  Skysplitter: 3,
-  Earthshaker: 3,
-  PlagueBearer: 3,
-  Suppressor: 2,
-  Headsman: 2,
-  Truthseeker: 4,
-};
 
 export type Rng = () => number;
 
@@ -33,8 +13,8 @@ function nextInstanceId(): string {
 
 export function buildDeck(): DeckCard[] {
   const deck: DeckCard[] = [];
-  for (const [cardId, count] of Object.entries(DECK_COPY_COUNTS) as [CardId, number][]) {
-    for (let i = 0; i < count; i++) {
+  for (const cardId of Object.keys(CARD_DEFS) as CardId[]) {
+    for (let i = 0; i < CARD_DEFS[cardId].count; i++) {
       deck.push({ instanceId: nextInstanceId(), cardId });
     }
   }

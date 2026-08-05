@@ -1,4 +1,5 @@
 import { adjacentPositions, getLegalPlacementPositions, isCenterPosition } from "./board";
+import { CENTER_EFFECTS } from "./centerEffects";
 import { CardInstance, FlipAction, GameConfig, GameState, PlaceAction, Position, posKey } from "./types";
 
 export function currentPlayerId(state: GameState): string {
@@ -20,11 +21,9 @@ function requireCurrentPlayer(state: GameState, playerId: string): void {
  * `flipUnlockRound`. All rule-toggle center effects, not scoring effects.
  */
 export function isFlipUnlocked(round: number, config: GameConfig): boolean {
-  if (config.centerEffect === "shadowlands" && config.playerCount === 2) return false;
-  if (config.centerEffect === "pryingEyes") return true;
-  if (round < config.flipUnlockRound) return false;
-  if (config.centerEffect === "shadowlands") return (round - config.flipUnlockRound) % 2 === 0;
-  return true;
+  const flipGate = CENTER_EFFECTS[config.centerEffect].flipGate;
+  if (flipGate) return flipGate(round, config);
+  return round >= config.flipUnlockRound;
 }
 
 /**
@@ -37,10 +36,8 @@ export function getLegalFlipTargets(state: GameState): CardInstance[] {
   if (!isFlipUnlocked(state.round, state.config)) return [];
   if (state.hasFlippedThisTurn) return [];
   const targets = [...state.board.values()].filter((c) => !c.faceUp);
-  if (state.config.centerEffect === "pryingEyes") {
-    const playerId = currentPlayerId(state);
-    return targets.filter((c) => c.ownerId !== playerId);
-  }
+  const flipTargetFilter = CENTER_EFFECTS[state.config.centerEffect].flipTargetFilter;
+  if (flipTargetFilter) return flipTargetFilter(targets, currentPlayerId(state));
   return targets;
 }
 
@@ -68,8 +65,9 @@ export function applyFlip(state: GameState, action: FlipAction): GameState {
   if (!entry) throw new Error(`No card ${action.instanceId} on the board`);
   const [key, target] = entry;
   if (target.faceUp) throw new Error("Card is already face-up");
-  if (state.config.centerEffect === "pryingEyes" && target.ownerId === action.playerId) {
-    throw new Error("Prying Eyes: you cannot flip your own cards");
+  const flipTargetFilter = CENTER_EFFECTS[state.config.centerEffect].flipTargetFilter;
+  if (flipTargetFilter && flipTargetFilter([target], action.playerId).length === 0) {
+    throw new Error(`${CENTER_EFFECTS[state.config.centerEffect].label}: you cannot flip that card`);
   }
 
   const board = new Map(state.board);

@@ -28,6 +28,8 @@ export interface CardDef {
   text: string;
   /** Full effect description, matching game_spec.md's wording -- for hover tooltips. */
   fullText: string;
+  /** Number of copies of this card in the deck. */
+  count: number;
 }
 
 /** A card before it's been dealt to a player — no owner yet. */

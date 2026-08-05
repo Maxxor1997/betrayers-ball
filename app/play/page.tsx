@@ -3,90 +3,16 @@
 import { useEffect, useState } from "react";
 import { CARD_DEFS } from "@/lib/engine/cards";
 import { inBounds, isCenterPosition } from "@/lib/engine/board";
+import { CENTER_EFFECTS, centerEffectDescription, RANDOM_CENTER_EFFECT_POOL, SELECTABLE_CENTER_EFFECTS } from "@/lib/engine/centerEffects";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
-import { resolveBoard, ResolvedCard } from "@/lib/engine/resolution";
+import { resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
-import { CardInstance, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
+import { CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
+import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, PLAYER_BORDER_COLOR_CLASSES, PLAYER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
+import { BoardGridProps, HandProps, NewGameSetup, PendingFlip, PlayerTableProps } from "./types";
 
 const HUMAN = "human";
-const MIN_PLAYERS = 2;
-const MAX_PLAYERS = 6;
-
-const CENTER_EFFECT_LABELS: Record<CenterEffectId, string> = {
-  none: "None",
-  noMansLand: "No Man's Land",
-  mirrorPool: "Mirror Pool",
-  championOfTheWeak: "Champion of the Weak",
-  kingslayer: "Kingslayer",
-  shadowlands: "Shadowlands",
-  reckoning: "The Reckoning",
-  pryingEyes: "Prying Eyes",
-};
-
-const CENTER_EFFECT_DESCRIPTIONS: Record<CenterEffectId, string> = {
-  none: "No special rule this game.",
-  noMansLand: "Every placed card on the center's row or column scores −2. The center tile itself is exempt.",
-  mirrorPool:
-    "Each card has one mirror position (same column, opposite side of the center row). If occupied, both cards get +1, or +2 each if they're the same card type.",
-  championOfTheWeak:
-    "The center counts as a card worth 5 (modified by adjacent buffs/dents). After scoring, it's transferred to the unique last-place player — a tie for last means no transfer.",
-  kingslayer: "After scoring, the highest-value card(s) on the board are set to 0. Ties zero all of them.",
-  shadowlands: "Flipping is only allowed on rounds 2, 4, and 6.",
-  reckoning: "At the start of round 4, every player discards their hand and draws the same number of fresh cards.",
-  pryingEyes: "Flipping is unlocked from round 1, but you can never flip your own cards -- only opponents'.",
-};
-
-/** Shadowlands' description depends on player count (2p is a full lockout, not the rounds-2/4/6 schedule). */
-function centerEffectDescription(effect: CenterEffectId, playerCount: number): string {
-  if (effect === "shadowlands" && playerCount === 2) {
-    return "At 2p, this disables flipping for the entire game instead of the usual rounds 2, 4, and 6.";
-  }
-  return CENTER_EFFECT_DESCRIPTIONS[effect];
-}
-
-/** The real effects explicitly selectable in the New Game popup ("None" and "Random" are hardcoded separately). */
-const SELECTABLE_CENTER_EFFECTS: CenterEffectId[] = [
-  "noMansLand",
-  "mirrorPool",
-  "championOfTheWeak",
-  "kingslayer",
-  "shadowlands",
-  "reckoning",
-  "pryingEyes",
-];
-
-/** What a "Random" draw picks from -- unlike explicit selection, this includes "none". */
-const RANDOM_CENTER_EFFECT_POOL: CenterEffectId[] = ["none", ...SELECTABLE_CENTER_EFFECTS];
-
-const PLAYER_COLOR_CLASSES = [
-  "border-blue-500 bg-blue-50 dark:bg-blue-950",
-  "border-red-500 bg-red-50 dark:bg-red-950",
-  "border-purple-500 bg-purple-50 dark:bg-purple-950",
-  "border-orange-500 bg-orange-50 dark:bg-orange-950",
-  "border-teal-500 bg-teal-50 dark:bg-teal-950",
-  "border-pink-500 bg-pink-50 dark:bg-pink-950",
-];
-
-// Same order/palette as PLAYER_COLOR_CLASSES, as plain text colors for the end screen.
-const PLAYER_TEXT_COLOR_CLASSES = [
-  "text-blue-600 dark:text-blue-400",
-  "text-red-600 dark:text-red-400",
-  "text-purple-600 dark:text-purple-400",
-  "text-orange-600 dark:text-orange-400",
-  "text-teal-600 dark:text-teal-400",
-  "text-pink-600 dark:text-pink-400",
-];
-
-// Same order again, as a left-border accent color for the end screen's per-player tables.
-const PLAYER_BORDER_COLOR_CLASSES = [
-  "border-blue-500",
-  "border-red-500",
-  "border-purple-500",
-  "border-orange-500",
-  "border-teal-500",
-  "border-pink-500",
-];
 
 const DRAG_MIME = "application/x-card-instance-id";
 
@@ -101,15 +27,6 @@ function newGameState(playerCount: number, centerEffect: CenterEffectId): GameSt
   const firstPlayerIndex = Math.floor(Math.random() * playerIds.length);
   return createGame(playerIds, config, undefined, aiPlayerIds, firstPlayerIndex);
 }
-
-const AI_NAMES = [
-  "Sir Loin of Beef",
-  "Baron von Bluffalo",
-  "Duchess Doomscroll",
-  "Count Cardigan",
-  "Earl of Awkward",
-  "Viscount Vibecheck",
-];
 
 function ownerDisplayName(state: GameState, ownerId: string): string {
   if (ownerId === HUMAN) return "You";
@@ -152,12 +69,10 @@ function Game() {
   const [state, setState] = useState<GameState>(() => newGameState(2, "none"));
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
-  const [pendingFlip, setPendingFlip] = useState<{ instanceId: string; label: string } | null>(null);
+  const [pendingFlip, setPendingFlip] = useState<PendingFlip | null>(null);
   // Player count and center effect are only ever chosen from this setup popup (opened
   // by "New game"), never editable while a game is in progress.
-  const [newGameSetup, setNewGameSetup] = useState<{ playerCount: number; centerEffect: CenterEffectId | "random" } | null>(
-    null
-  );
+  const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(null);
   const [showInstructions, setShowInstructions] = useState(false);
 
   const dispatch = (action: GameAction) => {
@@ -299,7 +214,7 @@ function Game() {
                 : state.config.centerEffect === "shadowlands"
                   ? "flipping locked this round (Shadowlands)"
                   : "flipping locks at round " + state.config.flipUnlockRound}{" "}
-            · Center: {CENTER_EFFECT_LABELS[state.config.centerEffect]}
+            · Center: {CENTER_EFFECTS[state.config.centerEffect].label}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -443,7 +358,7 @@ function Game() {
               <option value="none">None</option>
               {SELECTABLE_CENTER_EFFECTS.map((id) => (
                 <option key={id} value={id}>
-                  {CENTER_EFFECT_LABELS[id]}
+                  {CENTER_EFFECTS[id].label}
                 </option>
               ))}
             </select>
@@ -479,18 +394,7 @@ function BoardGrid({
   onCellDragOver,
   onCellDragLeave,
   onCellDrop,
-}: {
-  state: GameState;
-  legalCellKeys: Set<string>;
-  flipTargetIds: Set<string>;
-  selectedInstanceId: string | null;
-  dragOverKey: string | null;
-  revealAll: boolean;
-  onCellClick: (pos: Position) => void;
-  onCellDragOver: (e: React.DragEvent, key: string) => void;
-  onCellDragLeave: () => void;
-  onCellDrop: (e: React.DragEvent, pos: Position) => void;
-}) {
+}: BoardGridProps) {
   const { width, height } = state.config.boardBounds;
   const rows = Array.from({ length: height }, (_, y) => y);
   const cols = Array.from({ length: width }, (_, x) => x);
@@ -516,12 +420,12 @@ function BoardGrid({
                 onMouseLeave={() => setHoveredKey((prev) => (prev === key ? null : prev))}
               >
                 <div className="flex h-20 w-20 items-center justify-center rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400">
-                  {CENTER_EFFECT_LABELS[state.config.centerEffect]}
+                  {CENTER_EFFECTS[state.config.centerEffect].label}
                 </div>
                 {hoveredKey === key && (
                   <div className="pointer-events-none absolute -top-9 left-1/2 z-10 w-max max-w-[14rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
-                    {CENTER_EFFECT_LABELS[state.config.centerEffect]} —{" "}
-                    {centerEffectDescription(state.config.centerEffect, state.config.playerCount)}
+                    {CENTER_EFFECTS[state.config.centerEffect].label} —{" "}
+                    {centerEffectDescription(state.config.centerEffect, state.config)}
                   </div>
                 )}
               </div>
@@ -607,19 +511,7 @@ function BoardGrid({
   );
 }
 
-function Hand({
-  cards,
-  selectedInstanceId,
-  onCardClick,
-  onCardDragStart,
-  disabled,
-}: {
-  cards: CardInstance[];
-  selectedInstanceId: string | null;
-  onCardClick: (instanceId: string) => void;
-  onCardDragStart: (e: React.DragEvent, instanceId: string) => void;
-  disabled: boolean;
-}) {
+function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disabled }: HandProps) {
   const sortedCards = [...cards].sort((a, b) => CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name));
   const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(null);
 
@@ -660,21 +552,7 @@ function Hand({
   );
 }
 
-function PlayerTable({
-  label,
-  score,
-  colorClass,
-  borderColorClass,
-  cards,
-  extraRow,
-}: {
-  label: string;
-  score: number;
-  colorClass: string;
-  borderColorClass: string;
-  cards: ResolvedCard[];
-  extraRow?: { label: string; value: number };
-}) {
+function PlayerTable({ label, score, colorClass, borderColorClass, cards, extraRow }: PlayerTableProps) {
   return (
     <div className={`min-w-[11rem] flex-1 border-l-2 pl-2 ${borderColorClass}`}>
       <h3 className={`mb-1 text-sm font-semibold ${colorClass}`}>

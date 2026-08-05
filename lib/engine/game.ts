@@ -1,24 +1,9 @@
-import { dealNewGame, redrawHands, Rng } from "./deck";
+import { BOARD_BOUNDS_BY_PLAYER_COUNT } from "@/lib/config/boardSizing";
+import { CENTER_EFFECTS } from "./centerEffects";
+import { dealNewGame, Rng } from "./deck";
 import { computeAiVote, computeGameResult, shouldEndGame } from "./endgame";
 import { applyFlip, applyPass, applyPlace, currentPlayerId, mustPass } from "./turns";
-import { BoardBounds, CastVoteAction, GameAction, GameConfig, GameState } from "./types";
-
-/** Round the Reckoning center effect fires on -- discard & redraw every hand. */
-const RECKONING_TRIGGER_ROUND = 4;
-
-/**
- * Board sizing by player count, per game_spec.md's table (2-5p) extended to 6p using
- * the same pattern: height held at 5, width odd, usable cells (W*H-1) grows by 10 per
- * player (14, 24, 34, 44, 54...). Not in the spec — flagged there as "a later
- * extension" — so this 6p entry is an extrapolation, not a locked number.
- */
-const BOARD_BOUNDS_BY_PLAYER_COUNT: Record<number, BoardBounds> = {
-  2: { width: 5, height: 3, center: { x: 2, y: 1 } },
-  3: { width: 5, height: 5, center: { x: 2, y: 2 } },
-  4: { width: 7, height: 5, center: { x: 3, y: 2 } },
-  5: { width: 9, height: 5, center: { x: 4, y: 2 } },
-  6: { width: 11, height: 5, center: { x: 5, y: 2 } },
-};
+import { CastVoteAction, GameAction, GameConfig, GameState } from "./types";
 
 export function configForPlayerCount(playerCount: number): GameConfig {
   const boardBounds = BOARD_BOUNDS_BY_PLAYER_COUNT[playerCount];
@@ -65,15 +50,13 @@ export function createGame(
 }
 
 /**
- * Reckoning: at the start of round 4, every player discards their current hand and
- * redraws the same count. Round 4 can be entered two different ways (see call sites
- * below), so this is factored out rather than duplicated.
+ * Round-start hook for center effects that need one (currently just Reckoning).
+ * Round 4 can be entered two different ways (see call sites below), so this is
+ * factored out rather than duplicated. See lib/engine/centerEffects.ts.
  */
 function applyRoundStart(state: GameState, newRound: number, rng: Rng): Pick<GameState, "players" | "deck"> {
-  if (state.config.centerEffect === "reckoning" && newRound === RECKONING_TRIGGER_ROUND) {
-    const { players, remainingDeck } = redrawHands(state.deck, state.players, rng);
-    return { players, deck: remainingDeck };
-  }
+  const onRoundStart = CENTER_EFFECTS[state.config.centerEffect].onRoundStart;
+  if (onRoundStart) return onRoundStart(state, newRound, rng);
   return { players: state.players, deck: state.deck };
 }
 

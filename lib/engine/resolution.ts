@@ -1,5 +1,6 @@
 import { CARD_DEFS } from "./cards";
 import { countAdjacentOccupied, getAdjacentCards, isInFootmanLine, parsePosKey, posKey } from "./board";
+import { CENTER_EFFECTS } from "./centerEffects";
 import { Board, BoardBounds, CardId, CenterEffectId, Position } from "./types";
 
 export interface ResolvedCard {
@@ -151,60 +152,10 @@ function computeValueModifiers(
   }
 
   // Center-effect scoring-time passes. These are board rules, not printed card text,
-  // so they apply regardless of negation.
-  if (centerEffect === "noMansLand") {
-    for (const [key, c] of board.entries()) {
-      const pos = parsePosKey(key);
-      if (pos.x === bounds.center.x || pos.y === bounds.center.y) addDelta(c.instanceId, -2);
-    }
-  }
-
-  if (centerEffect === "mirrorPool") {
-    for (const [key, c] of board.entries()) {
-      const pos = parsePosKey(key);
-      const mirrorPos = { x: pos.x, y: 2 * bounds.center.y - pos.y };
-      if (mirrorPos.y === pos.y) continue; // on the center row itself -- no distinct mirror
-      const mirrorCard = board.get(posKey(mirrorPos));
-      if (mirrorCard) addDelta(c.instanceId, mirrorCard.cardId === c.cardId ? 2 : 1);
-    }
-  }
+  // so they apply regardless of negation. See lib/engine/centerEffects.ts.
+  CENTER_EFFECTS[centerEffect].valueModifiers?.(board, bounds, addDelta);
 
   return deltas;
-}
-
-/**
- * Champion of the Weak only: the center is "a scorable card worth 5 (modifiable by
- * adjacent buff/dent effects during resolution)". A fully general version would mean
- * synthesizing a fake CardInstance for the center and teaching every CardId-keyed
- * lookup (deck building, CARD_DEFS) to tolerate a non-drawable pseudo-card -- real
- * rework, not additive. This scopes it to the flat, identity-blind positional
- * modifiers: Bannerman (+1 -- center is never a Footman), Earthshaker (-1 if center
- * shares its row), Skysplitter (-3 if directly above/below).
- */
-function computeCenterModifier(board: Board, bounds: BoardBounds, negated: Set<string>): number {
-  let delta = 0;
-  const center = bounds.center;
-  for (const [key, c] of board.entries()) {
-    if (negated.has(c.instanceId)) continue;
-    const pos = parsePosKey(key);
-    const dx = Math.abs(pos.x - center.x);
-    const dy = Math.abs(pos.y - center.y);
-
-    switch (c.cardId) {
-      case "Bannerman":
-        if (dx + dy === 1) delta += 1;
-        break;
-      case "Earthshaker":
-        if (pos.y === center.y) delta -= 1;
-        break;
-      case "Skysplitter":
-        if (pos.x === center.x && dy === 1) delta -= 3;
-        break;
-      default:
-        break;
-    }
-  }
-  return delta;
 }
 
 /** Step 3 — Zeroing pass. A non-negated Plague Bearer with 2+ adjacent Footmen zeroes those Footmen. */
@@ -275,32 +226,12 @@ export function resolveBoard(
     totalsByOwner[c.ownerId] = (totalsByOwner[c.ownerId] ?? 0) + finalValue;
   }
 
-  const kingslayerZeroed: string[] = [];
-  if (centerEffect === "kingslayer" && cards.length > 0) {
-    const maxValue = Math.max(...cards.map((c) => c.finalValue));
-    for (const c of cards) {
-      if (c.finalValue === maxValue) {
-        totalsByOwner[c.ownerId] = (totalsByOwner[c.ownerId] ?? 0) - c.finalValue;
-        c.finalValue = 0;
-        kingslayerZeroed.push(c.instanceId);
-      }
-    }
-  }
+  const postResult = CENTER_EFFECTS[centerEffect].postResolution?.({ board, bounds, negated, cards, totalsByOwner, playerIds });
 
-  let centerAward: { value: number; ownerId: string } | null = null;
-  if (centerEffect === "championOfTheWeak") {
-    const centerValue = 5 + computeCenterModifier(board, bounds, negated);
-    const ids = playerIds ?? Object.keys(totalsByOwner);
-    if (ids.length > 0) {
-      const minTotal = Math.min(...ids.map((id) => totalsByOwner[id] ?? 0));
-      const lowest = ids.filter((id) => (totalsByOwner[id] ?? 0) === minTotal);
-      if (lowest.length === 1) {
-        const ownerId = lowest[0];
-        totalsByOwner[ownerId] = (totalsByOwner[ownerId] ?? 0) + centerValue;
-        centerAward = { value: centerValue, ownerId };
-      }
-    }
-  }
-
-  return { cards, totalsByOwner, centerAward, kingslayerZeroed };
+  return {
+    cards,
+    totalsByOwner,
+    centerAward: postResult?.centerAward ?? null,
+    kingslayerZeroed: postResult?.kingslayerZeroed ?? [],
+  };
 }
