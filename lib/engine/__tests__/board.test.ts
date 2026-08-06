@@ -6,7 +6,6 @@ import {
   getLegalPlacementPositions,
   inBounds,
   isCenterPosition,
-  isInFootmanLine,
 } from "../board";
 import { Board, BoardBounds, CardInstance, posKey } from "../types";
 
@@ -89,55 +88,5 @@ describe("getLegalPlacementPositions", () => {
     expect(legal).toHaveLength(allCells);
     expect(legal).not.toContain("2,1"); // center still excluded
     expect(legal).toContain("0,0"); // far corner, not adjacent to anything -- still legal
-  });
-});
-
-describe("isInFootmanLine", () => {
-  it("is false for fewer than 3 consecutive same-owner Footmen", () => {
-    const board: Board = new Map();
-    board.set(posKey({ x: 0, y: 0 }), card("Footman", "p1"));
-    board.set(posKey({ x: 1, y: 0 }), card("Footman", "p1"));
-    expect(isInFootmanLine(board, { x: 0, y: 0 })).toBe(false);
-  });
-
-  it("is true for 3 consecutive same-owner Footmen in a row", () => {
-    const board: Board = new Map();
-    board.set(posKey({ x: 0, y: 0 }), card("Footman", "p1"));
-    board.set(posKey({ x: 1, y: 0 }), card("Footman", "p1"));
-    board.set(posKey({ x: 2, y: 0 }), card("Footman", "p1"));
-    expect(isInFootmanLine(board, { x: 0, y: 0 })).toBe(true);
-    expect(isInFootmanLine(board, { x: 1, y: 0 })).toBe(true);
-    expect(isInFootmanLine(board, { x: 2, y: 0 })).toBe(true);
-  });
-
-  it("is true for 3 consecutive same-owner Footmen in a column", () => {
-    const board: Board = new Map();
-    board.set(posKey({ x: 0, y: 0 }), card("Footman", "p1"));
-    board.set(posKey({ x: 0, y: 1 }), card("Footman", "p1"));
-    board.set(posKey({ x: 0, y: 2 }), card("Footman", "p1"));
-    expect(isInFootmanLine(board, { x: 0, y: 1 })).toBe(true);
-  });
-
-  it("is broken by an opponent's card in the middle", () => {
-    const board: Board = new Map();
-    board.set(posKey({ x: 0, y: 0 }), card("Footman", "p1"));
-    board.set(posKey({ x: 1, y: 0 }), card("Footman", "p2"));
-    board.set(posKey({ x: 2, y: 0 }), card("Footman", "p1"));
-    expect(isInFootmanLine(board, { x: 0, y: 0 })).toBe(false);
-    expect(isInFootmanLine(board, { x: 2, y: 0 })).toBe(false);
-  });
-
-  it("is broken by a non-Footman card in the middle", () => {
-    const board: Board = new Map();
-    board.set(posKey({ x: 0, y: 0 }), card("Footman", "p1"));
-    board.set(posKey({ x: 1, y: 0 }), card("Giant", "p1"));
-    board.set(posKey({ x: 2, y: 0 }), card("Footman", "p1"));
-    expect(isInFootmanLine(board, { x: 0, y: 0 })).toBe(false);
-  });
-
-  it("is false for non-Footman cards", () => {
-    const board: Board = new Map();
-    board.set(posKey({ x: 0, y: 0 }), card("Giant", "p1"));
-    expect(isInFootmanLine(board, { x: 0, y: 0 })).toBe(false);
   });
 });

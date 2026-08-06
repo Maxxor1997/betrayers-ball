@@ -1,4 +1,4 @@
-import { adjacentPositions, countAdjacentOccupied, getAdjacentCards, isInFootmanLine, parsePosKey, posKey } from "@/lib/engine/board";
+import { adjacentPositions, countAdjacentOccupied, getAdjacentCards, parsePosKey, posKey } from "@/lib/engine/board";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { Board, BoardBounds, CardBucket, CardId, CardInstance, Position } from "@/lib/engine/types";
 
@@ -88,11 +88,19 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Footman",
     base: 5,
     bucket: "Engine",
-    text: "+1 if in a 3+ same-owner line",
-    fullText: "+1 to itself if part of a line of 3+ consecutive same-owner Footmen (row or column).",
+    text: "+1 if 3+ of your cards share its row/column",
+    fullText: "+1 to itself if its row or column (including itself) has 3 or more cards you own -- any card type, not just other Footmen.",
     count: flatCount(12),
     valueModifier: ({ board, pos, self, addDelta }) => {
-      if (isInFootmanLine(board, pos)) addDelta(self.instanceId, 1, "Footman (3+ line)");
+      let ownedInRow = 0;
+      let ownedInColumn = 0;
+      for (const [key, other] of board.entries()) {
+        if (other.ownerId !== self.ownerId) continue;
+        const otherPos = parsePosKey(key);
+        if (otherPos.y === pos.y) ownedInRow++;
+        if (otherPos.x === pos.x) ownedInColumn++;
+      }
+      if (ownedInRow >= 3 || ownedInColumn >= 3) addDelta(self.instanceId, 1, "Footman (3+ owned in row/column)");
     },
   },
   Giant: {
@@ -254,9 +262,9 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Plague Bearer",
     base: 3,
     bucket: "Control",
-    text: "Steals 2 from each same-type pair+",
+    text: "Steals 2 from matching neighbor pairs",
     fullText:
-      "For every card type that appears 2 or more times among its neighbors (any owner), each of those neighbors has 2 points stolen by Plague Bearer. Multiple qualifying types at once (e.g. two Footmen and two Warlords) each pay out separately.",
+      "If 2 or more of its neighbors are the same card type (any owner) -- say, two Footmen -- Plague Bearer steals 2 points from each of them. This can happen for more than one matching type at once (e.g. two Footmen and two Warlords both qualify), and each group pays out on its own.",
     count: flatCount(2),
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const neighborsByType = new Map<CardId, CardInstance[]>();

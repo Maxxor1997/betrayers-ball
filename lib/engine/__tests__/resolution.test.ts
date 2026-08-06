@@ -19,24 +19,49 @@ function find(cards: ResolvedCard[], instanceId: string): ResolvedCard {
   return found;
 }
 
-describe("resolveBoard — Footman line bonus", () => {
-  it("gives +1 to each Footman in a 3+ same-owner line", () => {
+describe("resolveBoard — Footman row/column bonus", () => {
+  it("gives +1 when its row has 3+ cards you own, even if they aren't Footmen", () => {
     const board: Board = new Map();
     const f0 = place(board, 0, 0, "Footman", "p1");
-    const f1 = place(board, 1, 0, "Footman", "p1");
-    const f2 = place(board, 2, 0, "Footman", "p1");
+    place(board, 1, 0, "Warlord", "p1");
+    place(board, 2, 0, "Giant", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
-    expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
-    expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
 
-  it("gives no bonus for fewer than 3", () => {
+  it("gives +1 when its column has 3+ cards you own", () => {
+    const board: Board = new Map();
+    const f0 = place(board, 0, 0, "Footman", "p1");
+    place(board, 0, 1, "Warlord", "p1");
+    place(board, 0, 2, "Giant", "p1");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
+  });
+
+  it("gives no bonus for fewer than 3 owned cards in its row or column", () => {
     const board: Board = new Map();
     const f0 = place(board, 0, 0, "Footman", "p1");
     place(board, 1, 0, "Footman", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+  });
+
+  it("doesn't count an opponent's cards toward the 3", () => {
+    const board: Board = new Map();
+    const f0 = place(board, 0, 0, "Footman", "p1");
+    place(board, 1, 0, "Footman", "p2");
+    place(board, 2, 0, "Footman", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+  });
+
+  it("cards don't need to be adjacent or contiguous -- just in the same row/column", () => {
+    const board: Board = new Map();
+    const f0 = place(board, 0, 0, "Footman", "p1");
+    place(board, 4, 0, "Warlord", "p1");
+    place(board, 7, 0, "Giant", "p1");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
 });
 
@@ -420,7 +445,10 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     place(board, 2, 3, "Giant", "p2");
     const footman = place(board, 4, 2, "Footman", "p2"); // adjacent to Bannerman only
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, footman.instanceId).finalValue).toBe(CARD_DEFS.Footman.base); // no +2, Bannerman is negated
+    // No +2 from Bannerman (negated) -- but Footman's own row bonus still fires,
+    // since negation cancels a card's own/outgoing effects, not its ownership as read
+    // by others: row y=2 has 3 p2-owned cards (Giant, Bannerman, Footman itself).
+    expect(find(cards, footman.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
 
   it("without an active Suppressor, Bannerman's buff lands normally", () => {
@@ -431,7 +459,7 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     expect(find(cards, footman.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 2);
   });
 
-  it("a negated Footman still counts as a line-link for its neighbors, but gets no bonus itself", () => {
+  it("a negated card still counts toward its owner's row/column total for others, but scores no bonus itself", () => {
     const board: Board = new Map();
     const f0 = place(board, 0, 0, "Footman", "p1");
     const f1 = place(board, 1, 0, "Footman", "p1"); // will be negated
@@ -443,7 +471,7 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, f1.instanceId).negated).toBe(true);
     expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base); // negated, no own +1
-    expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1); // still sees a 3-line via f1
+    expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1); // still sees 3 p1-owned in row y=0
     expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
 
@@ -473,7 +501,9 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     const f2 = place(board, 3, 1, "Footman", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, pb.instanceId).negated).toBe(true);
-    expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+    // No steal from the negated Plague Bearer -- but f1's own row bonus still fires:
+    // row y=2 has 3 p2-owned cards (Giant, Plague Bearer, f1 itself).
+    expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
     expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
   });
 });

@@ -196,6 +196,7 @@ function Game() {
   const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(null);
   const [showInstructions, setShowInstructions] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [highlightedCardId, setHighlightedCardId] = useState<CardId | null>(null);
 
   const dispatch = (action: GameAction) => {
     setState((prev) => {
@@ -395,7 +396,11 @@ function Game() {
       <p className="min-h-[1.25rem] text-sm">
         {state.phase === "playing"
           ? isHumanTurn
-            ? selectedInstanceId && "Tap a highlighted cell to place the selected card (or just drag it there)."
+            ? selectedInstanceId
+              ? "Tap a highlighted cell to place the selected card (or just drag it there)."
+              : flipUnlocked && !state.hasFlippedThisTurn
+                ? "You can optionally flip a face-down card face-up first, then drag a card from your hand onto a highlighted cell to place it."
+                : "Drag a card from your hand onto a highlighted cell to place it."
             : `${ownerDisplayName(state, currentPlayerId(state))} is thinking…`
           : isVoting && !humanVotePending && "Tallying votes…"}
       </p>
@@ -408,6 +413,7 @@ function Game() {
         dragOverKey={dragOverKey}
         revealAll={state.phase === "ended"}
         resolvedCards={resolvedCards}
+        highlightedCardId={highlightedCardId}
         onCellClick={handleBoardCellClick}
         onCellDragOver={handleCellDragOver}
         onCellDragLeave={() => setDragOverKey(null)}
@@ -425,6 +431,7 @@ function Game() {
             selectedInstanceId={selectedInstanceId}
             onCardClick={handleHandCardClick}
             onCardDragStart={handleHandDragStart}
+            onHoverCardId={setHighlightedCardId}
             disabled={!isHumanTurn}
           />
           {humanMustPass && (
@@ -564,6 +571,7 @@ function BoardGrid({
   dragOverKey,
   revealAll,
   resolvedCards,
+  highlightedCardId,
   onCellClick,
   onCellDragOver,
   onCellDragLeave,
@@ -651,6 +659,11 @@ function BoardGrid({
             // The hover listener lives on the wrapper div (not the button) so it still
             // fires even when the button itself is disabled.
             const tooltipOwner = ownerDisplayName(state, card.ownerId);
+            // Same "identity known to the viewer" rule as the tooltip above -- an
+            // opponent's still-hidden card never gets highlighted, even if it secretly
+            // matches, so hovering your hand can't leak what's face-down on the board.
+            const identityKnown = displayFaceUp || card.ownerId === HUMAN;
+            const highlighted = identityKnown && highlightedCardId !== null && card.cardId === highlightedCardId;
             const tooltipDetail = displayFaceUp
               ? `${def.name} (${def.base}) — ${def.fullText}`
               : card.ownerId === HUMAN
@@ -672,7 +685,7 @@ function BoardGrid({
                   title={clickable ? "Tap to flip face-up" : undefined}
                   className={`@container flex aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 p-1 text-center ${ownerColorClass(state, card.ownerId)} ${
                     clickable ? "cursor-pointer ring-2 ring-amber-400" : ""
-                  }`}
+                  } ${highlighted ? "ring-2 ring-sky-400 dark:ring-sky-500" : ""}`}
                 >
                   {displayFaceUp ? (
                     <>
@@ -1133,7 +1146,7 @@ function CardCatalog({
   );
 }
 
-function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disabled }: HandProps) {
+function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, onHoverCardId, disabled }: HandProps) {
   const sortedCards = [...cards].sort((a, b) => CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name));
   const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(null);
 
@@ -1154,8 +1167,14 @@ function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disable
             key={card.instanceId}
             className="relative"
             style={{ flex: "1 1 7rem", minWidth: "4rem", maxWidth: "7rem" }}
-            onMouseEnter={() => setHoveredInstanceId(card.instanceId)}
-            onMouseLeave={() => setHoveredInstanceId((prev) => (prev === card.instanceId ? null : prev))}
+            onMouseEnter={() => {
+              setHoveredInstanceId(card.instanceId);
+              onHoverCardId(card.cardId);
+            }}
+            onMouseLeave={() => {
+              setHoveredInstanceId((prev) => (prev === card.instanceId ? null : prev));
+              onHoverCardId(null);
+            }}
           >
             <button
               onClick={() => onCardClick(card.instanceId)}
@@ -1184,13 +1203,17 @@ function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disable
   );
 }
 
-function PlayerTable({ label, score, colorClass, borderColorClass, cards, extraRow, votesByRound }: PlayerTableProps) {
+function PlayerTable({ label, score, placeLabel, isYou, colorClass, borderColorClass, cards, extraRow, votesByRound }: PlayerTableProps) {
   const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(null);
 
   return (
-    <div className={`min-w-[11rem] flex-1 border-l-2 pl-2 ${borderColorClass}`}>
+    <div
+      className={`min-w-[11rem] flex-1 rounded-md border-l-2 py-2 pr-2 pl-2 ${borderColorClass} ${
+        isYou ? "bg-amber-50 ring-2 ring-amber-400 dark:bg-amber-950/30 dark:ring-amber-600" : ""
+      }`}
+    >
       <h3 className={`mb-1 text-sm font-semibold ${colorClass}`}>
-        {label}: {score}
+        {label}: {score} <span className="font-normal text-zinc-500 dark:text-zinc-400">— {placeLabel}</span>
       </h3>
       <table className="w-full text-left text-xs">
         <thead>
@@ -1255,6 +1278,22 @@ function PlayerTable({ label, score, colorClass, borderColorClass, cards, extraR
   );
 }
 
+/** "1st"/"2nd"/"3rd"/"4th", handling the 11th/12th/13th exception. */
+function ordinal(n: number): string {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
+}
+
 function EndScreen({ state, result }: { state: GameState; result: ResolutionResult }) {
   const gameResult = state.result!;
   const { cards, centerAward, kingslayerHit } = result;
@@ -1271,6 +1310,23 @@ function EndScreen({ state, result }: { state: GameState; result: ResolutionResu
       : gameResult.winnerIds[0] === HUMAN
         ? "you win!"
         : `${ownerDisplayName(state, gameResult.winnerIds[0])} wins.`;
+
+  // Standard competition ranking (1, 2, 2, 4 -- a tie doesn't compress the ranks below
+  // it), highest score first. `rankByPlayerId` and `countAtRank` together let each
+  // player's row say e.g. "2nd place" or "Tied for 2nd place".
+  const rankedPlayerIds = state.players.map((p) => p.id).sort((a, b) => gameResult.scores[b] - gameResult.scores[a]);
+  const rankByPlayerId = new Map<string, number>();
+  const countAtRank = new Map<number, number>();
+  rankedPlayerIds.forEach((id, i) => {
+    const rank = i === 0 || gameResult.scores[id] !== gameResult.scores[rankedPlayerIds[i - 1]] ? i + 1 : rankByPlayerId.get(rankedPlayerIds[i - 1])!;
+    rankByPlayerId.set(id, rank);
+    countAtRank.set(rank, (countAtRank.get(rank) ?? 0) + 1);
+  });
+  const placeLabel = (id: string): string => {
+    const rank = rankByPlayerId.get(id)!;
+    const ord = ordinal(rank);
+    return (countAtRank.get(rank) ?? 1) > 1 ? `Tied for ${ord} place` : `${ord} place`;
+  };
 
   return (
     <div className="flex w-full max-w-5xl flex-col gap-4 rounded-lg border border-zinc-300 p-4 dark:border-zinc-700">
@@ -1292,20 +1348,22 @@ function EndScreen({ state, result }: { state: GameState; result: ResolutionResu
         </p>
       )}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {state.players.map((p) => (
+        {rankedPlayerIds.map((id) => (
           <PlayerTable
-            key={p.id}
-            label={ownerDisplayName(state, p.id)}
-            score={gameResult.scores[p.id]}
-            colorClass={ownerTextColorClass(state, p.id)}
-            borderColorClass={ownerBorderColorClass(state, p.id)}
-            cards={byTurnPlayed(p.id)}
-            extraRow={centerAward && centerAward.ownerId === p.id ? { label: "Center", value: centerAward.value } : undefined}
+            key={id}
+            label={ownerDisplayName(state, id)}
+            score={gameResult.scores[id]}
+            placeLabel={placeLabel(id)}
+            isYou={id === HUMAN}
+            colorClass={ownerTextColorClass(state, id)}
+            borderColorClass={ownerBorderColorClass(state, id)}
+            cards={byTurnPlayed(id)}
+            extraRow={centerAward && centerAward.ownerId === id ? { label: "Center", value: centerAward.value } : undefined}
             votesByRound={
               new Map(
                 state.voteHistory
-                  .filter(({ votes }) => p.id in votes)
-                  .map(({ round, votes }) => [round, votes[p.id]])
+                  .filter(({ votes }) => id in votes)
+                  .map(({ round, votes }) => [round, votes[id]])
               )
             }
           />
@@ -1363,7 +1421,7 @@ function MiniCard() {
     <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 border-blue-500 bg-blue-50 p-1 text-center dark:bg-blue-950">
       <span className="text-[9px] font-semibold leading-tight">Footman</span>
       <span className="text-lg font-bold leading-none">5</span>
-      <span className="text-[7px] leading-tight text-zinc-500 dark:text-zinc-400">+1 in a line</span>
+      <span className="text-[7px] leading-tight text-zinc-500 dark:text-zinc-400">+1 if 3+ owned in row/col</span>
     </div>
   );
 }

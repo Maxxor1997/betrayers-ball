@@ -1,5 +1,5 @@
 import { ResolvedCard } from "@/lib/engine/resolution";
-import { CardInstance, CenterEffectId, GameState, Position } from "@/lib/engine/types";
+import { CardId, CardInstance, CenterEffectId, GameState, Position } from "@/lib/engine/types";
 
 /** Player count and center effect chosen from the "New game" setup popup. */
 export interface NewGameSetup {
@@ -22,6 +22,10 @@ export interface BoardGridProps {
   revealAll: boolean;
   /** Scoring breakdown per instanceId, once the game has ended -- see EndScreen. */
   resolvedCards?: Map<string, ResolvedCard>;
+  /** Card type currently hovered in the hand (see HandProps.onHoverCardId) -- every
+   * board card of this type whose identity is visible to the viewer gets highlighted,
+   * so e.g. hovering a Warlord in hand shows every Warlord already on the board. */
+  highlightedCardId: CardId | null;
   onCellClick: (pos: Position) => void;
   onCellDragOver: (e: React.DragEvent, key: string) => void;
   onCellDragLeave: () => void;
@@ -33,12 +37,19 @@ export interface HandProps {
   selectedInstanceId: string | null;
   onCardClick: (instanceId: string) => void;
   onCardDragStart: (e: React.DragEvent, instanceId: string) => void;
+  /** Fires as the mouse enters/leaves a hand card, with that card's type (or null on
+   * leave) -- lets the board highlight matching cards elsewhere. */
+  onHoverCardId: (cardId: CardId | null) => void;
   disabled: boolean;
 }
 
 export interface PlayerTableProps {
   label: string;
   score: number;
+  /** e.g. "1st place" or "Tied for 2nd place" -- see EndScreen's ranking computation. */
+  placeLabel: string;
+  /** Visually sets this player's table apart from the rest -- the human viewer's own row. */
+  isYou: boolean;
   colorClass: string;
   borderColorClass: string;
   cards: ResolvedCard[];

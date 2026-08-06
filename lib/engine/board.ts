@@ -109,35 +109,4 @@ function parsePosKey(key: string): Position {
   return { x, y };
 }
 
-/**
- * Whether the Footman at `pos` is part of a run of 3+ consecutive same-owner Footmen,
- * in its row or column. Identity/ownership only (not resolved values), so a negated
- * Footman still counts as a link for its neighbors' line even though it won't receive
- * its own bonus (that's gated separately, in resolution.ts).
- */
-export function isInFootmanLine(board: Board, pos: Position, minLength = 3): boolean {
-  const self = board.get(posKey(pos));
-  if (!self || self.cardId !== "Footman") return false;
-
-  const axes: Position[] = [
-    { x: 1, y: 0 },
-    { x: 0, y: 1 },
-  ];
-
-  for (const axis of axes) {
-    let length = 1;
-    for (const dir of [1, -1]) {
-      let cursor = { x: pos.x + axis.x * dir, y: pos.y + axis.y * dir };
-      for (;;) {
-        const card = board.get(posKey(cursor));
-        if (!card || card.cardId !== "Footman" || card.ownerId !== self.ownerId) break;
-        length++;
-        cursor = { x: cursor.x + axis.x * dir, y: cursor.y + axis.y * dir };
-      }
-    }
-    if (length >= minLength) return true;
-  }
-  return false;
-}
-
 export { posKey, parsePosKey };
