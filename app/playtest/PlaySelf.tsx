@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { randomCenterEffectPool } from "@/lib/content/centerEffects";
-import { AI_NAMES } from "@/lib/config/players";
+import { AI_NAMES, playerAccentClass } from "@/lib/config/players";
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { ResolutionResult, resolveBoard, ResolvedCard } from "@/lib/engine/resolution";
@@ -224,6 +224,7 @@ export function PlaySelf({
               }}
               onHoverCardId={setHighlightedCardId}
               disabled={!isHumanTurn}
+              ownerAccentClass={playerAccentClass(state.players, SELF)}
             />
             {humanMustPass && (
               <button

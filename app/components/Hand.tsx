@@ -13,9 +13,11 @@ export interface HandProps {
    * leave) -- lets the board highlight matching cards elsewhere. */
   onHoverCardId: (cardId: CardId | null) => void;
   disabled: boolean;
+  /** The viewer's own board accent (see lib/config/players.ts's playerAccentClass) -- an unselected hand card's border/fill matches this, so it's visually the same color as that same card once placed on the board, not a hardcoded blue that only happens to match a fixed seat. */
+  ownerAccentClass: string;
 }
 
-export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, onHoverCardId, disabled }: HandProps) {
+export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, onHoverCardId, disabled, ownerAccentClass }: HandProps) {
   const sortedCards = [...cards].sort((a, b) => CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name));
   const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(null);
 
@@ -52,7 +54,7 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
               disabled={disabled}
               className={`@container flex h-28 w-full flex-col items-center justify-center gap-1 rounded-md border-2 p-1.5 text-center ${
                 disabled ? "cursor-default" : "cursor-grab active:cursor-grabbing"
-              } ${selected ? "border-amber-500 bg-amber-50 dark:bg-amber-950" : "border-blue-400 dark:border-blue-700"}`}
+              } ${selected ? "border-amber-500 bg-amber-50 dark:bg-amber-950" : ownerAccentClass}`}
             >
               <span className="w-full text-[length:clamp(8px,20cqw,10px)] leading-tight break-words font-semibold">{def.name}</span>
               <span className="text-[length:clamp(14px,32cqw,20px)] leading-none font-bold">{def.base}</span>

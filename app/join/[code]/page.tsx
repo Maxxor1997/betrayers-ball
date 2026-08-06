@@ -16,6 +16,7 @@ import { InstructionsModal } from "@/app/components/InstructionsModal";
 import { NewGameModal, NewGameSetup } from "@/app/components/NewGameModal";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
+import { playerAccentClass, playerDotColorClass } from "@/lib/config/players";
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
 import { CardId, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
@@ -416,6 +417,8 @@ function GameView({
         myCardIds={myCardIds}
         opponentVisibleBoardCardIds={opponentVisibleBoardCardIds}
         currentCenterEffect={state.config.centerEffect}
+        myAccentClass={playerAccentClass(state.players, myPlayerId)}
+        myDotColorClass={playerDotColorClass(state.players, myPlayerId)}
         collapsed={cardsCollapsed}
         onCollapsedChange={onCardsCollapsedChange}
       />
@@ -497,6 +500,7 @@ function GameView({
               onCardDragStart={handleHandDragStart}
               onHoverCardId={setHighlightedCardId}
               disabled={!isMyTurn}
+              ownerAccentClass={playerAccentClass(state.players, myPlayerId)}
             />
             {myMustPass && (
               <button onClick={handlePass} className="rounded-full bg-zinc-900 px-4 py-1.5 text-sm text-white dark:bg-zinc-100 dark:text-black">

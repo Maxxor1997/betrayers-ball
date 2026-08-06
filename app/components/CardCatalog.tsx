@@ -90,6 +90,12 @@ export function CardCatalog({
   myCardIds = new Set(),
   opponentVisibleBoardCardIds = new Set(),
   currentCenterEffect = "none",
+  // Defaults match single-player's fixed HUMAN-is-always-index-0 board color -- the
+  // standalone home-screen catalog (no active game, myCardIds always empty) never
+  // actually renders anything in this color, so the default only matters for callers
+  // that don't bother overriding it.
+  myAccentClass = "border-blue-500 bg-blue-50 dark:bg-blue-950",
+  myDotColorClass = "bg-blue-500",
   collapsed,
   onCollapsedChange,
 }: {
@@ -97,6 +103,9 @@ export function CardCatalog({
   myCardIds?: Set<CardId>;
   opponentVisibleBoardCardIds?: Set<CardId>;
   currentCenterEffect?: CenterEffectId;
+  /** The viewer's own board accent (see lib/config/players.ts's playerAccentClass) -- "My Cards" is highlighted in this color instead of a hardcoded blue, so it matches whatever color that same player's cards actually show as on the board (which depends on seat order, not fixed to any one player in multiplayer). */
+  myAccentClass?: string;
+  myDotColorClass?: string;
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
 }) {
@@ -135,7 +144,7 @@ export function CardCatalog({
       </div>
       <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-zinc-500 dark:text-zinc-400">
         <span className="flex items-center gap-1">
-          <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" /> My Cards
+          <span className={`h-2 w-2 shrink-0 rounded-full ${myDotColorClass}`} /> My Cards
         </span>
         <span className="flex items-center gap-1">
           <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" /> Cards on Board
@@ -181,7 +190,7 @@ export function CardCatalog({
                       copies === 0
                         ? "border-zinc-200 opacity-50 dark:border-zinc-800"
                         : mine
-                          ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
+                          ? myAccentClass
                           : onOpponentBoard
                             ? "border-emerald-300/70 bg-emerald-50/50 dark:border-emerald-800/70 dark:bg-emerald-950/40"
                             : "border-zinc-300 dark:border-zinc-700";

@@ -10,7 +10,7 @@ import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
 import { CardId, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
-import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
+import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, playerAccentClass, playerDotColorClass } from "@/lib/config/players";
 import { NewGameSetup, PendingFlip } from "./types";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { CardCatalog } from "@/app/components/CardCatalog";
@@ -392,6 +392,8 @@ function Game() {
         myCardIds={myCardIds}
         opponentVisibleBoardCardIds={opponentVisibleBoardCardIds}
         currentCenterEffect={state.config.centerEffect}
+        myAccentClass={playerAccentClass(state.players, HUMAN)}
+        myDotColorClass={playerDotColorClass(state.players, HUMAN)}
         collapsed={cardsCollapsed}
         onCollapsedChange={setCardsCollapsed}
       />
@@ -481,6 +483,7 @@ function Game() {
             onCardDragStart={handleHandDragStart}
             onHoverCardId={setHighlightedCardId}
             disabled={!isHumanTurn}
+            ownerAccentClass={playerAccentClass(state.players, HUMAN)}
           />
           {humanMustPass && (
             <button onClick={handlePass} className="rounded-full bg-zinc-900 px-4 py-1.5 text-sm text-white dark:bg-zinc-100 dark:text-black">
