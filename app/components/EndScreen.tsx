@@ -148,7 +148,7 @@ export function EndScreen({
   /** Whose screen this is -- only affects which row gets the "you" highlight/wording. */
   viewerId: string;
   nameFor: (id: string) => string;
-  /** Extra content below the player tables -- e.g. multiplayer's "Play again" button. Single-player passes nothing. */
+  /** Extra content next to the result heading -- e.g. multiplayer's "Play again" button. Single-player passes nothing. */
   footer?: React.ReactNode;
 }) {
   const gameResult = state.result!;
@@ -184,7 +184,10 @@ export function EndScreen({
 
   return (
     <div className="flex w-full max-w-5xl flex-col gap-4 rounded-lg border border-zinc-300 p-4 dark:border-zinc-700">
-      <h2 className="text-lg font-semibold">Game over — {winnerLabel}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">Game over — {winnerLabel}</h2>
+        {footer}
+      </div>
       {centerAward && (
         <p className="-mb-2 text-xs text-zinc-500">
           Champion of the Weak: the center (value {centerAward.value}) went to {nameFor(centerAward.ownerId)}.
@@ -217,7 +220,6 @@ export function EndScreen({
           />
         ))}
       </div>
-      {footer}
     </div>
   );
 }

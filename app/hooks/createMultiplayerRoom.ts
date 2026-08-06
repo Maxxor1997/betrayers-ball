@@ -12,7 +12,9 @@ import { saveCredentials } from "./multiplayerCredentials";
 export function createMultiplayerRoom(
   hostName: string,
   playerCount: number,
-  centerEffect: CenterEffectId
+  centerEffect: CenterEffectId,
+  /** Jackbox-style shared screen -- the caller takes no seat, just hosts. Defaults false (the normal "host also plays" room). */
+  asDisplay = false
 ): Promise<{ roomCode: string } | { error: string }> {
   return new Promise((resolve) => {
     const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io();
@@ -25,7 +27,7 @@ export function createMultiplayerRoom(
     };
 
     socket.on("connect", () => {
-      socket.emit("room:create", { hostName, playerCount, centerEffect }, (ack) => {
+      socket.emit("room:create", { hostName, playerCount, centerEffect, asDisplay }, (ack) => {
         if (ack.ok) {
           saveCredentials(ack.roomCode, { playerId: ack.playerId, token: ack.token });
           finish({ roomCode: ack.roomCode });

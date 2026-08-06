@@ -6,7 +6,7 @@ import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game
 import { redactedStateFor } from "@/lib/engine/playerView";
 import { currentPlayerId } from "@/lib/engine/turns";
 import { CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
-import { LobbyState, RoomSummary, SeatInfo, toWireState, WireGameState } from "./protocol";
+import { DISPLAY_VIEWER_ID, LobbyState, RoomSummary, SeatInfo, toWireState, WireGameState } from "./protocol";
 
 /** Same pacing as the single-player AI turn effect in app/play/page.tsx, so a mixed human/AI room feels consistent regardless of mode. */
 const AI_TURN_DELAY_MS = 550;
@@ -25,7 +25,12 @@ interface Seat extends SeatInfo {
  */
 export class GameSession {
   readonly roomCode: string;
+  /** DISPLAY_VIEWER_ID when displayHosted -- the host has no seat, so this is a pseudo-playerId, not a key into `seats`. */
   readonly hostPlayerId: string;
+  private readonly displayHosted: boolean;
+  /** Stored separately from `seats` -- getSummary() needs it even when displayHosted leaves no host seat to read it from. */
+  private readonly hostNameLabel: string;
+  private readonly hostTokenValue: string;
   private readonly playerCount: number;
   /** Not readonly -- rematch() can change the location for the next deal, unlike playerCount which is fixed to the room's existing seats. */
   private centerEffect: CenterEffectId;
@@ -49,7 +54,9 @@ export class GameSession {
       onLobbyChange: (lobby: LobbyState) => void;
       onPlayerState: (playerId: string, state: WireGameState) => void;
     },
-    rng?: Rng
+    rng?: Rng,
+    /** Jackbox-style shared screen -- the host takes no seat, and all `playerCount` seats are open for real players/AI. Defaults false so every existing single-device-host call site is unaffected. */
+    displayHosted = false
   ) {
     if (!Number.isInteger(playerCount) || playerCount < MIN_PLAYERS || playerCount > MAX_PLAYERS) {
       throw new Error(`playerCount must be an integer between ${MIN_PLAYERS} and ${MAX_PLAYERS}`);
@@ -59,12 +66,20 @@ export class GameSession {
     this.centerEffect = centerEffect;
     this.serverOrigin = serverOrigin;
     this.rng = rng;
+    this.displayHosted = displayHosted;
+    this.hostNameLabel = hostName;
     this.onLobbyChange = handlers.onLobbyChange;
     this.onPlayerState = handlers.onPlayerState;
 
-    const host = this.newSeat(hostName, false);
-    this.hostPlayerId = host.playerId;
-    this.seats.set(host.playerId, host);
+    if (displayHosted) {
+      this.hostPlayerId = DISPLAY_VIEWER_ID;
+      this.hostTokenValue = randomUUID();
+    } else {
+      const host = this.newSeat(hostName, false);
+      this.hostPlayerId = host.playerId;
+      this.seats.set(host.playerId, host);
+      this.hostTokenValue = host.token!;
+    }
   }
 
   private newSeat(name: string, isAI: boolean): Seat {
@@ -77,16 +92,17 @@ export class GameSession {
     return this.state !== null;
   }
 
-  /** The host's own bearer token -- seated directly in the constructor (not via addPlayer), so this is the only way to retrieve it, both for tests and for the real room:create handler to hand back to its caller. */
+  /** The host's own bearer token -- for a non-display room this is the same token its seat holds; for a display room it's a standalone token no seat ever carries. Either way, this is the only way to retrieve it, both for tests and for the real room:create handler to hand back to its caller. */
   get hostToken(): string {
-    return this.seats.get(this.hostPlayerId)!.token!;
+    return this.hostTokenValue;
   }
 
   /** Trimmed-down public summary for the home screen's "active sessions" list -- see RoomSummary's doc comment for what's deliberately left out. */
   getSummary(): RoomSummary {
     return {
       roomCode: this.roomCode,
-      hostName: this.seats.get(this.hostPlayerId)!.name,
+      hostName: this.hostNameLabel,
+      hostIsDisplay: this.displayHosted,
       seatedCount: [...this.seats.values()].filter((s) => !s.isAI).length,
       playerCount: this.playerCount,
       centerEffect: this.centerEffect,
@@ -98,6 +114,7 @@ export class GameSession {
     return {
       roomCode: this.roomCode,
       hostPlayerId: this.hostPlayerId,
+      hostIsDisplay: this.displayHosted,
       playerCount: this.playerCount,
       centerEffect: this.centerEffect,
       seats: [...this.seats.values()].map(({ playerId, name, isAI, connected }) => ({ playerId, name, isAI, connected })),
@@ -118,8 +135,13 @@ export class GameSession {
     return { playerId: seat.playerId, token: seat.token! };
   }
 
-  /** Re-attaches a fresh connection (e.g. a page refresh) to an already-claimed seat. */
+  /** Re-attaches a fresh connection (e.g. a page refresh) to an already-claimed seat -- or, for a display-hosted room, back to the host's seatless pseudo-identity. */
   rejoin(token: string): { playerId: string } | { error: string } {
+    if (this.displayHosted && token === this.hostTokenValue) {
+      this.onLobbyChange(this.getLobbyState());
+      if (this.state) this.pushStateTo(DISPLAY_VIEWER_ID);
+      return { playerId: DISPLAY_VIEWER_ID };
+    }
     const seat = [...this.seats.values()].find((s) => s.token === token);
     if (!seat) return { error: "That session isn't valid for this room anymore." };
     seat.connected = true;
@@ -148,15 +170,12 @@ export class GameSession {
    * from), so wireSocketServer.ts calls this to authorize before it does that.
    */
   isHost(token: string): boolean {
-    const caller = this.requireSeatByToken(token);
-    return "error" in caller ? false : caller.playerId === this.hostPlayerId;
+    return token === this.hostTokenValue;
   }
 
   /** Host-only. Fills any seats still open at `playerCount` with AI, then deals and starts the real game. */
   start(callerToken: string): { ok: true } | { error: string } {
-    const caller = this.requireSeatByToken(callerToken);
-    if ("error" in caller) return caller;
-    if (caller.playerId !== this.hostPlayerId) return { error: "Only the host can start the game." };
+    if (!this.isHost(callerToken)) return { error: "Only the host can start the game." };
     if (this.started) return { error: "This game has already started." };
 
     let aiIndex = 0;
@@ -181,9 +200,7 @@ export class GameSession {
    * as room:create.
    */
   rematch(callerToken: string, centerEffect: CenterEffectId): { ok: true } | { error: string } {
-    const caller = this.requireSeatByToken(callerToken);
-    if ("error" in caller) return caller;
-    if (caller.playerId !== this.hostPlayerId) return { error: "Only the host can start a new game." };
+    if (!this.isHost(callerToken)) return { error: "Only the host can start a new game." };
     if (!this.state || this.state.phase !== "ended") return { error: "The current game hasn't ended yet." };
 
     this.centerEffect = centerEffect;
@@ -235,6 +252,12 @@ export class GameSession {
 
   private pushStateToAll(): void {
     for (const seat of this.seats.values()) this.pushStateTo(seat.playerId);
+    // The display host has no seat to loop over above -- stateFor(DISPLAY_VIEWER_ID)
+    // still resolves correctly since redactedStateFor treats any id that matches no
+    // real player (this one by construction) as a full spectator: every hand and
+    // face-down card comes back hidden, exactly the "nobody's" view a shared screen
+    // needs.
+    if (this.displayHosted) this.pushStateTo(DISPLAY_VIEWER_ID);
   }
 
   /**

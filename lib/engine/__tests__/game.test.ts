@@ -250,6 +250,27 @@ describe("applyAction — voting", () => {
     const state = playRound1(() => 0.99); // AI votes no, human still pending
     expect(() => applyAction(state, { type: "castVote", playerId: "bot", vote: true })).toThrow();
   });
+
+  // A Jackbox-style display room can have every seat filled with AI (nobody's
+  // "human" -- the shared screen itself takes no seat, see DISPLAY_VIEWER_ID). The
+  // round-boundary AI-vote loop then fills every player's ballot by itself, with no
+  // human left to ever dispatch a castVote action that would trigger the tally --
+  // this used to leave the game stuck in "voting" forever.
+  it("tallies immediately at a round boundary when every player is AI, instead of waiting on a castVote that will never come", () => {
+    let state = createGame(["bot1", "bot2"], config, deterministicRng(6), ["bot1", "bot2"]);
+    const cell1 = getLegalPlacementCells(state)[0];
+    state = applyAction(state, { type: "place", playerId: "bot1", instanceId: state.players[0].hand[0].instanceId, position: cell1 });
+    const cell2 = getLegalPlacementCells(state)[0];
+    state = applyAction(
+      state,
+      { type: "place", playerId: "bot2", instanceId: state.players[1].hand[0].instanceId, position: cell2 },
+      () => 0.01 // well under the round-1 probability for both AIs -> both vote yes
+    );
+    // Never observably "voting" from the caller's perspective -- fully tallied (both
+    // yes -> ends) within the same place action that crossed the round boundary.
+    expect(state.phase).toBe("ended");
+    expect(state.voteHistory).toEqual([{ round: 1, votes: { bot1: true, bot2: true } }]);
+  });
 });
 
 describe("applyAction — centerEffect threads through to a real end-of-game result", () => {

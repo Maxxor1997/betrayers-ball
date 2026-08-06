@@ -41,14 +41,23 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
   }
 
   io.on("connection", (socket: IOSocket) => {
-    socket.on("room:create", ({ hostName, playerCount, centerEffect }, ack) => {
+    socket.on("room:create", ({ hostName, playerCount, centerEffect, asDisplay }, ack) => {
       try {
         const session = registry.create(
           (roomCode) =>
-            new GameSession(roomCode, hostName?.trim() || "Host", playerCount, centerEffect, serverOrigin, {
-              onLobbyChange: (lobby) => io.to(lobby.roomCode).emit("lobby:update", lobby),
-              onPlayerState: (playerId, state) => io.to(`${roomCode}:${playerId}`).emit("game:state", { state, myPlayerId: playerId }),
-            })
+            new GameSession(
+              roomCode,
+              hostName?.trim() || "Host",
+              playerCount,
+              centerEffect,
+              serverOrigin,
+              {
+                onLobbyChange: (lobby) => io.to(lobby.roomCode).emit("lobby:update", lobby),
+                onPlayerState: (playerId, state) => io.to(`${roomCode}:${playerId}`).emit("game:state", { state, myPlayerId: playerId }),
+              },
+              undefined,
+              asDisplay
+            )
         );
         attach(socket, session.roomCode, session.hostPlayerId);
         // Unlike addPlayer/rejoin, GameSession's constructor never calls

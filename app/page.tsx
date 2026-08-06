@@ -108,7 +108,7 @@ function ActiveSessions() {
                 className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
               >
                 <span className="min-w-0">
-                  <span className="font-medium">{room.hostName}&rsquo;s game</span>{" "}
+                  <span className="font-medium">{room.hostIsDisplay ? "Game on a shared screen" : `${room.hostName}’s game`}</span>{" "}
                   <span className="text-zinc-500 dark:text-zinc-400">
                     — {room.seatedCount}/{room.playerCount} players, {CENTER_EFFECTS[room.centerEffect].label}
                     {room.started && " · in progress"}
@@ -116,7 +116,7 @@ function ActiveSessions() {
                 </span>
                 {canJoin || canReconnect ? (
                   <button
-                    onClick={() => router.push(`/join/${room.roomCode}`)}
+                    onClick={() => router.push(`${room.hostIsDisplay && canReconnect ? "/host" : "/join"}/${room.roomCode}`)}
                     className="shrink-0 rounded-full bg-zinc-900 px-3 py-1 text-xs text-white dark:bg-zinc-100 dark:text-black"
                   >
                     {canReconnect ? "Reconnect" : "Join"}
@@ -141,7 +141,7 @@ export default function HomePage() {
   // destination page only ever mounts with a real, already-chosen setup, never a
   // placeholder the player didn't ask for.
   const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(null);
-  const [mode, setMode] = useState<"solo" | "host">("solo");
+  const [mode, setMode] = useState<"solo" | "host" | "display">("solo");
   const [hostName, setHostName] = useState("");
   const [hostError, setHostError] = useState<string | null>(null);
   const [hosting, setHosting] = useState(false);
@@ -160,6 +160,12 @@ export default function HomePage() {
 
   function openHostSetup() {
     setMode("host");
+    setHostError(null);
+    setNewGameSetup({ playerCount: 4, centerEffect: "random" });
+  }
+
+  function openDisplaySetup() {
+    setMode("display");
     setHostError(null);
     setNewGameSetup({ playerCount: 4, centerEffect: "random" });
   }
@@ -184,10 +190,26 @@ export default function HomePage() {
     router.push(`/join/${result.roomCode}`);
   }
 
+  /** Jackbox-style: this device takes no seat, just displays the board -- every real player joins from their own phone via /join/[code]. See createMultiplayerRoom's asDisplay flag. */
+  async function startDisplayRoom(setup: NewGameSetup) {
+    setHosting(true);
+    setHostError(null);
+    const pool = randomCenterEffectPool(setup.playerCount);
+    const centerEffect = setup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : setup.centerEffect;
+    const result = await createMultiplayerRoom("Host", setup.playerCount, centerEffect, true);
+    setHosting(false);
+    if ("error" in result) {
+      setHostError(result.error);
+      return;
+    }
+    router.push(`/host/${result.roomCode}`);
+  }
+
   function confirmNewGame() {
     if (!newGameSetup) return;
     if (mode === "solo") startSoloGame(newGameSetup);
-    else startHostedRoom(newGameSetup);
+    else if (mode === "host") startHostedRoom(newGameSetup);
+    else startDisplayRoom(newGameSetup);
   }
 
   return (
@@ -222,14 +244,14 @@ export default function HomePage() {
 
       {newGameSetup && (
         <NewGameModal
-          title={mode === "host" ? "Host a multiplayer game" : "Start a new game"}
+          title={mode === "host" ? "Host a multiplayer game" : mode === "display" ? "Cast to this screen" : "Start a new game"}
           setup={newGameSetup}
           onChange={setNewGameSetup}
           onCancel={() => setNewGameSetup(null)}
           onConfirm={confirmNewGame}
-          confirmLabel={hosting ? "Starting…" : mode === "host" ? "Create room" : "Start"}
+          confirmLabel={hosting ? "Starting…" : mode === "host" ? "Create room" : mode === "display" ? "Open display" : "Start"}
           nameField={mode === "host" ? { value: hostName, onChange: setHostName } : undefined}
-          playerCountLabel={mode === "host" ? (n) => `${n}` : undefined}
+          playerCountLabel={mode === "host" ? (n) => `${n}` : mode === "display" ? (n) => `${n} players` : undefined}
         />
       )}
 
@@ -247,6 +269,11 @@ export default function HomePage() {
               title="Multiplayer"
               description="Host a game on this network; others join from their own browser."
               onClick={openHostSetup}
+            />
+            <PlayOption
+              title="Cast to a screen"
+              description="This device shows the board only, no hand of its own -- everyone else joins from their phone."
+              onClick={openDisplaySetup}
             />
             <ActiveSessions />
           </div>

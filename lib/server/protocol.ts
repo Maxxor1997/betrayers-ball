@@ -1,5 +1,17 @@
 import { CardInstance, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
 
+/**
+ * Reserved pseudo-playerId for a "shared screen" host -- see board_game_design.md's
+ * Jackbox-style option: the host device takes no seat at all, just displays a fully
+ * redacted (nobody's) view of the board while every real player joins from their own
+ * phone. Never collides with a real seat id (those are always `p${n}`/`ai-${n}`), so
+ * it can flow through every existing per-player wire path (attach()'s per-viewer
+ * Socket.IO room, game:state's myPlayerId, GameState's redaction) completely
+ * unchanged -- redactedStateFor(state, DISPLAY_VIEWER_ID) naturally hides every real
+ * player's hand and face-down card, exactly like the AI's "Unknown" fairness view.
+ */
+export const DISPLAY_VIEWER_ID = "__display__";
+
 /** One seat at the table -- a real connected player or an AI slot filled in at Start. */
 export interface SeatInfo {
   playerId: string;
@@ -13,6 +25,8 @@ export interface SeatInfo {
 export interface LobbyState {
   roomCode: string;
   hostPlayerId: string;
+  /** True if the host is a shared-screen display with no seat of its own -- see DISPLAY_VIEWER_ID. All `playerCount` seats go to real players/AI in that case, none to the host. */
+  hostIsDisplay: boolean;
   playerCount: number;
   centerEffect: CenterEffectId;
   seats: SeatInfo[];
@@ -58,9 +72,12 @@ export interface CreateRoomPayload {
   hostName: string;
   playerCount: number;
   centerEffect: CenterEffectId;
+  /** Jackbox-style shared screen: the host takes no seat (ignores hostName), and all playerCount seats are open for real players/AI. */
+  asDisplay: boolean;
 }
 export interface CreateRoomResult {
   roomCode: string;
+  /** DISPLAY_VIEWER_ID for a display-hosted room -- see its doc comment. */
   playerId: string;
   token: string;
 }
@@ -120,6 +137,7 @@ export interface GameActionPayload {
 export interface RoomSummary {
   roomCode: string;
   hostName: string;
+  hostIsDisplay: boolean;
   seatedCount: number;
   playerCount: number;
   centerEffect: CenterEffectId;

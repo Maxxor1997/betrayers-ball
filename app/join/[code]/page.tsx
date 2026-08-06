@@ -23,7 +23,7 @@ import { LobbyState, SeatInfo } from "@/lib/server/protocol";
 
 const DRAG_MIME = "application/x-card-instance-id";
 
-function nameFor(lobby: LobbyState | null, playerId: string): string {
+export function nameFor(lobby: LobbyState | null, playerId: string): string {
   return lobby?.seats.find((s) => s.playerId === playerId)?.name ?? playerId;
 }
 
@@ -256,7 +256,7 @@ function Lobby({ roomCode, session }: { roomCode: string; session: ReturnType<ty
   );
 }
 
-function SeatRow({ seat, isHost, isYou }: { seat: SeatInfo; isHost: boolean; isYou: boolean }) {
+export function SeatRow({ seat, isHost, isYou }: { seat: SeatInfo; isHost: boolean; isYou: boolean }) {
   return (
     <li
       className={`flex items-center justify-between gap-2 rounded border px-2 py-1 text-sm ${
@@ -465,12 +465,12 @@ function GameView({
               isHost ? (
                 <button
                   onClick={() => setRematchSetup({ playerCount: lobby.playerCount, centerEffect: "random" })}
-                  className="self-start rounded-full bg-zinc-900 px-4 py-1.5 text-sm text-white dark:bg-zinc-100 dark:text-black"
+                  className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-sm whitespace-nowrap text-white dark:bg-zinc-100 dark:text-black"
                 >
                   Play again (same room)
                 </button>
               ) : (
-                <p className="text-sm text-zinc-500">Waiting for the host to start a new game…</p>
+                <p className="shrink-0 text-sm whitespace-nowrap text-zinc-500">Waiting for the host to start a new game…</p>
               )
             }
           />

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GameSession } from "../session";
-import { fromWireState, LobbyState, WireGameState } from "../protocol";
+import { DISPLAY_VIEWER_ID, fromWireState, LobbyState, WireGameState } from "../protocol";
 import { currentPlayerId, getLegalPlacementCells } from "@/lib/engine/turns";
 
 function deterministicRng(seed: number) {
@@ -12,7 +12,7 @@ function deterministicRng(seed: number) {
 }
 
 /** Records every push a session makes, and captures the host's own token (GameSession exposes it via `.hostToken` -- see its doc comment for why that getter exists). */
-function harness(playerCount: number, seed = 1) {
+function harness(playerCount: number, seed = 1, displayHosted = false) {
   const lobbyPushes: LobbyState[] = [];
   const statePushes: { playerId: string; state: WireGameState }[] = [];
   const session = new GameSession(
@@ -25,7 +25,8 @@ function harness(playerCount: number, seed = 1) {
       onLobbyChange: (lobby) => lobbyPushes.push(lobby),
       onPlayerState: (playerId, state) => statePushes.push({ playerId, state }),
     },
-    deterministicRng(seed)
+    deterministicRng(seed),
+    displayHosted
   );
   return { session, lobbyPushes, statePushes, hostToken: session.hostToken };
 }
@@ -110,6 +111,7 @@ describe("GameSession lobby", () => {
     expect(summary).toEqual({
       roomCode: "TEST",
       hostName: "Host",
+      hostIsDisplay: false,
       seatedCount: 2,
       playerCount: 3,
       centerEffect: "none",
@@ -122,6 +124,70 @@ describe("GameSession lobby", () => {
     session.start(hostToken);
     const result = session.addPlayer("TooLate");
     expect(result).toMatchObject({ error: expect.any(String) });
+  });
+});
+
+describe("GameSession display-hosted (Jackbox-style shared screen)", () => {
+  it("seats no one for the host -- all playerCount seats are open for real players/AI", () => {
+    const { session } = harness(3, 1, true);
+    const lobby = session.getLobbyState();
+    expect(lobby.hostIsDisplay).toBe(true);
+    expect(lobby.hostPlayerId).toBe(DISPLAY_VIEWER_ID);
+    expect(lobby.seats).toHaveLength(0);
+    expect(session.hostPlayerId).toBe(DISPLAY_VIEWER_ID);
+  });
+
+  it("lets all playerCount seats fill with real players, unlike a single-device host which reserves one for itself", () => {
+    const { session } = harness(2, 1, true);
+    expect("error" in session.addPlayer("Alice")).toBe(false);
+    expect("error" in session.addPlayer("Bob")).toBe(false);
+    const result = session.addPlayer("OneTooMany");
+    expect(result).toMatchObject({ error: expect.any(String) });
+  });
+
+  it("start/rematch/isHost/end all authorize off the standalone host token, not a seat", () => {
+    const { session, hostToken } = harness(2, 1, true);
+    expect(session.isHost(hostToken)).toBe(true);
+    expect(session.isHost("not-the-token")).toBe(false);
+    session.addPlayer("Alice");
+    session.addPlayer("Bob");
+    const result = session.start(hostToken);
+    expect("error" in result).toBe(false);
+    expect(session.started).toBe(true);
+  });
+
+  it("rejects start from a real seated player's own token -- only the display's host token can start", () => {
+    const { session } = harness(2, 1, true);
+    const alice = session.addPlayer("Alice") as { playerId: string; token: string };
+    session.addPlayer("Bob");
+    const result = session.start(alice.token);
+    expect(result).toMatchObject({ error: expect.any(String) });
+  });
+
+  it("pushes a fully redacted (nobody's) state to the display on every state change", () => {
+    const { session, hostToken, statePushes } = harness(2, 1, true);
+    session.addPlayer("Alice");
+    session.addPlayer("Bob");
+    session.start(hostToken);
+    const displayPush = [...statePushes].reverse().find((p) => p.playerId === DISPLAY_VIEWER_ID);
+    expect(displayPush).toBeDefined();
+    const state = fromWireState(displayPush!.state);
+    expect(state.players.every((p) => p.hand.length === 0)).toBe(true);
+    expect(state.deck).toHaveLength(0);
+  });
+
+  it("rejoin re-attaches the display's pseudo-identity via its standalone token", () => {
+    const { session, hostToken } = harness(2, 1, true);
+    session.addPlayer("Alice");
+    session.addPlayer("Bob");
+    session.start(hostToken);
+    const result = session.rejoin(hostToken);
+    expect(result).toEqual({ playerId: DISPLAY_VIEWER_ID });
+  });
+
+  it("getSummary/getLobbyState report hostIsDisplay without a real host seat backing hostName", () => {
+    const { session } = harness(4, 1, true);
+    expect(session.getSummary()).toMatchObject({ hostName: "Host", hostIsDisplay: true, seatedCount: 0, playerCount: 4 });
   });
 });
 

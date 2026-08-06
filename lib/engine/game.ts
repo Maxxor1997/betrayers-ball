@@ -102,7 +102,13 @@ function advanceTurn(state: GameState, rng: Rng): GameState {
     for (const player of state.players) {
       if (player.isAI) votes[player.id] = computeAiVote(state, player.id, rng);
     }
-    return { ...state, phase: "voting", votes, currentPlayerIndex: nextIndex, hasFlippedThisTurn: false, turnsThisRound: 0 };
+    const withVotes = { ...state, phase: "voting" as const, votes, currentPlayerIndex: nextIndex, hasFlippedThisTurn: false, turnsThisRound: 0 };
+    // Every player might already be AI (e.g. a Jackbox-style display room where no
+    // human ever took a seat) -- then the loop above just filled every vote, and
+    // there's no castVote action left for anyone to dispatch to trigger the tally.
+    // Tally right here in that case instead of sitting in "voting" with a complete
+    // ballot nobody ever counts.
+    return Object.keys(votes).length === state.players.length ? tallyVotes(withVotes, rng) : withVotes;
   }
 
   const nextRound = completedRound + 1;
@@ -111,19 +117,14 @@ function advanceTurn(state: GameState, rng: Rng): GameState {
 }
 
 /**
- * Simultaneous private commit, tally when everyone's voted. Tie -> continue (ending
- * is the disruptive action, needs a real majority) -- at 2p this means consensus.
+ * Tallies a `state.votes` that's already complete (every player has a ballot in it) --
+ * called both once a human's castVote action fills the last slot, and directly from
+ * advanceTurn when a round with no human players at all fills every vote by itself
+ * (see its call site's comment). Tie -> continue (ending is the disruptive action,
+ * needs a real majority) -- at 2p this means consensus.
  */
-function applyCastVote(state: GameState, action: CastVoteAction, rng: Rng): GameState {
-  if (state.phase !== "voting") throw new Error("No vote is currently in progress");
-  if (!state.players.some((p) => p.id === action.playerId)) throw new Error(`Unknown player ${action.playerId}`);
-  if (action.playerId in state.votes) throw new Error(`${action.playerId} has already voted`);
-
-  const votes = { ...state.votes, [action.playerId]: action.vote };
-  if (Object.keys(votes).length < state.players.length) {
-    return { ...state, votes };
-  }
-
+function tallyVotes(state: GameState, rng: Rng): GameState {
+  const votes = state.votes;
   const yesCount = Object.values(votes).filter(Boolean).length;
   const passes = yesCount > state.players.length / 2;
   // Every completed round's tally gets logged here, whether it ended the game or not
@@ -144,6 +145,23 @@ function applyCastVote(state: GameState, action: CastVoteAction, rng: Rng): Game
   const nextRound = state.round + 1;
   const roundStart = applyRoundStart(state, nextRound, rng);
   return { ...state, ...roundStart, phase: "playing", votes: {}, voteHistory, round: nextRound, hasFlippedThisTurn: false };
+}
+
+/**
+ * Simultaneous private commit, tally when everyone's voted. Tie -> continue (ending
+ * is the disruptive action, needs a real majority) -- at 2p this means consensus.
+ */
+function applyCastVote(state: GameState, action: CastVoteAction, rng: Rng): GameState {
+  if (state.phase !== "voting") throw new Error("No vote is currently in progress");
+  if (!state.players.some((p) => p.id === action.playerId)) throw new Error(`Unknown player ${action.playerId}`);
+  if (action.playerId in state.votes) throw new Error(`${action.playerId} has already voted`);
+
+  const votes = { ...state.votes, [action.playerId]: action.vote };
+  if (Object.keys(votes).length < state.players.length) {
+    return { ...state, votes };
+  }
+
+  return tallyVotes({ ...state, votes }, rng);
 }
 
 /** Pure reducer: applyAction(state, action) -> state. Throws on illegal actions. */
