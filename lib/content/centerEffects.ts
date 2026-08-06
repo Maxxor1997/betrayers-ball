@@ -73,7 +73,7 @@ export interface CenterEffectDef {
  * modifiers: Bannerman (+1 -- center is never a Footman), Earthshaker (-1 if center
  * shares its row), Skysplitter (-3 if directly above/below).
  */
-function computeCenterModifier(board: Board, bounds: BoardBounds, negated: Set<string>): number {
+export function computeCenterModifier(board: Board, bounds: BoardBounds, negated: Set<string>): number {
   let delta = 0;
   const center = bounds.center;
   for (const [key, c] of board.entries()) {
@@ -108,6 +108,17 @@ const RECKONING_TRIGGER_ROUND = 4;
  * expected totals from this instead of duplicating the literal.
  */
 export const PSEUDO_CARD_BASE_VALUE = 3;
+
+/**
+ * Live (pre-resolution) value of the center pseudo-card for Champion of the Weak /
+ * Kingslayer, for UI display -- same base + computeCenterModifier math postResolution
+ * uses, just run against the board as it currently sits instead of at scoring time.
+ * Null for every other center effect, which has no pseudo-card to show a value for.
+ */
+export function pseudoCardLiveValue(id: CenterEffectId, board: Board, bounds: BoardBounds, negated: Set<string>): number | null {
+  if (id !== "championOfTheWeak" && id !== "kingslayer") return null;
+  return PSEUDO_CARD_BASE_VALUE + computeCenterModifier(board, bounds, negated);
+}
 
 export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
   none: {

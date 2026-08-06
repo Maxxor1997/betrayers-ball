@@ -45,7 +45,7 @@ export interface ResolutionResult {
  * cancelled (base value only). Cards with the hook are immune to negation themselves
  * (so e.g. two adjacent negating cards never negate each other). See lib/content/cards.ts.
  */
-function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Set<string> {
+export function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Set<string> {
   const negated = new Set<string>();
   for (const [key, c] of board.entries()) {
     const negatesNeighborsIf = CARD_DEFS[c.cardId].negatesNeighborsIf;

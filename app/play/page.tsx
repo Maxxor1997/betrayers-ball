@@ -8,11 +8,12 @@ import {
   CENTER_EFFECTS,
   centerEffectDescription,
   isAvailableAtPlayerCount,
+  pseudoCardLiveValue,
   randomCenterEffectPool,
   selectableCenterEffects,
 } from "@/lib/content/centerEffects";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
-import { FLOORED_AT_ZERO_LABEL, ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
+import { computeNegatedInstanceIds, FLOORED_AT_ZERO_LABEL, ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
 import { CardBucket, CardId, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
@@ -627,6 +628,9 @@ function BoardGrid({
             const effect = CENTER_EFFECTS[state.config.centerEffect];
             const label = effect.ownerlessLabel ?? effect.label;
             const detail = centerEffectDescription(state.config.centerEffect, state.config);
+            const negated = computeNegatedInstanceIds(state.board, state.config.boardBounds);
+            const liveValue = pseudoCardLiveValue(state.config.centerEffect, state.board, state.config.boardBounds, negated);
+            const displayLabel = liveValue === null ? label : `${label} (${liveValue})`;
             return (
               <div
                 key={key}
@@ -635,11 +639,11 @@ function BoardGrid({
                 onMouseLeave={() => setHoveredKey((prev) => (prev === key ? null : prev))}
               >
                 <div className="flex aspect-square w-full items-center justify-center rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400">
-                  {label}
+                  {displayLabel}
                 </div>
                 {hoveredKey === key && (
                   <div className="pointer-events-none absolute -top-9 left-1/2 z-10 w-max max-w-[14rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
-                    {label} — {detail}
+                    {displayLabel} — {detail}
                   </div>
                 )}
               </div>

@@ -42,6 +42,3 @@ Exact base values, effect text, and bucket assignments live in `lib/content/card
 - Card that rewards neiboring multiple players (only for larger groups)
 
 # Feature backlog
-- The description text for plague bearer reads weird can you re-write it into something more intuitive
-- change footman to get +1 if it's in a row or column with 3+ cards owned by you, doesn't need to all be footman
-- if you hover a card in your hand it should highlight all other cards on the grid with the same name (helps a lot for warlord etc)

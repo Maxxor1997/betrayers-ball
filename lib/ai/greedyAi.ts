@@ -1,6 +1,7 @@
+import { getAdjacentCards, parsePosKey } from "../engine/board";
 import { computeAiVote, estimateMargin } from "../engine/endgame";
 import { applyPlace, currentPlayerId, getLegalFlipTargets, getLegalPlacementCells } from "../engine/turns";
-import { GameAction, GameState, Position } from "../engine/types";
+import { CardInstance, GameAction, GameState, Position } from "../engine/types";
 
 export type Rng = () => number;
 
@@ -37,12 +38,45 @@ function hypotheticalFlipMargin(state: GameState, playerId: string, target: { in
 }
 
 /**
+ * How many of the AI's own cards sit adjacent to `target` -- used to rank blind
+ * opponent flip targets. The AI can't know an opponent's hidden identity before
+ * flipping, but a card touching its own board presence is still worth more to reveal
+ * than one off in a corner: several of the AI's cards (Berserker, Mercenary, Commander,
+ * Bannerman...) score off a neighbor's or the board's true identity, and those
+ * evaluations stay blind to a hidden neighbor until it's flipped. Revealing near its
+ * own cards first resolves that uncertainty where it actually affects its next move.
+ */
+function opponentTargetPriority(board: GameState["board"], bounds: GameState["config"]["boardBounds"], playerId: string, target: CardInstance): number {
+  const entry = [...board.entries()].find(([, c]) => c.instanceId === target.instanceId)!;
+  const pos = parsePosKey(entry[0]);
+  return getAdjacentCards(board, bounds, pos).filter((n) => n.ownerId === playerId).length;
+}
+
+/**
+ * Cards whose own printed effect doesn't care about their own face state at all --
+ * Berserker's and Warlord's `valueModifier`s count matching cardIds straight off
+ * `board.values()` with no `faceUp` check, so flipping either face-up changes nothing
+ * about the owner's own margin (hypotheticalFlipMargin always comes back equal to
+ * baseline for these, so the margin-ranked branch above never picks them). The only
+ * reason a human flips one is the social move this models: showing it off to bait
+ * opponents into playing/revealing a matching card of their own, which *does* help --
+ * once it's visible, Berserker/Warlord's real bonus/penalty starts applying. Pure
+ * bluffing, so it isn't margin-driven; it's a flat chance instead, same shape as
+ * SPECULATIVE_CARD_IDS below.
+ */
+const BLUFF_FLIP_CARD_IDS = new Set(["Berserker", "Warlord"]);
+
+/** Chance, each time the AI has an eligible face-down bluff card of its own, that it reveals one instead of doing the usual margin/exploration flip. */
+const BLUFF_FLIP_PROBABILITY = 0.25;
+
+/**
  * Flips the target that improves the (fair) margin the most -- but only among the
  * player's own face-down cards, which they already know the identity of, so ranking
  * them by true post-flip value is fair. An opponent's face-down cards can't be ranked
  * this way without peeking (their true post-flip value literally requires knowing
  * their hidden identity first) -- so a flip target there, if any, is chosen instead of
- * a value-driven one, blind, at a flat exploration rate.
+ * a value-driven one, blind, weighted toward targets adjacent to the AI's own cards, at
+ * a flat exploration rate.
  */
 function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null {
   const targets = getLegalFlipTargets(state);
@@ -69,12 +103,35 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
     return bestOwnTargets[Math.floor(rng() * bestOwnTargets.length)];
   }
 
+  const bluffTargets = ownTargets.filter((t) => BLUFF_FLIP_CARD_IDS.has(t.cardId));
+  if (bluffTargets.length > 0 && rng() < BLUFF_FLIP_PROBABILITY) {
+    return bluffTargets[Math.floor(rng() * bluffTargets.length)].instanceId;
+  }
+
   if (opponentTargets.length > 0 && rng() < OPPONENT_FLIP_EXPLORATION_PROBABILITY) {
-    return opponentTargets[Math.floor(rng() * opponentTargets.length)].instanceId;
+    const best = pickBest(
+      opponentTargets,
+      (target) => opponentTargetPriority(state.board, state.config.boardBounds, playerId, target),
+      rng
+    );
+    return best.instanceId;
   }
 
   return null;
 }
+
+/**
+ * Cards worth playing speculatively, ahead of what pure margin math justifies --
+ * effects whose payoff depends on other players following suit, so nobody's ever the
+ * first to play one on merit alone (a real human will gamble on it anyway, hoping to
+ * bait others; the 1-ply greedy AI can't see that far ahead, so it needs a nudge).
+ * Currently just Berserker (+2 per opposing Berserker) -- extend this set if other
+ * cards get the same "worthless until someone else follows" shape.
+ */
+const SPECULATIVE_CARD_IDS = new Set(["Berserker"]);
+
+/** Chance, each time the AI has a speculative card in hand, that it plays that card instead of the margin-best one. */
+const SPECULATIVE_PLAY_PROBABILITY = 0.25;
 
 /** Places whichever (card, cell) combination yields the best resulting margin. */
 function choosePlacement(state: GameState, playerId: string, rng: Rng): GameAction {
@@ -84,8 +141,14 @@ function choosePlacement(state: GameState, playerId: string, rng: Rng): GameActi
     return { type: "pass", playerId };
   }
 
+  let handForCandidates = player.hand;
+  const speculativeCards = player.hand.filter((c) => SPECULATIVE_CARD_IDS.has(c.cardId));
+  if (speculativeCards.length > 0 && rng() < SPECULATIVE_PLAY_PROBABILITY) {
+    handForCandidates = speculativeCards;
+  }
+
   const candidates: { instanceId: string; position: Position }[] = [];
-  for (const card of player.hand) {
+  for (const card of handForCandidates) {
     for (const position of legalCells) {
       candidates.push({ instanceId: card.instanceId, position });
     }
