@@ -1,7 +1,7 @@
 import { getLegalPlacementPositions } from "./board";
-import { getVisibleBoard } from "./playerView";
+import { redactedBoardFor } from "./playerView";
 import { resolveBoard } from "./resolution";
-import { Board, BoardBounds, CardInstance, CenterEffectId, GameResult, GameState } from "./types";
+import { Board, BoardBounds, CenterEffectId, GameResult, GameState } from "./types";
 
 export function isBoardFull(board: Board, bounds: BoardBounds): boolean {
   return getLegalPlacementPositions(board, bounds).length === 0;
@@ -48,35 +48,6 @@ export function computeGameResult(
 }
 
 /**
- * A card whose identity a viewer can't see (an opponent's face-down card) is treated
- * as this when estimating standing -- a flat, effect-free stand-in worth roughly the
- * deck-wide average base value (CARD_DEFS.Unknown.base), a documented approximation
- * rather than a probability model. Deliberately has no valueModifier of its own (unlike
- * substituting a real card, e.g. Footman, which would incorrectly apply that card's
- * printed effect to something that isn't actually it) -- it can still be pushed around
- * by *other* cards' neighbor effects (Bannerman, Skysplitter, ...), same as any real
- * card would be. This deliberately undercounts how dangerous a truly-hidden Warlord/
- * Exile might be; the alternative (Bayesian reasoning over remaining deck composition)
- * is real work this 1-ply heuristic doesn't attempt.
- */
-const UNKNOWN_CARD_PLACEHOLDER = "Unknown" as const;
-
-function toEvaluationBoard(board: Board, viewerId: string): Board {
-  const visible = getVisibleBoard(board, viewerId);
-  const evaluationBoard: Board = new Map();
-  for (const [key, vc] of visible.entries()) {
-    const card: CardInstance = {
-      instanceId: vc.instanceId,
-      ownerId: vc.ownerId,
-      faceUp: vc.faceUp,
-      cardId: vc.cardId ?? UNKNOWN_CARD_PLACEHOLDER,
-    };
-    evaluationBoard.set(key, card);
-  }
-  return evaluationBoard;
-}
-
-/**
  * A player's own honest estimate of standing: "my total minus the best opponent's
  * total", using only what they could actually know -- their own cards plus anything
  * face-up. An opponent's still-hidden card never contributes its true effect here, so
@@ -85,7 +56,7 @@ function toEvaluationBoard(board: Board, viewerId: string): Board {
  */
 export function estimateMargin(state: GameState, viewerId: string): number {
   const playerIds = state.players.map((p) => p.id);
-  const evaluationBoard = toEvaluationBoard(state.board, viewerId);
+  const evaluationBoard = redactedBoardFor(state.board, viewerId);
   const { totalsByOwner } = resolveBoard(
     evaluationBoard,
     state.config.boardBounds,

@@ -1,0 +1,29 @@
+import { io, Socket } from "socket.io-client";
+import { ClientToServerEvents, RoomSummary, ServerToClientEvents } from "@/lib/server/protocol";
+
+/**
+ * One-shot "what rooms can I join right now" fetch for the home screen -- same
+ * throwaway-connection pattern as createMultiplayerRoom (open a socket just for this
+ * request, then disconnect; the actual join flow opens its own long-lived connection
+ * once a room is picked).
+ */
+export function listMultiplayerRooms(): Promise<{ rooms: RoomSummary[] } | { error: string }> {
+  return new Promise((resolve) => {
+    const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io();
+    let settled = false;
+    const finish = (result: { rooms: RoomSummary[] } | { error: string }) => {
+      if (settled) return;
+      settled = true;
+      socket.disconnect();
+      resolve(result);
+    };
+
+    socket.on("connect", () => {
+      socket.emit("rooms:list", (ack) => {
+        if (ack.ok) finish({ rooms: ack.rooms });
+        else finish({ error: ack.error });
+      });
+    });
+    socket.on("connect_error", (err) => finish({ error: err.message || "Couldn't reach the game server." }));
+  });
+}

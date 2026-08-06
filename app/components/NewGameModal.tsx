@@ -11,61 +11,99 @@ export interface NewGameSetup {
 }
 
 /**
- * Shared "start a game" popup -- used both on the home screen (before any game
- * exists, navigating to /play once confirmed) and on /play itself (the "New game"
- * button, replacing the game in progress). Full backdrop, not the lightweight
- * floating style used for in-game vote/flip prompts -- this is a blocking choice, not
- * a passive one, and on first load it needs to fully hide whatever's behind it.
+ * Shared "start a game" popup -- used on the home screen for both single player
+ * (before any game exists, navigating to /play once confirmed) and hosting a
+ * multiplayer room, plus on /play itself (the "New game" button, replacing the game
+ * in progress) and a multiplayer room's rematch config. Full backdrop, not the
+ * lightweight floating style used for in-game vote/flip prompts -- this is a blocking
+ * choice, not a passive one, and on first load it needs to fully hide whatever's
+ * behind it.
+ *
+ * Every label+control row shares one `grid-cols-[auto_1fr]` grid (not per-row flex) so
+ * every control starts at the same x position regardless of how long its label text
+ * is -- "Your name" / "Players" / "Center effect" are different widths, so per-row
+ * flex left each row's control starting at a different point.
  */
 export function NewGameModal({
+  title = "Start a new game",
   setup,
   onChange,
   onCancel,
   onConfirm,
   confirmLabel = "Start",
+  /** Multiplayer hosting only -- solo play and /play's mid-game "New game" have no separate "who are you" identity to collect. */
+  nameField,
+  /** Solo play's remaining seats are always AI; a hosted multiplayer room's remaining seats might be other joining players, only backfilled with AI at Start -- so the wording next to the player-count picker differs. */
+  playerCountLabel = (n) => `${n} (you + ${n - 1} AI)`,
+  /** False for a multiplayer rematch -- player count is fixed to the room's existing seats there, only the location is reconfigurable. */
+  showPlayerCount = true,
 }: {
+  title?: string;
   setup: NewGameSetup;
   onChange: (setup: NewGameSetup) => void;
   onCancel: () => void;
   onConfirm: () => void;
   confirmLabel?: string;
+  nameField?: { value: string; onChange: (name: string) => void };
+  playerCountLabel?: (n: number) => string;
+  showPlayerCount?: boolean;
 }) {
+  const controlClass = "w-full min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
       <div
-        className="w-[min(90vw,20rem)] rounded-lg border border-zinc-300 bg-white p-3 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+        className="w-[min(90vw,18rem)] rounded-lg border border-zinc-300 bg-white p-3 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
         onClick={(e) => e.stopPropagation()}
       >
-        <p className="mb-2 font-medium">Start a new game</p>
-        <label className="mb-2 flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
-          Players
+        <p className="mb-3 font-medium">{title}</p>
+        <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-sm text-zinc-600 dark:text-zinc-400">
+          {nameField && (
+            <>
+              <label htmlFor="ngm-name">Your name</label>
+              <input
+                id="ngm-name"
+                type="text"
+                value={nameField.value}
+                onChange={(e) => nameField.onChange(e.target.value)}
+                placeholder="Host"
+                maxLength={24}
+                className={controlClass}
+              />
+            </>
+          )}
+          {showPlayerCount && (
+            <>
+              <label htmlFor="ngm-players">Players</label>
+              <select
+                id="ngm-players"
+                value={setup.playerCount}
+                onChange={(e) => {
+                  const playerCount = Number(e.target.value);
+                  // Reset to "random" if the effect currently picked isn't available at
+                  // the new player count -- e.g. an effect that's only for larger boards.
+                  const centerEffect =
+                    setup.centerEffect === "random" || setup.centerEffect === "none" || isAvailableAtPlayerCount(setup.centerEffect, playerCount)
+                      ? setup.centerEffect
+                      : "random";
+                  onChange({ ...setup, playerCount, centerEffect });
+                }}
+                className={controlClass}
+              >
+                {Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i).map((n) => (
+                  <option key={n} value={n}>
+                    {playerCountLabel(n)}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+          <label htmlFor="ngm-center">Location</label>
           <select
-            value={setup.playerCount}
-            onChange={(e) => {
-              const playerCount = Number(e.target.value);
-              // Reset to "random" if the effect currently picked isn't available at
-              // the new player count -- e.g. an effect that's only for larger boards.
-              const centerEffect =
-                setup.centerEffect === "random" || setup.centerEffect === "none" || isAvailableAtPlayerCount(setup.centerEffect, playerCount)
-                  ? setup.centerEffect
-                  : "random";
-              onChange({ ...setup, playerCount, centerEffect });
-            }}
-            className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700"
-          >
-            {Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i).map((n) => (
-              <option key={n} value={n}>
-                {n} (you + {n - 1} AI)
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="mb-3 flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
-          Center effect
-          <select
+            id="ngm-center"
             value={setup.centerEffect}
             onChange={(e) => onChange({ ...setup, centerEffect: e.target.value as CenterEffectId | "random" })}
-            className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700"
+            className={controlClass}
           >
             <option value="random">Random</option>
             <option value="none">None</option>
@@ -75,8 +113,8 @@ export function NewGameModal({
               </option>
             ))}
           </select>
-        </label>
-        <div className="flex justify-end gap-2">
+        </div>
+        <div className="mt-3 flex justify-end gap-2">
           <button
             onClick={onCancel}
             className="rounded-full border border-zinc-300 px-3 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
