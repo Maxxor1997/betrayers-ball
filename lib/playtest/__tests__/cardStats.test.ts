@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest";
 import { CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { resolveBoard } from "@/lib/engine/resolution";
 import { Board, BoardBounds, CardId, CardInstance, posKey } from "@/lib/engine/types";
-import { computeRanks, createEmptyStats, ownValueFor, simulateOneGame, simulateOneGameSteps, statsSummary, tallyGame } from "../cardStats";
+import {
+  computeRanks,
+  createEmptyStats,
+  overallAvgRoundLength,
+  ownValueFor,
+  simulateOneGame,
+  simulateOneGameSteps,
+  statsSummary,
+  tallyGame,
+} from "../cardStats";
 
 const BOUNDS: BoardBounds = { width: 9, height: 9, center: { x: 4, y: 4 } };
 
@@ -88,50 +97,116 @@ describe("tallyGame", () => {
     const f0 = place(board, 0, 0, "Footman", "p1", true);
     const w0 = place(board, 1, 0, "Warlord", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    tallyGame(stats, cards, { p1: 100, p2: 50 }, 2);
+    tallyGame(stats, cards, { p1: 100, p2: 50 }, 2, 3);
 
-    expect(stats.Footman.played).toBe(1);
-    expect(stats.Footman.finalScoreSum).toBe(cards.find((c) => c.instanceId === f0.instanceId)!.finalValue);
-    expect(stats.Footman.placementSum).toBe(1); // p1 has the higher score -> 1st
+    expect(stats.cards.Footman.played).toBe(1);
+    expect(stats.cards.Footman.finalScoreSum).toBe(cards.find((c) => c.instanceId === f0.instanceId)!.finalValue);
+    expect(stats.cards.Footman.placementSum).toBe(1); // p1 has the higher score -> 1st
 
-    expect(stats.Warlord.played).toBe(1);
-    expect(stats.Warlord.finalScoreSum).toBe(cards.find((c) => c.instanceId === w0.instanceId)!.finalValue);
-    expect(stats.Warlord.placementSum).toBe(2); // p2 -> 2nd
+    expect(stats.cards.Warlord.played).toBe(1);
+    expect(stats.cards.Warlord.finalScoreSum).toBe(cards.find((c) => c.instanceId === w0.instanceId)!.finalValue);
+    expect(stats.cards.Warlord.placementSum).toBe(2); // p2 -> 2nd
 
     // Untouched cards stay at zero.
-    expect(stats.Giant.played).toBe(0);
+    expect(stats.cards.Giant.played).toBe(0);
   });
 
   it("accumulates across multiple games", () => {
     const stats = createEmptyStats();
     const board1: Board = new Map();
     place(board1, 0, 0, "Footman", "p1");
-    tallyGame(stats, resolveBoard(board1, BOUNDS, 3).cards, { p1: 10 }, 2);
+    tallyGame(stats, resolveBoard(board1, BOUNDS, 3).cards, { p1: 10 }, 2, 3);
 
     const board2: Board = new Map();
     place(board2, 0, 0, "Footman", "p1");
-    tallyGame(stats, resolveBoard(board2, BOUNDS, 3).cards, { p1: 10 }, 2);
+    tallyGame(stats, resolveBoard(board2, BOUNDS, 3).cards, { p1: 10 }, 2, 3);
 
-    expect(stats.Footman.played).toBe(2);
+    expect(stats.cards.Footman.played).toBe(2);
   });
 
   it("tallies copiesInDeck for every card at the game's player count, even ones never drawn/placed", () => {
     const stats = createEmptyStats();
     const board: Board = new Map();
     place(board, 0, 0, "Footman", "p1");
-    tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10 }, 4);
+    tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10 }, 4, 3);
 
-    expect(stats.Footman.copiesInDeck).toBe(copiesForPlayerCount(CARD_DEFS.Footman, 4));
+    expect(stats.cards.Footman.copiesInDeck).toBe(copiesForPlayerCount(CARD_DEFS.Footman, 4));
     // Giant was never placed this game, but still had copies in that game's deck.
-    expect(stats.Giant.copiesInDeck).toBe(copiesForPlayerCount(CARD_DEFS.Giant, 4));
+    expect(stats.cards.Giant.copiesInDeck).toBe(copiesForPlayerCount(CARD_DEFS.Giant, 4));
   });
 
   it("accumulates copiesInDeck across games with different player counts", () => {
     const stats = createEmptyStats();
-    tallyGame(stats, [], { p1: 0 }, 2);
-    tallyGame(stats, [], { p1: 0 }, 5);
+    tallyGame(stats, [], { p1: 0 }, 2, 3);
+    tallyGame(stats, [], { p1: 0 }, 5, 3);
 
-    expect(stats.Footman.copiesInDeck).toBe(copiesForPlayerCount(CARD_DEFS.Footman, 2) + copiesForPlayerCount(CARD_DEFS.Footman, 5));
+    expect(stats.cards.Footman.copiesInDeck).toBe(copiesForPlayerCount(CARD_DEFS.Footman, 2) + copiesForPlayerCount(CARD_DEFS.Footman, 5));
+  });
+
+  it("tallies roundLengthSum per card (once per placement) and overall gamesTallied/roundLengthSum (once per game)", () => {
+    const stats = createEmptyStats();
+    const board1: Board = new Map();
+    place(board1, 0, 0, "Footman", "p1");
+    place(board1, 1, 0, "Warlord", "p2");
+    tallyGame(stats, resolveBoard(board1, BOUNDS, 3).cards, { p1: 10, p2: 5 }, 2, 4);
+
+    const board2: Board = new Map();
+    place(board2, 0, 0, "Footman", "p1");
+    tallyGame(stats, resolveBoard(board2, BOUNDS, 3).cards, { p1: 10 }, 2, 6);
+
+    // Footman appeared in both games (rounds 4 and 6); Warlord only in the first (round 4).
+    expect(stats.cards.Footman.roundLengthSum).toBe(4 + 6);
+    expect(stats.cards.Warlord.roundLengthSum).toBe(4);
+
+    // Overall is per-game, not per-placement -- two games tallied, not three.
+    expect(stats.overall.gamesTallied).toBe(2);
+    expect(stats.overall.roundLengthSum).toBe(4 + 6);
+  });
+
+  it("also folds into the matching per-player-count slice, alongside the all-games total", () => {
+    const stats = createEmptyStats();
+    const board2p: Board = new Map();
+    place(board2p, 0, 0, "Footman", "p1");
+    tallyGame(stats, resolveBoard(board2p, BOUNDS, 3).cards, { p1: 10 }, 2, 3);
+
+    const board4p: Board = new Map();
+    place(board4p, 0, 0, "Footman", "p1");
+    place(board4p, 1, 0, "Footman", "p2");
+    tallyGame(stats, resolveBoard(board4p, BOUNDS, 3).cards, { p1: 10, p2: 20 }, 4, 5);
+
+    // All-games total blends both.
+    expect(stats.cards.Footman.played).toBe(3);
+    // Each player count's slice only has its own games.
+    expect(stats.byPlayerCount[2].cards.Footman.played).toBe(1);
+    expect(stats.byPlayerCount[2].overall.gamesTallied).toBe(1);
+    expect(stats.byPlayerCount[4].cards.Footman.played).toBe(2);
+    expect(stats.byPlayerCount[4].overall.gamesTallied).toBe(1);
+    // A player count never tallied has no entry at all (not a zeroed one).
+    expect(stats.byPlayerCount[6]).toBeUndefined();
+  });
+});
+
+describe("statsSummary / overallAvgRoundLength on a per-player-count slice", () => {
+  it("reads a byPlayerCount entry the same way as the all-games total, since both are StatsBuckets", () => {
+    const stats = createEmptyStats();
+    const board2p: Board = new Map();
+    place(board2p, 0, 0, "Footman", "p1");
+    tallyGame(stats, resolveBoard(board2p, BOUNDS, 3).cards, { p1: 10 }, 2, 3);
+
+    const board4p: Board = new Map();
+    place(board4p, 0, 0, "Footman", "p1");
+    tallyGame(stats, resolveBoard(board4p, BOUNDS, 3).cards, { p1: 10 }, 4, 7);
+
+    const rows2p = statsSummary(stats.byPlayerCount[2]);
+    expect(rows2p.find((r) => r.cardId === "Footman")!.avgRoundLength).toBe(3);
+    expect(overallAvgRoundLength(stats.byPlayerCount[2])).toBe(3);
+
+    const rows4p = statsSummary(stats.byPlayerCount[4]);
+    expect(rows4p.find((r) => r.cardId === "Footman")!.avgRoundLength).toBe(7);
+    expect(overallAvgRoundLength(stats.byPlayerCount[4])).toBe(7);
+
+    // The blended total still averages across both.
+    expect(overallAvgRoundLength(stats)).toBe(5);
   });
 });
 
@@ -144,6 +219,7 @@ describe("statsSummary", () => {
     expect(footman.avgOwnScore).toBeNull();
     expect(footman.avgFinalScore).toBeNull();
     expect(footman.avgPlacement).toBeNull();
+    expect(footman.avgRoundLength).toBeNull();
   });
 
   it("averages sums over played count once a card has appeared", () => {
@@ -151,18 +227,19 @@ describe("statsSummary", () => {
     const board: Board = new Map();
     place(board, 0, 0, "Footman", "p1");
     place(board, 1, 0, "Footman", "p2");
-    tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10, p2: 20 }, 2);
+    tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10, p2: 20 }, 2, 3);
 
     const row = statsSummary(stats).find((r) => r.cardId === "Footman")!;
     expect(row.played).toBe(2);
     expect(row.avgPlacement).toBe(1.5); // one 1st (p2), one 2nd (p1)
+    expect(row.avgRoundLength).toBe(3);
   });
 
   it("computes playRate as played divided by copies-in-deck, scaling for cards with different print counts", () => {
     const stats = createEmptyStats();
     const board: Board = new Map();
     place(board, 0, 0, "Footman", "p1");
-    tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10 }, 4);
+    tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10 }, 4, 3);
 
     const row = statsSummary(stats).find((r) => r.cardId === "Footman")!;
     expect(row.copiesInDeck).toBe(copiesForPlayerCount(CARD_DEFS.Footman, 4));
@@ -172,6 +249,19 @@ describe("statsSummary", () => {
   it("never includes the Unknown pseudo-card", () => {
     const rows = statsSummary(createEmptyStats());
     expect(rows.some((r) => r.cardId === "Unknown")).toBe(false);
+  });
+});
+
+describe("overallAvgRoundLength", () => {
+  it("is null before anything's been tallied", () => {
+    expect(overallAvgRoundLength(createEmptyStats())).toBeNull();
+  });
+
+  it("averages the ending round across every tallied game, regardless of card count", () => {
+    const stats = createEmptyStats();
+    tallyGame(stats, [], { p1: 0 }, 2, 2);
+    tallyGame(stats, [], { p1: 0 }, 2, 8);
+    expect(overallAvgRoundLength(stats)).toBe(5);
   });
 });
 

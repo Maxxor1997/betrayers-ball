@@ -24,16 +24,46 @@ export interface CardStats {
   finalScoreSum: number;
   /** Sum of the owning player's standard-competition placement (1st/2nd/...) in each game this card appeared in. */
   placementSum: number;
+  /** Sum of the ending round number (see OverallStats.roundLengthSum's doc comment) of every game this card appeared in -- once per placement, same weighting as every other per-card sum here. */
+  roundLengthSum: number;
 }
 
-export function createEmptyStats(): Record<CardId, CardStats> {
-  const stats = {} as Record<CardId, CardStats>;
+/** Running totals that aren't about any one card -- currently just the game-length baseline every card's own avgRoundLength gets compared against. */
+export interface OverallStats {
+  gamesTallied: number;
+  /** Sum of the round each tallied game ended on -- once per game, regardless of how many cards it had. */
+  roundLengthSum: number;
+}
+
+/** One "slice" of tallied stats -- everything, or scoped to just one player count (see PlaytestStats.byPlayerCount). Both are folded by the same tallyGame/read by the same statsSummary/overallAvgRoundLength, since a per-player-count slice is shaped identically to the all-games total. */
+export interface StatsBucket {
+  cards: Record<CardId, CardStats>;
+  overall: OverallStats;
+}
+
+export interface PlaytestStats extends StatsBucket {
+  /**
+   * The same tally, split out per player count -- lets a UI compare how a card does at
+   * 2p vs 8p (e.g. a heatmap) instead of only ever seeing every game blended together.
+   * Keyed by playerCount; a count with no games tallied yet simply has no entry (not a
+   * zeroed one), so a UI can tell "never run at this count" apart from "run, but every
+   * card scored exactly 0" by checking for the key's presence.
+   */
+  byPlayerCount: Record<number, StatsBucket>;
+}
+
+export function createEmptyBucket(): StatsBucket {
+  const cards = {} as Record<CardId, CardStats>;
   for (const id of ALL_CARD_IDS) {
     // "Unknown" is the AI-fairness/redaction placeholder, never a real playable card -- see CardId's own doc comment.
     if (id === "Unknown") continue;
-    stats[id] = { played: 0, copiesInDeck: 0, ownScoreSum: 0, finalScoreSum: 0, placementSum: 0 };
+    cards[id] = { played: 0, copiesInDeck: 0, ownScoreSum: 0, finalScoreSum: 0, placementSum: 0, roundLengthSum: 0 };
   }
-  return stats;
+  return { cards, overall: { gamesTallied: 0, roundLengthSum: 0 } };
+}
+
+export function createEmptyStats(): PlaytestStats {
+  return { ...createEmptyBucket(), byPlayerCount: {} };
 }
 
 /**
@@ -69,27 +99,53 @@ export function ownValueFor(card: ResolvedCard): number {
   return CARD_DEFS[card.cardId].floorAtZero ? Math.max(0, ownRawTotal) : ownRawTotal;
 }
 
-/**
- * Folds one completed game's resolved board into the running stats table, in place.
- * `playerCount` (the game's, not necessarily the UI's *current* config -- stats
- * accumulate across runs that may have used different settings) determines how many
- * copies of every card existed in that game's deck, for the copiesInDeck tally every
- * card gets regardless of whether it was actually drawn/placed this game.
- */
-export function tallyGame(stats: Record<CardId, CardStats>, resolvedCards: ResolvedCard[], scores: Record<string, number>, playerCount: number): void {
+function tallyIntoBucket(
+  bucket: StatsBucket,
+  resolvedCards: ResolvedCard[],
+  scores: Record<string, number>,
+  playerCount: number,
+  roundsPlayed: number
+): void {
   for (const cardId of ALL_CARD_IDS) {
     if (cardId === "Unknown") continue;
-    stats[cardId].copiesInDeck += copiesForPlayerCount(CARD_DEFS[cardId], playerCount);
+    bucket.cards[cardId].copiesInDeck += copiesForPlayerCount(CARD_DEFS[cardId], playerCount);
   }
+
+  bucket.overall.gamesTallied += 1;
+  bucket.overall.roundLengthSum += roundsPlayed;
 
   const ranks = computeRanks(scores);
   for (const card of resolvedCards) {
-    const entry = stats[card.cardId];
+    const entry = bucket.cards[card.cardId];
     entry.played += 1;
     entry.ownScoreSum += ownValueFor(card);
     entry.finalScoreSum += card.finalValue;
     entry.placementSum += ranks.get(card.ownerId)!;
+    entry.roundLengthSum += roundsPlayed;
   }
+}
+
+/**
+ * Folds one completed game's resolved board into the running stats table, in place --
+ * both the all-games total and the matching per-player-count slice (see
+ * PlaytestStats.byPlayerCount). `playerCount` (the game's, not necessarily the UI's
+ * *current* config -- stats accumulate across runs that may have used different
+ * settings) determines how many copies of every card existed in that game's deck, for
+ * the copiesInDeck tally every card gets regardless of whether it was actually
+ * drawn/placed this game. `roundsPlayed` is the round the game ended on
+ * (GameState.round at "ended" -- the engine never increments it past the last round
+ * actually played, see game.ts's advanceTurn).
+ */
+export function tallyGame(
+  stats: PlaytestStats,
+  resolvedCards: ResolvedCard[],
+  scores: Record<string, number>,
+  playerCount: number,
+  roundsPlayed: number
+): void {
+  tallyIntoBucket(stats, resolvedCards, scores, playerCount, roundsPlayed);
+  if (!stats.byPlayerCount[playerCount]) stats.byPlayerCount[playerCount] = createEmptyBucket();
+  tallyIntoBucket(stats.byPlayerCount[playerCount], resolvedCards, scores, playerCount, roundsPlayed);
 }
 
 export interface CardStatsRow {
@@ -101,12 +157,14 @@ export interface CardStatsRow {
   avgOwnScore: number | null;
   avgFinalScore: number | null;
   avgPlacement: number | null;
+  /** Average ending round of games this card appeared in -- compare against overallAvgRoundLength to see whether this card tends to show up in longer or shorter games than average. */
+  avgRoundLength: number | null;
 }
 
-/** Derived per-card averages for display -- null (not 0) for a card that's never been played, so a UI can render "—" instead of a misleading 0. */
-export function statsSummary(stats: Record<CardId, CardStats>): CardStatsRow[] {
+/** Derived per-card averages for display -- null (not 0) for a card that's never been played, so a UI can render "—" instead of a misleading 0. Takes any StatsBucket -- the all-games total or one player count's slice are shaped identically. */
+export function statsSummary(bucket: StatsBucket): CardStatsRow[] {
   return ALL_CARD_IDS.filter((id) => id !== "Unknown").map((cardId) => {
-    const s = stats[cardId];
+    const s = bucket.cards[cardId];
     return {
       cardId,
       played: s.played,
@@ -115,8 +173,14 @@ export function statsSummary(stats: Record<CardId, CardStats>): CardStatsRow[] {
       avgOwnScore: s.played === 0 ? null : s.ownScoreSum / s.played,
       avgFinalScore: s.played === 0 ? null : s.finalScoreSum / s.played,
       avgPlacement: s.played === 0 ? null : s.placementSum / s.played,
+      avgRoundLength: s.played === 0 ? null : s.roundLengthSum / s.played,
     };
   });
+}
+
+/** Baseline "how long do tallied games last, on average" -- independent of any one card, for comparison against each card's own avgRoundLength. Null (not 0) if nothing's been tallied yet. Takes any StatsBucket, same as statsSummary. */
+export function overallAvgRoundLength(bucket: StatsBucket): number | null {
+  return bucket.overall.gamesTallied === 0 ? null : bucket.overall.roundLengthSum / bucket.overall.gamesTallied;
 }
 
 /**

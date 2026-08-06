@@ -50,7 +50,7 @@ export function PlaySelf({
 }: {
   playerCount: number;
   centerEffect: CenterEffectId | "random";
-  onGameEnded: (cards: ResolvedCard[], scores: Record<string, number>) => void;
+  onGameEnded: (cards: ResolvedCard[], scores: Record<string, number>, roundsPlayed: number) => void;
 }) {
   const [state, setState] = useState<GameState | null>(null);
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
@@ -99,7 +99,7 @@ export function PlaySelf({
       state.config.centerEffect,
       state.players.map((p) => p.id)
     );
-    onGameEnded(result.cards, state.result!.scores);
+    onGameEnded(result.cards, state.result!.scores, state.round);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 

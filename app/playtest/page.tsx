@@ -9,7 +9,17 @@ import { CENTER_EFFECTS, randomCenterEffectPool, selectableCenterEffects } from 
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { ResolvedCard, resolveBoard } from "@/lib/engine/resolution";
 import { CardBucket, CardId, CenterEffectId, GameState } from "@/lib/engine/types";
-import { CardStats, CardStatsRow, createEmptyStats, simulateOneGame, simulateOneGameSteps, statsSummary, tallyGame } from "@/lib/playtest/cardStats";
+import {
+  CardStatsRow,
+  createEmptyStats,
+  overallAvgRoundLength,
+  PlaytestStats,
+  simulateOneGame,
+  simulateOneGameSteps,
+  StatsBucket,
+  statsSummary,
+  tallyGame,
+} from "@/lib/playtest/cardStats";
 import { loadStats, resetStats, saveStats } from "@/lib/playtest/store";
 import { PlaySelf } from "./PlaySelf";
 
@@ -23,6 +33,8 @@ const BATCH_SIZE = 25;
 const LIVE_SAMPLE_EVERY_ACTIONS = 3;
 
 const EMPTY_KEYS = new Set<string>();
+
+const ALL_PLAYER_COUNTS = Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i);
 
 function fmt(n: number | null, decimals = 1): string {
   return n === null ? "—" : n.toFixed(decimals);
@@ -43,15 +55,23 @@ function ownScoreDelta(row: CardStatsRow): number | null {
   return row.avgOwnScore === null ? null : row.avgOwnScore - CARD_DEFS[row.cardId].base;
 }
 
+/** Same bucket-then-name ordering used everywhere in this file (the table's default sort, and the heatmap's fixed row order). */
+function byBucketThenName(a: CardStatsRow, b: CardStatsRow): number {
+  const diff = BUCKET_ORDER.indexOf(CARD_DEFS[a.cardId].bucket) - BUCKET_ORDER.indexOf(CARD_DEFS[b.cardId].bucket);
+  return diff !== 0 ? diff : CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name);
+}
+
 /** Markdown table of the currently-sorted rows, for pasting elsewhere (bug reports, balance discussion) -- same values shown on screen, in the same order. */
-function buildStatsMarkdown(rows: CardStatsRow[]): string {
+function buildStatsMarkdown(rows: CardStatsRow[], overallRoundLength: number | null): string {
   const lines = [
-    "| Card | Bucket | Played | Own Δ base | Final score | Avg placement |",
-    "|---|---|---|---|---|---|",
+    `Overall average round length: ${fmt(overallRoundLength, 2)}`,
+    "",
+    "| Card | Bucket | Played | Own Δ base | Final score | Avg placement | Avg round length |",
+    "|---|---|---|---|---|---|---|",
   ];
   for (const row of rows) {
     lines.push(
-      `| ${CARD_DEFS[row.cardId].name} | ${CARD_DEFS[row.cardId].bucket} | ${fmtPercent(row.playRate)} (${row.played}/${row.copiesInDeck}) | ${fmtSigned(ownScoreDelta(row))} | ${fmt(row.avgFinalScore)} | ${fmt(row.avgPlacement, 2)} |`
+      `| ${CARD_DEFS[row.cardId].name} | ${CARD_DEFS[row.cardId].bucket} | ${fmtPercent(row.playRate)} (${row.played}/${row.copiesInDeck}) | ${fmtSigned(ownScoreDelta(row))} | ${fmt(row.avgFinalScore)} | ${fmt(row.avgPlacement, 2)} | ${fmt(row.avgRoundLength, 2)} |`
     );
   }
   return lines.join("\n") + "\n";
@@ -63,13 +83,101 @@ function simPlayerLabel(id: string): string {
   return Number.isNaN(n) ? id : `P${n + 1}`;
 }
 
-type SortKey = "name" | "bucket" | "played" | "own" | "final" | "placement";
+type SortKey = "name" | "bucket" | "played" | "own" | "final" | "placement" | "roundLength";
 
 function compareNullable(a: number | null, b: number | null, dir: 1 | -1): number {
   if (a === null && b === null) return 0;
   if (a === null) return 1; // never-played cards always sort last, regardless of direction
   if (b === null) return -1;
   return dir * (a - b);
+}
+
+type HeatMetric = "placement" | "playRate" | "own" | "final" | "roundLength";
+
+const HEAT_METRIC_LABELS: Record<HeatMetric, string> = {
+  placement: "Avg placement",
+  playRate: "Played",
+  own: "Own Δ base",
+  final: "Final score",
+  roundLength: "Avg round length",
+};
+
+/** Only "placement" has a real notion of better/worse (lower rank number wins) -- every other metric is purely informational, so its heatmap coloring is just a plain magnitude scale, not a judgment. */
+function heatMetricPolarity(metric: HeatMetric): "lowIsGood" | "neutral" {
+  return metric === "placement" ? "lowIsGood" : "neutral";
+}
+
+function heatMetricValue(row: CardStatsRow | undefined, metric: HeatMetric): number | null {
+  if (!row) return null;
+  switch (metric) {
+    case "placement":
+      return row.avgPlacement;
+    case "playRate":
+      return row.playRate;
+    case "own":
+      return ownScoreDelta(row);
+    case "final":
+      return row.avgFinalScore;
+    case "roundLength":
+      return row.avgRoundLength;
+  }
+}
+
+function heatMetricFormat(row: CardStatsRow | undefined, metric: HeatMetric): string {
+  if (!row) return "—";
+  switch (metric) {
+    case "placement":
+      return fmt(row.avgPlacement, 2);
+    case "playRate":
+      return fmtPercent(row.playRate);
+    case "own":
+      return fmtSigned(ownScoreDelta(row));
+    case "final":
+      return fmt(row.avgFinalScore);
+    case "roundLength":
+      return fmt(row.avgRoundLength, 2);
+  }
+}
+
+/**
+ * Green (good) -> red (bad) for "lowIsGood" metrics (placement); a plain light->dark
+ * blue magnitude scale for everything else, which has no inherent good/bad direction.
+ * Semi-transparent either way so the underlying light/dark page background still shows
+ * through and text stays legible.
+ *
+ * Colored by `rank` (this card's ordinal position among the other cards *at the same
+ * player count*), not the raw value against a single global min/max -- a metric like
+ * average placement has a completely different possible range per player count (best
+ * is always 1st, but worst is playerCount-th), so coloring every column off one shared
+ * scale would paint 2p almost entirely green and 8p almost entirely red regardless of
+ * how any card is actually doing relative to its own table. Ranking within each column
+ * fixes that, and as a side effect stops one outlier value from compressing everything
+ * else into a narrow, hard-to-distinguish color band.
+ */
+function heatColorByRank(rank: number, columnSize: number, polarity: "lowIsGood" | "neutral"): string {
+  const t = columnSize <= 1 ? 0 : (rank - 1) / (columnSize - 1);
+  if (polarity === "lowIsGood") {
+    const r = Math.round(34 + (239 - 34) * t);
+    const g = Math.round(197 + (68 - 197) * t);
+    const b = Math.round(94 + (68 - 94) * t);
+    return `rgba(${r}, ${g}, ${b}, 0.4)`;
+  }
+  return `rgba(59, 130, 246, ${(0.08 + t * 0.42).toFixed(2)})`;
+}
+
+/** Markdown table of one heatmap metric across every available player count, for the same "copy" workflow the flat table already has. */
+function buildHeatmapMarkdown(rows: CardStatsRow[], playerCounts: number[], lookup: Map<number, Map<CardId, CardStatsRow>>, metric: HeatMetric): string {
+  const lines = [
+    `${HEAT_METRIC_LABELS[metric]} by player count`,
+    "",
+    `| Card | ${playerCounts.map((pc) => `${pc}p`).join(" | ")} |`,
+    `|---|${playerCounts.map(() => "---").join("|")}|`,
+  ];
+  for (const row of rows) {
+    const cells = playerCounts.map((pc) => heatMetricFormat(lookup.get(pc)?.get(row.cardId), metric));
+    lines.push(`| ${CARD_DEFS[row.cardId].name} | ${cells.join(" | ")} |`);
+  }
+  return lines.join("\n") + "\n";
 }
 
 /**
@@ -87,12 +195,14 @@ export default function PlaytestPage() {
 }
 
 function Playtest() {
-  const [stats, setStats] = useState<Record<CardId, CardStats>>(() => loadStats());
+  const [stats, setStats] = useState<PlaytestStats>(() => loadStats());
   const [playerCount, setPlayerCount] = useState(4);
+  const [runAllPlayerCounts, setRunAllPlayerCounts] = useState(false);
   const [centerEffect, setCenterEffect] = useState<CenterEffectId | "random">("random");
   const [gameCount, setGameCount] = useState(500);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [pendingRunConfirm, setPendingRunConfirm] = useState(false);
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [watchLive, setWatchLive] = useState(true);
   const [liveState, setLiveState] = useState<GameState | null>(null);
@@ -100,6 +210,8 @@ function Playtest() {
   const [sortKey, setSortKey] = useState<SortKey>("bucket");
   const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [view, setView] = useState<"table" | "heatmap">("table");
+  const [heatMetric, setHeatMetric] = useState<HeatMetric>("placement");
   // Checked once per batch, not once per game -- cancel doesn't need to be instant,
   // just prompt (finishing the in-flight batch of BATCH_SIZE is fine).
   const cancelRef = useRef(false);
@@ -112,7 +224,7 @@ function Playtest() {
     }
   }
 
-  function tallyOneGame(working: Record<CardId, CardStats>, finalState: GameState) {
+  function tallyOneGame(working: PlaytestStats, finalState: GameState) {
     const result = resolveBoard(
       finalState.board,
       finalState.config.boardBounds,
@@ -120,10 +232,11 @@ function Playtest() {
       finalState.config.centerEffect,
       finalState.players.map((p) => p.id)
     );
-    tallyGame(working, result.cards, finalState.result!.scores, finalState.config.playerCount);
+    tallyGame(working, result.cards, finalState.result!.scores, finalState.config.playerCount, finalState.round);
   }
 
-  async function runSimulation() {
+  /** `startFresh` clears any already-tallied data before this run instead of adding to it -- see the pre-run confirmation popup below, which is the only place that ever passes true. */
+  async function runSimulation(startFresh: boolean) {
     setRunning(true);
     setProgress(0);
     setLiveState(null);
@@ -131,55 +244,69 @@ function Playtest() {
     // A working copy, mutated in place by tallyGame across the whole run for speed --
     // committed to React state (and localStorage) once per batch, not once per game,
     // so a few-thousand-game run doesn't trigger a few thousand re-renders.
-    const working = loadStats();
+    const working = startFresh ? createEmptyStats() : loadStats();
 
-    const randomPool = centerEffect === "random" ? randomCenterEffectPool(playerCount) : null;
-    let actionsSinceSample = 0;
+    const playerCounts = runAllPlayerCounts ? ALL_PLAYER_COUNTS : [playerCount];
+    const totalGames = gameCount * playerCounts.length;
+    let completed = 0;
 
-    for (let i = 0; i < gameCount; i++) {
-      const effect = centerEffect === "random" ? randomPool![Math.floor(Math.random() * randomPool!.length)] : centerEffect;
+    runLoop: for (const pc of playerCounts) {
+      const randomPool = centerEffect === "random" ? randomCenterEffectPool(pc) : null;
+      let actionsSinceSample = 0;
 
-      let finalState: GameState;
-      if (watchLive) {
-        // Steps through the game action-by-action instead of running it in one call,
-        // so the board actually visible on screen keeps up with play instead of only
-        // ever showing the previous game's finished result.
-        const steps = simulateOneGameSteps(playerCount, effect, Math.random);
-        let step = steps.next();
-        while (!step.done) {
-          if (++actionsSinceSample >= LIVE_SAMPLE_EVERY_ACTIONS) {
-            actionsSinceSample = 0;
-            setLiveState(step.value);
-            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-            if (cancelRef.current) break;
+      for (let i = 0; i < gameCount; i++) {
+        const effect = centerEffect === "random" ? randomPool![Math.floor(Math.random() * randomPool!.length)] : centerEffect;
+
+        let finalState: GameState;
+        if (watchLive) {
+          // Steps through the game action-by-action instead of running it in one call,
+          // so the board actually visible on screen keeps up with play instead of only
+          // ever showing the previous game's finished result.
+          const steps = simulateOneGameSteps(pc, effect, Math.random);
+          let step = steps.next();
+          while (!step.done) {
+            if (++actionsSinceSample >= LIVE_SAMPLE_EVERY_ACTIONS) {
+              actionsSinceSample = 0;
+              setLiveState(step.value);
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+              if (cancelRef.current) break;
+            }
+            step = steps.next();
           }
-          step = steps.next();
+          // Cancelled mid-game -- this game never reached "ended" (state.result is
+          // still null), so there's nothing valid to tally. Abandon it and stop the
+          // whole run (every remaining player count too), rather than crash on a null
+          // result or silently skip the tally.
+          if (!step.done) break runLoop;
+          finalState = step.value;
+          setLiveState(finalState);
+        } else {
+          finalState = simulateOneGame(pc, effect, Math.random);
         }
-        // Cancelled mid-game -- this game never reached "ended" (state.result is still
-        // null), so there's nothing valid to tally. Abandon it and stop the whole run,
-        // rather than crash on a null result or silently skip the tally.
-        if (!step.done) break;
-        finalState = step.value;
-        setLiveState(finalState);
-      } else {
-        finalState = simulateOneGame(playerCount, effect, Math.random);
-      }
 
-      tallyOneGame(working, finalState);
+        tallyOneGame(working, finalState);
+        completed++;
 
-      if ((i + 1) % BATCH_SIZE === 0 || i === gameCount - 1) {
-        setProgress(i + 1);
-        setStats({ ...working });
-        saveStats(working);
-        if (cancelRef.current) break;
-        // Yields to the browser between batches so the tab stays responsive/paintable
-        // -- redundant with the per-action yield above when watchLive is on, but
-        // still needed for the fast (non-watching) path.
-        if (!watchLive) await new Promise((resolve) => setTimeout(resolve, 0));
+        if (completed % BATCH_SIZE === 0 || completed === totalGames) {
+          setProgress(completed);
+          setStats({ ...working });
+          saveStats(working);
+          if (cancelRef.current) break runLoop;
+          // Yields to the browser between batches so the tab stays responsive/paintable
+          // -- redundant with the per-action yield above when watchLive is on, but
+          // still needed for the fast (non-watching) path.
+          if (!watchLive) await new Promise((resolve) => setTimeout(resolve, 0));
+        }
       }
     }
 
     setRunning(false);
+  }
+
+  function handleRunClick() {
+    // Nothing to conflict with yet -- just run, no need to ask "add or start fresh".
+    if (totalPlayed === 0) runSimulation(false);
+    else setPendingRunConfirm(true);
   }
 
   function handleReset() {
@@ -192,10 +319,8 @@ function Playtest() {
     switch (sortKey) {
       case "name":
         return sortDir * CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name);
-      case "bucket": {
-        const diff = BUCKET_ORDER.indexOf(CARD_DEFS[a.cardId].bucket) - BUCKET_ORDER.indexOf(CARD_DEFS[b.cardId].bucket);
-        return sortDir * (diff !== 0 ? diff : CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name));
-      }
+      case "bucket":
+        return sortDir * byBucketThenName(a, b);
       case "played":
         return compareNullable(a.playRate, b.playRate, sortDir);
       case "own":
@@ -204,20 +329,58 @@ function Playtest() {
         return compareNullable(a.avgFinalScore, b.avgFinalScore, sortDir);
       case "placement":
         return compareNullable(a.avgPlacement, b.avgPlacement, sortDir);
+      case "roundLength":
+        return compareNullable(a.avgRoundLength, b.avgRoundLength, sortDir);
     }
   });
   const totalPlayed = rows.reduce((sum, r) => sum + r.played, 0);
+  const overallRoundLength = overallAvgRoundLength(stats);
+  const totalGamesConfigured = gameCount * (runAllPlayerCounts ? ALL_PLAYER_COUNTS.length : 1);
+
+  // Heatmap data -- every available player count's own StatsBucket, summarized and
+  // indexed by cardId, plus a fixed bucket-then-name row order independent of the flat
+  // table's own sort (the heatmap's whole point is comparing across player counts, so
+  // its rows stay put regardless of which column you last sorted the table by).
+  const availablePlayerCounts = Object.keys(stats.byPlayerCount)
+    .map(Number)
+    .sort((a, b) => a - b);
+  const heatmapRows = [...rows].sort(byBucketThenName);
+  const heatmapLookup = new Map<number, Map<CardId, CardStatsRow>>(
+    availablePlayerCounts.map((pc) => [pc, new Map(statsSummary(stats.byPlayerCount[pc] as StatsBucket).map((r) => [r.cardId, r]))])
+  );
+  const heatPolarity = heatMetricPolarity(heatMetric);
+  // Rank (1 = lowest value) of every card within its own player-count column, for the
+  // selected metric -- see heatColorByRank's doc comment for why coloring is relative
+  // to the column, not one shared scale across every player count.
+  const heatRanksByColumn = new Map<number, Map<CardId, number>>();
+  const heatColumnSizes = new Map<number, number>();
+  for (const pc of availablePlayerCounts) {
+    const colLookup = heatmapLookup.get(pc)!;
+    const ranked = heatmapRows
+      .map((row) => ({ cardId: row.cardId, value: heatMetricValue(colLookup.get(row.cardId), heatMetric) }))
+      .filter((e): e is { cardId: CardId; value: number } => e.value !== null)
+      .sort((a, b) => a.value - b.value);
+    heatRanksByColumn.set(
+      pc,
+      new Map(ranked.map((e, i) => [e.cardId, i + 1]))
+    );
+    heatColumnSizes.set(pc, ranked.length);
+  }
 
   function copyStats() {
-    navigator.clipboard.writeText(buildStatsMarkdown(rows)).then(() => {
+    const text =
+      view === "table"
+        ? buildStatsMarkdown(rows, overallRoundLength)
+        : buildHeatmapMarkdown(heatmapRows, availablePlayerCounts, heatmapLookup, heatMetric);
+    navigator.clipboard.writeText(text).then(() => {
       setCopyFeedback(true);
       setTimeout(() => setCopyFeedback(false), 1500);
     });
   }
 
-  function onSelfGameEnded(cards: ResolvedCard[], scores: Record<string, number>) {
+  function onSelfGameEnded(cards: ResolvedCard[], scores: Record<string, number>, roundsPlayed: number) {
     const working = loadStats();
-    tallyGame(working, cards, scores, playerCount);
+    tallyGame(working, cards, scores, playerCount, roundsPlayed);
     saveStats(working);
     setStats(working);
     setSelfPlayedCount((n) => n + 1);
@@ -249,11 +412,11 @@ function Playtest() {
           <select
             id="pt-players"
             value={playerCount}
-            disabled={running}
+            disabled={running || runAllPlayerCounts}
             onChange={(e) => setPlayerCount(Number(e.target.value))}
             className="w-full min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
           >
-            {Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i).map((n) => (
+            {ALL_PLAYER_COUNTS.map((n) => (
               <option key={n} value={n}>
                 {n}
               </option>
@@ -269,13 +432,13 @@ function Playtest() {
           >
             <option value="random">Random</option>
             <option value="none">None</option>
-            {selectableCenterEffects(playerCount).map((id) => (
+            {selectableCenterEffects(runAllPlayerCounts ? MAX_PLAYERS : playerCount).map((id) => (
               <option key={id} value={id}>
                 {CENTER_EFFECTS[id].label}
               </option>
             ))}
           </select>
-          <label htmlFor="pt-games">Games</label>
+          <label htmlFor="pt-games">Games{runAllPlayerCounts ? " (per player count)" : ""}</label>
           <input
             id="pt-games"
             type="number"
@@ -286,6 +449,17 @@ function Playtest() {
             onChange={(e) => setGameCount(Math.max(1, Math.min(50000, Number(e.target.value) || 1)))}
             className="w-full min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
           />
+          <label htmlFor="pt-all-counts" className="flex items-center gap-1.5">
+            <input
+              id="pt-all-counts"
+              type="checkbox"
+              checked={runAllPlayerCounts}
+              disabled={running}
+              onChange={(e) => setRunAllPlayerCounts(e.target.checked)}
+              className="disabled:opacity-50"
+            />
+            All player counts ({MIN_PLAYERS}p–{MAX_PLAYERS}p)
+          </label>
           <label htmlFor="pt-watch" className="flex items-center gap-1.5">
             <input
               id="pt-watch"
@@ -301,7 +475,7 @@ function Playtest() {
             {running ? (
               <>
                 <span className="text-xs whitespace-nowrap">
-                  {progress} / {gameCount}
+                  {progress} / {totalGamesConfigured}
                 </span>
                 <button
                   onClick={() => (cancelRef.current = true)}
@@ -312,7 +486,7 @@ function Playtest() {
               </>
             ) : (
               <button
-                onClick={runSimulation}
+                onClick={handleRunClick}
                 className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-xs whitespace-nowrap text-white dark:bg-zinc-100 dark:text-black"
               >
                 Run simulation
@@ -321,6 +495,48 @@ function Playtest() {
           </div>
         </div>
       </div>
+
+      {pendingRunConfirm && (
+        <div className="fixed top-20 left-1/2 z-50 w-[min(90vw,24rem)] -translate-x-1/2 rounded-lg border border-zinc-300 bg-white p-3 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+          <p className="mb-2 font-medium">You already have tallied stats</p>
+          <p className="mb-2 text-xs text-zinc-500">
+            {totalPlayed.toLocaleString()} card placements across {stats.overall.gamesTallied.toLocaleString()} games so far. Add this run to that
+            data, or clear it and start fresh?
+          </p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              onClick={() => setPendingRunConfirm(false)}
+              className="rounded-full border border-zinc-300 px-3 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                setPendingRunConfirm(false);
+                // Clears the table immediately -- runSimulation's own first React-state
+                // commit doesn't land until the first batch of games finishes, which
+                // would otherwise leave the old (stale) results on screen for however
+                // long that takes.
+                resetStats();
+                setStats(createEmptyStats());
+                runSimulation(true);
+              }}
+              className="rounded-full border border-red-300 px-3 py-1 text-xs text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+            >
+              Start fresh
+            </button>
+            <button
+              onClick={() => {
+                setPendingRunConfirm(false);
+                runSimulation(false);
+              }}
+              className="rounded-full bg-zinc-900 px-3 py-1 text-xs text-white dark:bg-zinc-100 dark:text-black"
+            >
+              Add to existing
+            </button>
+          </div>
+        </div>
+      )}
 
       {watchLive && liveState && (
         <div className="flex w-full max-w-sm flex-col items-center gap-2">
@@ -345,9 +561,11 @@ function Playtest() {
         </div>
       )}
 
-      <div className="flex w-full max-w-4xl items-center justify-between gap-2">
+      <div className="flex w-full max-w-4xl flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-zinc-500">
-          {totalPlayed === 0 ? "No games tallied yet." : `${totalPlayed.toLocaleString()} card placements tallied across every run so far.`}
+          {totalPlayed === 0
+            ? "No games tallied yet."
+            : `${totalPlayed.toLocaleString()} card placements across ${stats.overall.gamesTallied.toLocaleString()} games so far -- averaging ${fmt(overallRoundLength, 2)} rounds/game.`}
         </p>
         {confirmingReset ? (
           <div className="flex shrink-0 items-center gap-2 text-xs">
@@ -364,6 +582,20 @@ function Playtest() {
           </div>
         ) : (
           <div className="flex shrink-0 items-center gap-2">
+            <div className="flex overflow-hidden rounded-full border border-zinc-300 text-xs dark:border-zinc-700">
+              <button
+                onClick={() => setView("table")}
+                className={`px-3 py-1 whitespace-nowrap ${view === "table" ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-black" : "hover:bg-zinc-100 dark:hover:bg-zinc-900"}`}
+              >
+                Table
+              </button>
+              <button
+                onClick={() => setView("heatmap")}
+                className={`px-3 py-1 whitespace-nowrap ${view === "heatmap" ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-black" : "hover:bg-zinc-100 dark:hover:bg-zinc-900"}`}
+              >
+                Heatmap
+              </button>
+            </div>
             <button
               onClick={copyStats}
               disabled={totalPlayed === 0}
@@ -382,66 +614,137 @@ function Playtest() {
         )}
       </div>
 
-      <div className="w-full max-w-4xl overflow-x-auto rounded-lg border border-zinc-300 dark:border-zinc-700">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-zinc-300 bg-zinc-50 text-xs text-zinc-500 uppercase dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
-              <SortableHeader label="Card" sortKey="name" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-              <SortableHeader label="Bucket" sortKey="bucket" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-              <SortableHeader
-                label="Played"
-                sortKey="played"
-                activeKey={sortKey}
-                dir={sortDir}
-                onClick={toggleSort}
-                align="right"
-                title="Times placed on the board, as a share of every copy of this card that's existed across every tallied game -- scaled so a card with more printed copies doesn't just look more 'played' for having more copies"
-              />
-              <SortableHeader
-                label="Own Δ base"
-                sortKey="own"
-                activeKey={sortKey}
-                dir={sortDir}
-                onClick={toggleSort}
-                align="right"
-                title="Base + only this card's own conditional effects (excluding neighbor/center-effect deltas), shown as +/- versus the card's printed base value"
-              />
-              <SortableHeader
-                label="Final score"
-                sortKey="final"
-                activeKey={sortKey}
-                dir={sortDir}
-                onClick={toggleSort}
-                align="right"
-                title="Full resolved value as actually scored, including neighbor and center effects"
-              />
-              <SortableHeader
-                label="Avg placement"
-                sortKey="placement"
-                activeKey={sortKey}
-                dir={sortDir}
-                onClick={toggleSort}
-                align="right"
-                title="Average final placement (1st/2nd/...) of the player who played this card"
-              />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row: CardStatsRow) => (
-              <tr key={row.cardId} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
-                <td className="px-3 py-1.5 font-medium">{CARD_DEFS[row.cardId].name}</td>
-                <td className="px-3 py-1.5 text-zinc-500 dark:text-zinc-400">{CARD_DEFS[row.cardId].bucket}</td>
-                <td className="px-3 py-1.5 text-right" title={`${row.played} / ${row.copiesInDeck} copies`}>
-                  {fmtPercent(row.playRate)}
-                </td>
-                <td className="px-3 py-1.5 text-right">{fmtSigned(ownScoreDelta(row))}</td>
-                <td className="px-3 py-1.5 text-right">{fmt(row.avgFinalScore)}</td>
-                <td className="px-3 py-1.5 text-right">{fmt(row.avgPlacement, 2)}</td>
+      {view === "table" ? (
+        <div className="w-full max-w-4xl overflow-x-auto rounded-lg border border-zinc-300 dark:border-zinc-700">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-zinc-300 bg-zinc-50 text-xs text-zinc-500 uppercase dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
+                <SortableHeader label="Card" sortKey="name" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                <SortableHeader label="Bucket" sortKey="bucket" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                <SortableHeader
+                  label="Played"
+                  sortKey="played"
+                  activeKey={sortKey}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                  align="right"
+                  title="Times placed on the board, as a share of every copy of this card that's existed across every tallied game -- scaled so a card with more printed copies doesn't just look more 'played' for having more copies"
+                />
+                <SortableHeader
+                  label="Own Δ base"
+                  sortKey="own"
+                  activeKey={sortKey}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                  align="right"
+                  title="Base + only this card's own conditional effects (excluding neighbor/center-effect deltas), shown as +/- versus the card's printed base value"
+                />
+                <SortableHeader
+                  label="Final score"
+                  sortKey="final"
+                  activeKey={sortKey}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                  align="right"
+                  title="Full resolved value as actually scored, including neighbor and center effects"
+                />
+                <SortableHeader
+                  label="Avg placement"
+                  sortKey="placement"
+                  activeKey={sortKey}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                  align="right"
+                  title="Average final placement (1st/2nd/...) of the player who played this card"
+                />
+                <SortableHeader
+                  label="Avg round length"
+                  sortKey="roundLength"
+                  activeKey={sortKey}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                  align="right"
+                  title={`Average length (in rounds) of games this card appeared in. Overall average across every tallied game: ${fmt(overallRoundLength, 2)}`}
+                />
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((row: CardStatsRow) => (
+                <tr key={row.cardId} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
+                  <td className="px-3 py-1.5 font-medium">{CARD_DEFS[row.cardId].name}</td>
+                  <td className="px-3 py-1.5 text-zinc-500 dark:text-zinc-400">{CARD_DEFS[row.cardId].bucket}</td>
+                  <td className="px-3 py-1.5 text-right" title={`${row.played} / ${row.copiesInDeck} copies`}>
+                    {fmtPercent(row.playRate)}
+                  </td>
+                  <td className="px-3 py-1.5 text-right">{fmtSigned(ownScoreDelta(row))}</td>
+                  <td className="px-3 py-1.5 text-right">{fmt(row.avgFinalScore)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmt(row.avgPlacement, 2)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmt(row.avgRoundLength, 2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="flex w-full max-w-4xl flex-col gap-3">
+          <RoundLengthByPlayerCountChart stats={stats} />
+          <label htmlFor="pt-heat-metric" className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+            Color by
+            <select
+              id="pt-heat-metric"
+              value={heatMetric}
+              onChange={(e) => setHeatMetric(e.target.value as HeatMetric)}
+              className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700"
+            >
+              {(Object.keys(HEAT_METRIC_LABELS) as HeatMetric[]).map((m) => (
+                <option key={m} value={m}>
+                  {HEAT_METRIC_LABELS[m]}
+                </option>
+              ))}
+            </select>
+          </label>
+          {availablePlayerCounts.length === 0 ? (
+            <p className="text-sm text-zinc-500">Run a simulation to see the heatmap.</p>
+          ) : (
+            <div className="w-full overflow-x-auto rounded-lg border border-zinc-300 dark:border-zinc-700">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-zinc-300 bg-zinc-50 text-xs text-zinc-500 uppercase dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
+                    <th className="px-3 py-2">Card</th>
+                    {availablePlayerCounts.map((pc) => (
+                      <th key={pc} className="px-3 py-2 text-right">
+                        {pc}p
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {heatmapRows.map((row) => (
+                    <tr key={row.cardId} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
+                      <td className="px-3 py-1.5 font-medium whitespace-nowrap">{CARD_DEFS[row.cardId].name}</td>
+                      {availablePlayerCounts.map((pc) => {
+                        const cellRow = heatmapLookup.get(pc)?.get(row.cardId);
+                        const rank = heatRanksByColumn.get(pc)?.get(row.cardId);
+                        const columnSize = heatColumnSizes.get(pc) ?? 0;
+                        return (
+                          <td
+                            key={pc}
+                            className="px-3 py-1.5 text-right"
+                            style={rank === undefined ? undefined : { backgroundColor: heatColorByRank(rank, columnSize, heatPolarity) }}
+                            title={cellRow && rank !== undefined ? `${pc}p: rank ${rank}/${columnSize}, ${cellRow.played} placements` : `${pc}p: never played`}
+                          >
+                            {heatMetricFormat(cellRow, heatMetric)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex w-full max-w-4xl flex-col gap-3 rounded-lg border border-zinc-300 p-4 dark:border-zinc-700">
         <div className="flex items-center justify-between gap-2">
@@ -453,6 +756,38 @@ function Playtest() {
           )}
         </div>
         <PlaySelf playerCount={playerCount} centerEffect={centerEffect} onGameEnded={onSelfGameEnded} />
+      </div>
+    </div>
+  );
+}
+
+/** Simple hand-rolled bar chart (no charting library) -- average round length at each player count that's actually been tallied, so you can see at a glance whether games run longer or shorter as the table fills up. */
+function RoundLengthByPlayerCountChart({ stats }: { stats: PlaytestStats }) {
+  const counts = Object.keys(stats.byPlayerCount)
+    .map(Number)
+    .sort((a, b) => a - b);
+  if (counts.length === 0) return null;
+
+  const values = counts.map((pc) => overallAvgRoundLength(stats.byPlayerCount[pc])!);
+  const max = Math.max(...values);
+
+  return (
+    <div className="flex w-full flex-col gap-2 rounded-lg border border-zinc-300 p-4 dark:border-zinc-700">
+      <p className="text-sm font-medium">Average round length by player count</p>
+      <div className="flex flex-col gap-1.5">
+        {counts.map((pc, i) => {
+          const value = values[i];
+          const widthPct = max > 0 ? (value / max) * 100 : 0;
+          return (
+            <div key={pc} className="flex items-center gap-2 text-xs">
+              <span className="w-8 shrink-0 text-zinc-500 dark:text-zinc-400">{pc}p</span>
+              <div className="h-4 flex-1 overflow-hidden rounded bg-zinc-100 dark:bg-zinc-800">
+                <div className="h-full rounded bg-blue-500/70" style={{ width: `${widthPct}%` }} />
+              </div>
+              <span className="w-10 shrink-0 text-right font-medium">{value.toFixed(2)}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
