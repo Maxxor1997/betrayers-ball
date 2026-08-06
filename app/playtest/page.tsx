@@ -28,6 +28,35 @@ function fmt(n: number | null, decimals = 1): string {
   return n === null ? "—" : n.toFixed(decimals);
 }
 
+/** For a delta column (own score vs. base) -- an explicit "+" on non-negative values, since a bare "3.0" reads as an absolute number, not a change. */
+function fmtSigned(n: number | null, decimals = 1): string {
+  if (n === null) return "—";
+  return n >= 0 ? `+${n.toFixed(decimals)}` : n.toFixed(decimals);
+}
+
+function fmtPercent(n: number | null): string {
+  return n === null ? "—" : `${Math.round(n * 100)}%`;
+}
+
+/** Own score minus the card's own printed base -- see CardStatsRow.avgOwnScore's doc comment for what "own" already excludes; this just re-centers it on 0 so the table reads as "how much this card's own conditions typically add or subtract" rather than an absolute number you have to compare to the base yourself. */
+function ownScoreDelta(row: CardStatsRow): number | null {
+  return row.avgOwnScore === null ? null : row.avgOwnScore - CARD_DEFS[row.cardId].base;
+}
+
+/** Markdown table of the currently-sorted rows, for pasting elsewhere (bug reports, balance discussion) -- same values shown on screen, in the same order. */
+function buildStatsMarkdown(rows: CardStatsRow[]): string {
+  const lines = [
+    "| Card | Bucket | Played | Own Δ base | Final score | Avg placement |",
+    "|---|---|---|---|---|---|",
+  ];
+  for (const row of rows) {
+    lines.push(
+      `| ${CARD_DEFS[row.cardId].name} | ${CARD_DEFS[row.cardId].bucket} | ${fmtPercent(row.playRate)} (${row.played}/${row.copiesInDeck}) | ${fmtSigned(ownScoreDelta(row))} | ${fmt(row.avgFinalScore)} | ${fmt(row.avgPlacement, 2)} |`
+    );
+  }
+  return lines.join("\n") + "\n";
+}
+
 /** sim0/sim1/... (see cardStats.ts's simulateOneGame) -> "P1"/"P2"/... for the live board viewer, which has no real lobby to look names up in. */
 function simPlayerLabel(id: string): string {
   const n = Number(id.replace("sim", ""));
@@ -70,6 +99,7 @@ function Playtest() {
   const [selfPlayedCount, setSelfPlayedCount] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>("bucket");
   const [sortDir, setSortDir] = useState<1 | -1>(1);
+  const [copyFeedback, setCopyFeedback] = useState(false);
   // Checked once per batch, not once per game -- cancel doesn't need to be instant,
   // just prompt (finishing the in-flight batch of BATCH_SIZE is fine).
   const cancelRef = useRef(false);
@@ -90,7 +120,7 @@ function Playtest() {
       finalState.config.centerEffect,
       finalState.players.map((p) => p.id)
     );
-    tallyGame(working, result.cards, finalState.result!.scores);
+    tallyGame(working, result.cards, finalState.result!.scores, finalState.config.playerCount);
   }
 
   async function runSimulation() {
@@ -167,9 +197,9 @@ function Playtest() {
         return sortDir * (diff !== 0 ? diff : CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name));
       }
       case "played":
-        return sortDir * (a.played - b.played);
+        return compareNullable(a.playRate, b.playRate, sortDir);
       case "own":
-        return compareNullable(a.avgOwnScore, b.avgOwnScore, sortDir);
+        return compareNullable(ownScoreDelta(a), ownScoreDelta(b), sortDir);
       case "final":
         return compareNullable(a.avgFinalScore, b.avgFinalScore, sortDir);
       case "placement":
@@ -178,9 +208,16 @@ function Playtest() {
   });
   const totalPlayed = rows.reduce((sum, r) => sum + r.played, 0);
 
+  function copyStats() {
+    navigator.clipboard.writeText(buildStatsMarkdown(rows)).then(() => {
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 1500);
+    });
+  }
+
   function onSelfGameEnded(cards: ResolvedCard[], scores: Record<string, number>) {
     const working = loadStats();
-    tallyGame(working, cards, scores);
+    tallyGame(working, cards, scores, playerCount);
     saveStats(working);
     setStats(working);
     setSelfPlayedCount((n) => n + 1);
@@ -326,13 +363,22 @@ function Playtest() {
             </button>
           </div>
         ) : (
-          <button
-            onClick={() => setConfirmingReset(true)}
-            disabled={running}
-            className="shrink-0 rounded-full border border-zinc-300 px-3 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
-          >
-            Reset stats
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              onClick={copyStats}
+              disabled={totalPlayed === 0}
+              className="shrink-0 rounded-full border border-zinc-300 px-3 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              {copyFeedback ? "Copied!" : "Copy stats"}
+            </button>
+            <button
+              onClick={() => setConfirmingReset(true)}
+              disabled={running}
+              className="shrink-0 rounded-full border border-zinc-300 px-3 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              Reset stats
+            </button>
+          </div>
         )}
       </div>
 
@@ -342,15 +388,23 @@ function Playtest() {
             <tr className="border-b border-zinc-300 bg-zinc-50 text-xs text-zinc-500 uppercase dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
               <SortableHeader label="Card" sortKey="name" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
               <SortableHeader label="Bucket" sortKey="bucket" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-              <SortableHeader label="Played" sortKey="played" activeKey={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
               <SortableHeader
-                label="Own score"
+                label="Played"
+                sortKey="played"
+                activeKey={sortKey}
+                dir={sortDir}
+                onClick={toggleSort}
+                align="right"
+                title="Times placed on the board, as a share of every copy of this card that's existed across every tallied game -- scaled so a card with more printed copies doesn't just look more 'played' for having more copies"
+              />
+              <SortableHeader
+                label="Own Δ base"
                 sortKey="own"
                 activeKey={sortKey}
                 dir={sortDir}
                 onClick={toggleSort}
                 align="right"
-                title="Base + only this card's own conditional effects, excluding neighbor/center-effect deltas"
+                title="Base + only this card's own conditional effects (excluding neighbor/center-effect deltas), shown as +/- versus the card's printed base value"
               />
               <SortableHeader
                 label="Final score"
@@ -377,8 +431,10 @@ function Playtest() {
               <tr key={row.cardId} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
                 <td className="px-3 py-1.5 font-medium">{CARD_DEFS[row.cardId].name}</td>
                 <td className="px-3 py-1.5 text-zinc-500 dark:text-zinc-400">{CARD_DEFS[row.cardId].bucket}</td>
-                <td className="px-3 py-1.5 text-right">{row.played}</td>
-                <td className="px-3 py-1.5 text-right">{fmt(row.avgOwnScore)}</td>
+                <td className="px-3 py-1.5 text-right" title={`${row.played} / ${row.copiesInDeck} copies`}>
+                  {fmtPercent(row.playRate)}
+                </td>
+                <td className="px-3 py-1.5 text-right">{fmtSigned(ownScoreDelta(row))}</td>
                 <td className="px-3 py-1.5 text-right">{fmt(row.avgFinalScore)}</td>
                 <td className="px-3 py-1.5 text-right">{fmt(row.avgPlacement, 2)}</td>
               </tr>

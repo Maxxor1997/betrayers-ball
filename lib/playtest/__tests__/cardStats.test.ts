@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CARD_DEFS } from "@/lib/content/cards";
+import { CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { resolveBoard } from "@/lib/engine/resolution";
 import { Board, BoardBounds, CardId, CardInstance, posKey } from "@/lib/engine/types";
 import { computeRanks, createEmptyStats, ownValueFor, simulateOneGame, simulateOneGameSteps, statsSummary, tallyGame } from "../cardStats";
@@ -88,7 +88,7 @@ describe("tallyGame", () => {
     const f0 = place(board, 0, 0, "Footman", "p1", true);
     const w0 = place(board, 1, 0, "Warlord", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    tallyGame(stats, cards, { p1: 100, p2: 50 });
+    tallyGame(stats, cards, { p1: 100, p2: 50 }, 2);
 
     expect(stats.Footman.played).toBe(1);
     expect(stats.Footman.finalScoreSum).toBe(cards.find((c) => c.instanceId === f0.instanceId)!.finalValue);
@@ -106,13 +106,32 @@ describe("tallyGame", () => {
     const stats = createEmptyStats();
     const board1: Board = new Map();
     place(board1, 0, 0, "Footman", "p1");
-    tallyGame(stats, resolveBoard(board1, BOUNDS, 3).cards, { p1: 10 });
+    tallyGame(stats, resolveBoard(board1, BOUNDS, 3).cards, { p1: 10 }, 2);
 
     const board2: Board = new Map();
     place(board2, 0, 0, "Footman", "p1");
-    tallyGame(stats, resolveBoard(board2, BOUNDS, 3).cards, { p1: 10 });
+    tallyGame(stats, resolveBoard(board2, BOUNDS, 3).cards, { p1: 10 }, 2);
 
     expect(stats.Footman.played).toBe(2);
+  });
+
+  it("tallies copiesInDeck for every card at the game's player count, even ones never drawn/placed", () => {
+    const stats = createEmptyStats();
+    const board: Board = new Map();
+    place(board, 0, 0, "Footman", "p1");
+    tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10 }, 4);
+
+    expect(stats.Footman.copiesInDeck).toBe(copiesForPlayerCount(CARD_DEFS.Footman, 4));
+    // Giant was never placed this game, but still had copies in that game's deck.
+    expect(stats.Giant.copiesInDeck).toBe(copiesForPlayerCount(CARD_DEFS.Giant, 4));
+  });
+
+  it("accumulates copiesInDeck across games with different player counts", () => {
+    const stats = createEmptyStats();
+    tallyGame(stats, [], { p1: 0 }, 2);
+    tallyGame(stats, [], { p1: 0 }, 5);
+
+    expect(stats.Footman.copiesInDeck).toBe(copiesForPlayerCount(CARD_DEFS.Footman, 2) + copiesForPlayerCount(CARD_DEFS.Footman, 5));
   });
 });
 
@@ -121,6 +140,7 @@ describe("statsSummary", () => {
     const rows = statsSummary(createEmptyStats());
     const footman = rows.find((r) => r.cardId === "Footman")!;
     expect(footman.played).toBe(0);
+    expect(footman.playRate).toBeNull(); // never had a single copy in a tallied deck either
     expect(footman.avgOwnScore).toBeNull();
     expect(footman.avgFinalScore).toBeNull();
     expect(footman.avgPlacement).toBeNull();
@@ -131,11 +151,22 @@ describe("statsSummary", () => {
     const board: Board = new Map();
     place(board, 0, 0, "Footman", "p1");
     place(board, 1, 0, "Footman", "p2");
-    tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10, p2: 20 });
+    tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10, p2: 20 }, 2);
 
     const row = statsSummary(stats).find((r) => r.cardId === "Footman")!;
     expect(row.played).toBe(2);
     expect(row.avgPlacement).toBe(1.5); // one 1st (p2), one 2nd (p1)
+  });
+
+  it("computes playRate as played divided by copies-in-deck, scaling for cards with different print counts", () => {
+    const stats = createEmptyStats();
+    const board: Board = new Map();
+    place(board, 0, 0, "Footman", "p1");
+    tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10 }, 4);
+
+    const row = statsSummary(stats).find((r) => r.cardId === "Footman")!;
+    expect(row.copiesInDeck).toBe(copiesForPlayerCount(CARD_DEFS.Footman, 4));
+    expect(row.playRate).toBe(1 / copiesForPlayerCount(CARD_DEFS.Footman, 4));
   });
 
   it("never includes the Unknown pseudo-card", () => {

@@ -1,5 +1,5 @@
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
-import { ALL_CARD_IDS, CARD_DEFS } from "@/lib/content/cards";
+import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { Rng } from "@/lib/engine/deck";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { FLOORED_AT_ZERO_LABEL, ResolvedCard } from "@/lib/engine/resolution";
@@ -10,6 +10,14 @@ import { CardId, CenterEffectId, GameState } from "@/lib/engine/types";
 export interface CardStats {
   /** Times this card was actually placed on the board and scored -- a card still sitting unplayed in hand at game end never reaches resolveBoard, so it's not counted. */
   played: number;
+  /**
+   * Sum of copiesForPlayerCount(card, playerCount) across every game tallied, whether
+   * or not this particular card ever got drawn or placed -- deck copy counts vary by
+   * player count and by card (see CardDef.count), so a card with more printed copies
+   * naturally rings up a higher raw `played` count for no interesting reason. Dividing
+   * played by this normalizes for that -- see statsSummary's playRate.
+   */
+  copiesInDeck: number;
   /** Sum of each appearance's "own" value -- base + only this card's own conditional self-effects and its own floorAtZero, deliberately excluding anything a neighbor or center effect did to it. See ownValueFor. */
   ownScoreSum: number;
   /** Sum of each appearance's actual finalValue as scored in-game -- includes everything, same number the game itself totals a player's score from. */
@@ -23,7 +31,7 @@ export function createEmptyStats(): Record<CardId, CardStats> {
   for (const id of ALL_CARD_IDS) {
     // "Unknown" is the AI-fairness/redaction placeholder, never a real playable card -- see CardId's own doc comment.
     if (id === "Unknown") continue;
-    stats[id] = { played: 0, ownScoreSum: 0, finalScoreSum: 0, placementSum: 0 };
+    stats[id] = { played: 0, copiesInDeck: 0, ownScoreSum: 0, finalScoreSum: 0, placementSum: 0 };
   }
   return stats;
 }
@@ -61,8 +69,19 @@ export function ownValueFor(card: ResolvedCard): number {
   return CARD_DEFS[card.cardId].floorAtZero ? Math.max(0, ownRawTotal) : ownRawTotal;
 }
 
-/** Folds one completed game's resolved board into the running stats table, in place. */
-export function tallyGame(stats: Record<CardId, CardStats>, resolvedCards: ResolvedCard[], scores: Record<string, number>): void {
+/**
+ * Folds one completed game's resolved board into the running stats table, in place.
+ * `playerCount` (the game's, not necessarily the UI's *current* config -- stats
+ * accumulate across runs that may have used different settings) determines how many
+ * copies of every card existed in that game's deck, for the copiesInDeck tally every
+ * card gets regardless of whether it was actually drawn/placed this game.
+ */
+export function tallyGame(stats: Record<CardId, CardStats>, resolvedCards: ResolvedCard[], scores: Record<string, number>, playerCount: number): void {
+  for (const cardId of ALL_CARD_IDS) {
+    if (cardId === "Unknown") continue;
+    stats[cardId].copiesInDeck += copiesForPlayerCount(CARD_DEFS[cardId], playerCount);
+  }
+
   const ranks = computeRanks(scores);
   for (const card of resolvedCards) {
     const entry = stats[card.cardId];
@@ -76,6 +95,9 @@ export function tallyGame(stats: Record<CardId, CardStats>, resolvedCards: Resol
 export interface CardStatsRow {
   cardId: CardId;
   played: number;
+  copiesInDeck: number;
+  /** played / copiesInDeck -- what fraction of every copy of this card that ever existed across the tallied games actually made it onto the board, independent of how many copies it happens to print. Null (not 0) if this card has never had a single copy in any tallied game's deck (e.g. it's disabled at every player count simulated so far). */
+  playRate: number | null;
   avgOwnScore: number | null;
   avgFinalScore: number | null;
   avgPlacement: number | null;
@@ -88,6 +110,8 @@ export function statsSummary(stats: Record<CardId, CardStats>): CardStatsRow[] {
     return {
       cardId,
       played: s.played,
+      copiesInDeck: s.copiesInDeck,
+      playRate: s.copiesInDeck === 0 ? null : s.played / s.copiesInDeck,
       avgOwnScore: s.played === 0 ? null : s.ownScoreSum / s.played,
       avgFinalScore: s.played === 0 ? null : s.finalScoreSum / s.played,
       avgPlacement: s.played === 0 ? null : s.placementSum / s.played,

@@ -18,18 +18,70 @@ import { RoomSummary } from "@/lib/server/protocol";
 /** Just a representative deck-count snapshot for the home screen's reference catalog -- there's no active game yet to derive a real player count from. */
 const CATALOG_PLAYER_COUNT = 4;
 
+/** Small stroke icons for each play option -- 20x20, currentColor, no external assets. */
+function SoloIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-5 w-5">
+      <circle cx="10" cy="6.5" r="3.25" />
+      <path d="M3.5 17c0-3.2 2.9-5.5 6.5-5.5s6.5 2.3 6.5 5.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+function MultiplayerIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-5 w-5">
+      <circle cx="7" cy="6.5" r="2.75" />
+      <circle cx="14.5" cy="8" r="2.1" />
+      <path d="M2 17c0-2.9 2.2-5 5-5s5 2.1 5 5" strokeLinecap="round" />
+      <path d="M12.7 12.3c2.2.2 3.8 2 3.8 4.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+function ScreencastIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-5 w-5">
+      <rect x="2.5" y="4" width="15" height="10" rx="1.5" />
+      <path d="M7.5 17.5h5" strokeLinecap="round" />
+      <path d="M7.5 10.5l2.8-1.7 2.7 1.7V6.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function PlaytestIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-5 w-5">
+      <path d="M5 15.5V11M10 15.5V6M15 15.5v-6.5" strokeLinecap="round" />
+      <path d="M2.5 17.5h15" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function PlayOption({
   href,
   onClick,
   title,
   description,
+  icon,
+  accentClass,
 }: {
   href?: string;
   onClick?: () => void;
   title: string;
   description: string;
+  icon: React.ReactNode;
+  /** Precomputed Tailwind classes for the icon badge, passed whole (not built from a color name) so Tailwind's build-time scanner sees the literal class names. */
+  accentClass: string;
 }) {
-  const className = "flex flex-col gap-1 rounded-xl border border-zinc-300 p-5 text-left transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900";
+  const className =
+    "group flex h-full items-start gap-3 rounded-xl border border-zinc-300 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md dark:border-zinc-700 dark:hover:border-zinc-600";
+  const content = (
+    <>
+      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${accentClass}`}>{icon}</span>
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-base font-semibold">{title}</span>
+        <span className="text-sm text-zinc-500 dark:text-zinc-400">{description}</span>
+      </span>
+    </>
+  );
 
   // onClick (e.g. "Single player"/"Multiplayer", which open a setup popup here rather
   // than navigating straight off the home screen) takes a <button>; a plain
@@ -37,16 +89,14 @@ function PlayOption({
   if (onClick) {
     return (
       <button onClick={onClick} className={className}>
-        <span className="text-base font-semibold">{title}</span>
-        <span className="text-sm text-zinc-500 dark:text-zinc-400">{description}</span>
+        {content}
       </button>
     );
   }
 
   return (
     <Link href={href!} className={className}>
-      <span className="text-base font-semibold">{title}</span>
-      <span className="text-sm text-zinc-500 dark:text-zinc-400">{description}</span>
+      {content}
     </Link>
   );
 }
@@ -81,7 +131,7 @@ function ActiveSessions() {
   }, []);
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-zinc-300 p-5 dark:border-zinc-700">
+    <div className="flex flex-col gap-3 rounded-xl border border-zinc-300 p-4 shadow-sm dark:border-zinc-700">
       <div className="flex items-center justify-between gap-2">
         <span className="text-base font-semibold">Active sessions</span>
         <button
@@ -213,70 +263,83 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col items-center gap-8 px-4 py-8">
-      <header className="flex w-full max-w-4xl flex-col gap-2">
-        <div className="flex w-full items-center justify-between gap-2">
-          <h1 className="text-lg font-semibold sm:text-xl">Board Game</h1>
-          <ThemeToggle />
-        </div>
-        <div className="flex w-full flex-wrap items-center gap-1.5">
-          <button
-            onClick={() => setCardsCollapsed(!cardsCollapsed)}
-            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
-          >
-            {cardsCollapsed ? "▶" : "◀"} Cards
-          </button>
-          <button
-            onClick={() => setShowInstructions(true)}
-            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
-          >
-            How to play
-          </button>
-        </div>
-      </header>
+    // CardCatalog is the first child of this row (not a sibling below a full-width
+    // header), same structure /play uses -- it's a `lg:self-start` sidebar that spans
+    // the row's full height, so it sits flush against the true left edge alongside
+    // the header too, not just alongside the content underneath it.
+    <div className="flex flex-1 flex-col gap-8 px-4 py-8 lg:flex-row lg:items-start">
+      <CardCatalog playerCount={CATALOG_PLAYER_COUNT} collapsed={cardsCollapsed} onCollapsedChange={setCardsCollapsed} />
+      <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-1 flex-col items-center gap-8">
+        <header className="flex w-full flex-col gap-2">
+          <div className="flex w-full items-center justify-between gap-2">
+            <h1 className="text-lg font-semibold sm:text-xl">Board Game</h1>
+            <ThemeToggle />
+          </div>
+          <div className="flex w-full flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => setCardsCollapsed(!cardsCollapsed)}
+              className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              {cardsCollapsed ? "▶" : "◀"} Cards
+            </button>
+            <button
+              onClick={() => setShowInstructions(true)}
+              className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              How to play
+            </button>
+          </div>
+        </header>
 
-      {showInstructions && <InstructionsModal onClose={() => setShowInstructions(false)} />}
+        {showInstructions && <InstructionsModal onClose={() => setShowInstructions(false)} />}
 
-      {newGameSetup && (
-        <NewGameModal
-          title={mode === "host" ? "Host a multiplayer game" : mode === "display" ? "Cast to this screen" : "Start a new game"}
-          setup={newGameSetup}
-          onChange={setNewGameSetup}
-          onCancel={() => setNewGameSetup(null)}
-          onConfirm={confirmNewGame}
-          confirmLabel={hosting ? "Starting…" : mode === "host" ? "Create room" : mode === "display" ? "Open display" : "Start"}
-          nameField={mode === "host" ? { value: hostName, onChange: setHostName } : undefined}
-          playerCountLabel={mode === "host" ? (n) => `${n}` : mode === "display" ? (n) => `${n} players` : undefined}
-        />
-      )}
+        {newGameSetup && (
+          <NewGameModal
+            title={mode === "host" ? "Host a multiplayer game" : mode === "display" ? "Cast to this screen" : "Start a new game"}
+            setup={newGameSetup}
+            onChange={setNewGameSetup}
+            onCancel={() => setNewGameSetup(null)}
+            onConfirm={confirmNewGame}
+            confirmLabel={hosting ? "Starting…" : mode === "host" ? "Create room" : mode === "display" ? "Open display" : "Start"}
+            nameField={mode === "host" ? { value: hostName, onChange: setHostName } : undefined}
+            playerCountLabel={mode === "host" ? (n) => `${n}` : mode === "display" ? (n) => `${n} players` : undefined}
+          />
+        )}
 
-      {/* w-full, not max-w-4xl like the header -- CardCatalog is a fixed-width aside
-          that should dock to the true left edge of the screen (matching the single-
-          player board's left sidebar), not just the left edge of a centered column. */}
-      <div className="flex w-full flex-1 flex-col gap-8 lg:flex-row lg:items-start">
-        <CardCatalog playerCount={CATALOG_PLAYER_COUNT} collapsed={cardsCollapsed} onCollapsedChange={setCardsCollapsed} />
-        <div className="mx-auto flex w-full max-w-md min-w-0 flex-1 flex-col gap-4">
+        <div className="flex w-full flex-col gap-4">
           <h2 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">Play</h2>
           {hostError && <p className="text-xs text-red-600 dark:text-red-400">{hostError}</p>}
-          <div className="flex flex-col gap-4">
-            <PlayOption title="Singleplayer" description="You vs. AI opponents, on this device." onClick={openSoloSetup} />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <PlayOption
+              title="Singleplayer"
+              description="You vs. AI opponents, on this device."
+              icon={<SoloIcon />}
+              accentClass="bg-sky-100 text-sky-600 dark:bg-sky-950 dark:text-sky-400"
+              onClick={openSoloSetup}
+            />
             <PlayOption
               title="Multiplayer"
               description="Host a game on this network; others join from their own browser."
+              icon={<MultiplayerIcon />}
+              accentClass="bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-400"
               onClick={openHostSetup}
             />
             <PlayOption
               title="Screencast"
               description="This device shows the board only, no hand of its own -- everyone else joins from their phone."
+              icon={<ScreencastIcon />}
+              accentClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
               onClick={openDisplaySetup}
             />
             <PlayOption
               href="/playtest"
               title="Playtest"
               description="Simulate large numbers of AI-only games (or play one yourself) and tally per-card scoring/placement stats."
+              icon={<PlaytestIcon />}
+              accentClass="bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
             />
-            <ActiveSessions />
           </div>
+          <ActiveSessions />
         </div>
       </div>
     </div>
