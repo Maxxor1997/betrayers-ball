@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMultiplayerSession } from "@/app/hooks/useMultiplayerSession";
+import { isMobileViewport } from "@/app/hooks/isMobileViewport";
+import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
 import { BoardGrid } from "@/app/components/Board";
 import { Hand } from "@/app/components/Hand";
 import { GameStatusPanel } from "@/app/components/GameStatusPanel";
@@ -44,30 +46,51 @@ function Room() {
   const session = useMultiplayerSession(roomCode);
   const [showInstructions, setShowInstructions] = useState(false);
   const [confirmingEnd, setConfirmingEnd] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => setIsMobile(isMobileViewport()), []);
+  const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobile);
 
   const isHost = !!session.lobby && session.myPlayerId === session.lobby.hostPlayerId;
 
   return (
     <div className="flex flex-1 flex-col items-center gap-6 px-4 py-8">
-      <header className="flex w-full max-w-4xl flex-wrap items-center justify-between gap-4">
-        <h1 className="text-xl font-semibold">
-          Board Game <span className="font-normal text-zinc-500">— room {roomCode}</span>
-        </h1>
-        <div className="flex flex-wrap items-center gap-3">
-          <ThemeToggle />
-          <Link href="/" className="rounded-full border border-zinc-300 px-4 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">
+      <header className="flex w-full max-w-4xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-start">
+          <h1 className="text-lg font-semibold sm:text-xl">
+            Board Game <span className="font-normal text-zinc-500">— room {roomCode}</span>
+          </h1>
+          <span className="sm:hidden">
+            <ThemeToggle />
+          </span>
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:gap-3">
+          <span className="hidden sm:inline-flex">
+            <ThemeToggle />
+          </span>
+          <Link
+            href="/"
+            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
             ◀ Home
           </Link>
+          {!session.roomClosed && session.connected && !session.needsName && session.lobby?.started && session.gameState && (
+            <button
+              onClick={() => setCardsCollapsed(!cardsCollapsed)}
+              className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              {cardsCollapsed ? "▶" : "◀"} Cards
+            </button>
+          )}
           <button
             onClick={() => setShowInstructions(true)}
-            className="rounded-full border border-zinc-300 px-4 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
           >
             How to play
           </button>
           {!session.roomClosed && isHost && (
             <button
               onClick={() => setConfirmingEnd(true)}
-              className="rounded-full border border-red-300 px-4 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+              className="rounded-full border border-red-300 px-2.5 py-1 text-xs whitespace-nowrap text-red-600 hover:bg-red-50 sm:px-4 sm:py-1.5 sm:text-sm dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
             >
               End room
             </button>
@@ -127,6 +150,8 @@ function Room() {
           myPlayerId={session.myPlayerId}
           dispatch={session.dispatch}
           rematch={session.rematch}
+          cardsCollapsed={cardsCollapsed}
+          onCardsCollapsedChange={setCardsCollapsed}
         />
       )}
     </div>
@@ -256,12 +281,16 @@ function GameView({
   myPlayerId,
   dispatch,
   rematch,
+  cardsCollapsed,
+  onCardsCollapsedChange,
 }: {
   state: GameState;
   lobby: LobbyState;
   myPlayerId: string;
   dispatch: (action: GameAction) => void;
   rematch: (centerEffect: CenterEffectId) => void;
+  cardsCollapsed: boolean;
+  onCardsCollapsedChange: (collapsed: boolean) => void;
 }) {
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
@@ -392,6 +421,8 @@ function GameView({
         myCardIds={myCardIds}
         opponentVisibleBoardCardIds={opponentVisibleBoardCardIds}
         currentCenterEffect={state.config.centerEffect}
+        collapsed={cardsCollapsed}
+        onCollapsedChange={onCardsCollapsedChange}
       />
 
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">

@@ -27,7 +27,7 @@ export function ThemeToggle() {
   }, []);
 
   if (theme === null) {
-    return <span className="inline-block h-[34px] w-[88px]" aria-hidden />;
+    return <span className="inline-block h-[26px] w-[68px] sm:h-[34px] sm:w-[88px]" aria-hidden />;
   }
 
   function toggle() {
@@ -40,7 +40,7 @@ export function ThemeToggle() {
     <button
       onClick={toggle}
       aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-      className="rounded-full border border-zinc-300 px-4 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+      className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
     >
       {theme === "dark" ? "🌙 Dark" : "☀️ Light"}
     </button>

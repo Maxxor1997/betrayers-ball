@@ -82,7 +82,7 @@ describe("wireSocketServer", () => {
     const result = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none" })) as AckResult<CreateRoomResult>;
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.roomCode).toHaveLength(4);
+    expect(result.roomCode).toMatch(/^[A-Z]+$/);
     expect(result.token).toBeTruthy();
   });
 

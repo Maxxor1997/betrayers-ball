@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { RoomRegistry } from "../rooms";
 import { GameSession } from "../session";
+import { ROOM_CODE_WORDS } from "../roomWords";
 
 function noopHandlers() {
   return { onLobbyChange: () => {}, onPlayerState: () => {} };
 }
 
 describe("RoomRegistry", () => {
-  it("assigns a unique 4-character room code on create", () => {
+  it("assigns a room code that's an uppercased word from the room-word list", () => {
     const registry = new RoomRegistry();
     const session = registry.create((roomCode) => new GameSession(roomCode, "Host", 2, "none", "http://test.local:3000", noopHandlers()));
-    expect(session.roomCode).toHaveLength(4);
+    expect(ROOM_CODE_WORDS).toContain(session.roomCode.toLowerCase());
+    expect(session.roomCode).toBe(session.roomCode.toUpperCase());
     expect(registry.get(session.roomCode)).toBe(session);
   });
 

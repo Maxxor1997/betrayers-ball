@@ -1,16 +1,10 @@
 import { GameSession } from "./session";
 import { RoomSummary } from "./protocol";
+import { ROOM_CODE_WORDS } from "./roomWords";
 
-/** Excludes visually ambiguous characters (0/O, 1/I) -- these get read aloud or typed off a screen across a room. */
-const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const ROOM_CODE_LENGTH = 4;
-
+/** A single word (see roomWords.ts), not a random character string -- much easier to remember, type, and read aloud across a room than e.g. "QX7K". */
 function randomRoomCode(): string {
-  let code = "";
-  for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
-    code += ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)];
-  }
-  return code;
+  return ROOM_CODE_WORDS[Math.floor(Math.random() * ROOM_CODE_WORDS.length)].toUpperCase();
 }
 
 /**

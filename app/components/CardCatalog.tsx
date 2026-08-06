@@ -75,22 +75,34 @@ const LOCATIONS_DESCRIPTION =
  * regardless of count (a card disabled or absent at this player count still appears,
  * just annotated "x0 in deck"). Also used standalone (no active game) on the home
  * screen, via the myCardIds/opponentVisibleBoardCardIds/currentCenterEffect defaults.
+ *
+ * Collapse state is fully controlled by the caller (`collapsed`/`onCollapsedChange`,
+ * typically backed by useDefaultCollapsed) rather than owned internally -- the actual
+ * "▶ Cards" toggle lives in each page's own header instead of here, so it can sit
+ * inline with the rest of the header's buttons instead of rendering as its own
+ * full-width block above them (which is exactly what it did back when this component
+ * rendered its own collapsed placeholder as a sibling `<aside>` ahead of the header:
+ * on a narrow mobile layout, that's a separate flex item, so it stacked onto its own
+ * line no matter how small the button itself was). Collapsed now just renders nothing.
  */
 export function CardCatalog({
   playerCount,
   myCardIds = new Set(),
   opponentVisibleBoardCardIds = new Set(),
   currentCenterEffect = "none",
+  collapsed,
+  onCollapsedChange,
 }: {
   playerCount: number;
   myCardIds?: Set<CardId>;
   opponentVisibleBoardCardIds?: Set<CardId>;
   currentCenterEffect?: CenterEffectId;
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
 }) {
   const [hoveredCard, setHoveredCard] = useState<{ id: CardId; rect: DOMRect } | null>(null);
   const [hoveredBucket, setHoveredBucket] = useState<{ bucket: CardBucket; rect: DOMRect } | null>(null);
   const [hoveredLocationsHeader, setHoveredLocationsHeader] = useState<DOMRect | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<CardBucket>>(new Set());
   // Collapsed by default, unlike the card buckets -- center effects are secondary
   // reference info, not something a new player needs open by default.
@@ -105,18 +117,7 @@ export function CardCatalog({
     });
   }
 
-  if (collapsed) {
-    return (
-      <aside className="shrink-0 lg:sticky lg:top-8 lg:self-start">
-        <button
-          onClick={() => setCollapsed(false)}
-          className="rounded-full border border-zinc-300 px-3 py-1.5 text-xs whitespace-nowrap hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-        >
-          ▶ Cards
-        </button>
-      </aside>
-    );
-  }
+  if (collapsed) return null;
 
   return (
     <aside className="w-full shrink-0 overflow-x-hidden lg:sticky lg:top-8 lg:w-48 lg:self-start lg:border-r-2 lg:border-zinc-400 lg:pr-4 dark:lg:border-zinc-600">
@@ -125,7 +126,7 @@ export function CardCatalog({
           Card catalog <span className="font-normal text-zinc-500">({playerCount}p)</span>
         </h2>
         <button
-          onClick={() => setCollapsed(true)}
+          onClick={() => onCollapsedChange(true)}
           title="Collapse"
           className="shrink-0 rounded-full border border-zinc-300 px-2 py-0.5 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
         >

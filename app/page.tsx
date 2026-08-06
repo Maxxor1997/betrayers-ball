@@ -10,6 +10,8 @@ import { NewGameModal, NewGameSetup } from "@/app/components/NewGameModal";
 import { createMultiplayerRoom } from "@/app/hooks/createMultiplayerRoom";
 import { listMultiplayerRooms } from "@/app/hooks/listMultiplayerRooms";
 import { loadCredentials } from "@/app/hooks/multiplayerCredentials";
+import { isMobileViewport } from "@/app/hooks/isMobileViewport";
+import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { RoomSummary } from "@/lib/server/protocol";
 
@@ -143,6 +145,12 @@ export default function HomePage() {
   const [hostName, setHostName] = useState("");
   const [hostError, setHostError] = useState<string | null>(null);
   const [hosting, setHosting] = useState(false);
+  // Starts false (SSR-safe -- window isn't available yet) and corrects itself once
+  // mounted; useDefaultCollapsed only ever applies this once, so the brief
+  // false->true flip on phones doesn't fight a manual toggle.
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => setIsMobile(isMobileViewport()), []);
+  const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobile);
 
   function openSoloSetup() {
     setMode("solo");
@@ -184,13 +192,26 @@ export default function HomePage() {
 
   return (
     <div className="flex flex-1 flex-col items-center gap-8 px-4 py-8">
-      <header className="flex w-full max-w-4xl flex-wrap items-center justify-between gap-4">
-        <h1 className="text-xl font-semibold">Board Game</h1>
-        <div className="flex flex-wrap items-center gap-3">
-          <ThemeToggle />
+      <header className="flex w-full max-w-4xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-start">
+          <h1 className="text-lg font-semibold sm:text-xl">Board Game</h1>
+          <span className="sm:hidden">
+            <ThemeToggle />
+          </span>
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:gap-3">
+          <span className="hidden sm:inline-flex">
+            <ThemeToggle />
+          </span>
+          <button
+            onClick={() => setCardsCollapsed(!cardsCollapsed)}
+            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            {cardsCollapsed ? "▶" : "◀"} Cards
+          </button>
           <button
             onClick={() => setShowInstructions(true)}
-            className="rounded-full border border-zinc-300 px-4 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
           >
             How to play
           </button>
@@ -216,7 +237,7 @@ export default function HomePage() {
           that should dock to the true left edge of the screen (matching the single-
           player board's left sidebar), not just the left edge of a centered column. */}
       <div className="flex w-full flex-1 flex-col gap-8 lg:flex-row lg:items-start">
-        <CardCatalog playerCount={CATALOG_PLAYER_COUNT} />
+        <CardCatalog playerCount={CATALOG_PLAYER_COUNT} collapsed={cardsCollapsed} onCollapsedChange={setCardsCollapsed} />
         <div className="mx-auto flex w-full max-w-md min-w-0 flex-1 flex-col gap-4">
           <h2 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">Play</h2>
           {hostError && <p className="text-xs text-red-600 dark:text-red-400">{hostError}</p>}
