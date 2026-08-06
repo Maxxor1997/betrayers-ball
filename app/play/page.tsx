@@ -396,20 +396,15 @@ function Game() {
         onCollapsedChange={setCardsCollapsed}
       />
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">
-      <header className="flex w-full max-w-4xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-        <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-start">
+      <header className="flex w-full max-w-4xl flex-col gap-2">
+        <div className="flex w-full items-center justify-between gap-2">
           <h1 className="text-lg font-semibold sm:text-xl">
             Board Game<span className="hidden sm:inline"> — engine playtest</span>
           </h1>
-          <span className="sm:hidden">
-            <ThemeToggle />
-          </span>
+          <ThemeToggle />
         </div>
-        <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:gap-3">
+        <div className="flex w-full flex-wrap items-center gap-1.5">
           <span className="text-sm whitespace-nowrap text-zinc-500">{playerCount} players</span>
-          <span className="hidden sm:inline-flex">
-            <ThemeToggle />
-          </span>
           <Link
             href="/"
             className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"

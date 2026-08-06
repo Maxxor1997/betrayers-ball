@@ -7,6 +7,14 @@ import { Board, BoardBounds, CardId, CenterEffectId, Position } from "./types";
 export interface ScoreContribution {
   label: string;
   amount: number;
+  /**
+   * "self" for the card's own printed rule -- Base, its own valueModifier hook's
+   * self-effects (addDelta'd onto its own instanceId), and its own floorAtZero --
+   * "external" for anything caused by a neighbor's outgoing effect or a center
+   * effect. Lets a stats tool (see the playtest simulator) separate a card's "own"
+   * score from value it only got because of board context around it.
+   */
+  source: "self" | "external";
 }
 
 /**
@@ -81,21 +89,28 @@ function computeValueModifiers(
   centerEffect: CenterEffectId
 ): Map<string, ScoreContribution[]> {
   const contributions = new Map<string, ScoreContribution[]>();
-  const addDelta = (instanceId: string, amount: number, label: string) => {
+  const push = (instanceId: string, amount: number, label: string, source: ScoreContribution["source"]) => {
     const list = contributions.get(instanceId);
-    if (list) list.push({ label, amount });
-    else contributions.set(instanceId, [{ label, amount }]);
+    const entry: ScoreContribution = { label, amount, source };
+    if (list) list.push(entry);
+    else contributions.set(instanceId, [entry]);
   };
 
   for (const [key, c] of board.entries()) {
     if (negated.has(c.instanceId)) continue;
     const pos = parsePosKey(key);
+    // A card's own hook can addDelta either onto itself (a self-effect) or onto a
+    // neighbor (an outgoing effect) -- which one determines whether the *target*
+    // should count this as its own printed rule or as something a neighbor did to it.
+    const addDelta = (instanceId: string, amount: number, label: string) =>
+      push(instanceId, amount, label, instanceId === c.instanceId ? "self" : "external");
     CARD_DEFS[c.cardId].valueModifier?.({ board, bounds, round, pos, self: c, addDelta });
   }
 
   // Center-effect scoring-time passes. These are board rules, not printed card text,
-  // so they apply regardless of negation. See lib/content/centerEffects.ts.
-  CENTER_EFFECTS[centerEffect].valueModifiers?.(board, bounds, addDelta);
+  // so they apply regardless of negation, and are always "external" -- never a card's
+  // own rule, no matter which card they land on. See lib/content/centerEffects.ts.
+  CENTER_EFFECTS[centerEffect].valueModifiers?.(board, bounds, (instanceId, amount, label) => push(instanceId, amount, label, "external"));
 
   return contributions;
 }
@@ -151,10 +166,11 @@ export function resolveBoard(
     const cardContributions = contributions.get(c.instanceId) ?? [];
     const finalValue = values.get(c.instanceId) ?? base;
 
-    const breakdown: ScoreContribution[] = [{ label: "Base", amount: base }, ...cardContributions];
+    const breakdown: ScoreContribution[] = [{ label: "Base", amount: base, source: "self" }, ...cardContributions];
     const rawTotal = base + cardContributions.reduce((sum, d) => sum + d.amount, 0);
     if (finalValue !== rawTotal) {
-      breakdown.push({ label: FLOORED_AT_ZERO_LABEL, amount: finalValue - rawTotal });
+      // The card's own printed floor rule, not something a neighbor did.
+      breakdown.push({ label: FLOORED_AT_ZERO_LABEL, amount: finalValue - rawTotal, source: "self" });
     }
 
     cards.push({

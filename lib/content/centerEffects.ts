@@ -169,7 +169,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
       for (const c of faceUpCards) {
         if (c.finalValue === maxValue) {
           totalsByOwner[c.ownerId] = (totalsByOwner[c.ownerId] ?? 0) - kingslayerValue;
-          c.breakdown.push({ label: "Kingslayer (highest face-up value)", amount: -kingslayerValue });
+          c.breakdown.push({ label: "Kingslayer (highest face-up value)", amount: -kingslayerValue, source: "external" });
           c.finalValue -= kingslayerValue;
           kingslayerHit.push(c.instanceId);
         }
