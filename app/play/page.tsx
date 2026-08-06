@@ -35,10 +35,10 @@ function newGameState(playerCount: number, centerEffect: CenterEffectId): GameSt
   return createGame(playerIds, config, undefined, aiPlayerIds, firstPlayerIndex);
 }
 
-/** A card's own printed floor (Warlord/Exile) is rarely worth a breakdown line -- it's
- * not a surprise interaction, just the card's known rule, and is redundant with the
- * Final value already shown. Other contributions (Plague Bearer, Kingslayer, ...) stay,
- * since those ARE a surprise interaction with another card worth calling out. */
+/** A card's own printed floor is rarely worth a breakdown line -- it's not a surprise
+ * interaction, just the card's known rule, and is redundant with the Final value
+ * already shown. Other contributions stay, since those ARE a surprise interaction with
+ * another card or effect worth calling out. */
 function visibleBreakdown(breakdown: { label: string; amount: number }[]) {
   return breakdown.filter((d) => d.label !== FLOORED_AT_ZERO_LABEL);
 }

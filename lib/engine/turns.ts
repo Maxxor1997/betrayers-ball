@@ -90,17 +90,16 @@ export function applyPlace(state: GameState, action: PlaceAction): GameState {
 
   const board = new Map(state.board);
   const def = CARD_DEFS[card.cardId];
-  // A card can force itself face-up on placement (e.g. Giant) — a placement/state
-  // rule, not a scoring effect.
+  // A card can force itself face-up on placement -- a placement/state rule, not a
+  // scoring effect.
   const faceUp = def.forceFaceUp ? true : card.faceUp;
   board.set(posKey(action.position), { ...card, faceUp });
 
-  // A card's placement-time trigger (e.g. Truthseeker flipping adjacent cards),
-  // distinct from the turn's normal optional flip action -- it doesn't consume
-  // hasFlippedThisTurn and ignores the flip-lock rules above (those gate the
-  // *player's* flip action, not a card's own printed effect). Also unaffected by
-  // Suppressor negation, which in this engine is a resolution-time-only concept,
-  // not something computed mid-game during turns.
+  // A card's placement-time trigger, distinct from the turn's normal optional flip
+  // action -- it doesn't consume hasFlippedThisTurn and ignores the flip-lock rules
+  // above (those gate the *player's* flip action, not a card's own printed effect).
+  // Also unaffected by negation, which in this engine is a resolution-time-only
+  // concept, not something computed mid-game during turns.
   def.onPlace?.({ board, bounds, pos: action.position });
 
   const players = state.players.map((p, i) =>

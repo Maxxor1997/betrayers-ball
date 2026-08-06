@@ -10,10 +10,10 @@ export interface ScoreContribution {
 }
 
 /**
- * Breakdown label for a card's own printed floor (Warlord/Exile) hitting 0. Exported
- * so a breakdown UI can filter this one out if it wants to -- unlike "Kingslayer", it's
- * not a surprise interaction with another card, just the card's own known rule, so it's
- * often redundant with the Final value already shown.
+ * Breakdown label for a card's own printed floor rule hitting 0. Exported so a
+ * breakdown UI can filter this one out if it wants to -- unlike a surprise interaction
+ * contributed by another card or center effect, it's just the card's own known rule,
+ * so it's often redundant with the Final value already shown.
  */
 export const FLOORED_AT_ZERO_LABEL = "Floored at 0";
 
@@ -33,18 +33,17 @@ export interface ResolvedCard {
 export interface ResolutionResult {
   cards: ResolvedCard[];
   totalsByOwner: Record<string, number>;
-  /** Champion of the Weak: who the center card went to and for how much, if anyone. */
+  /** Which player the center pseudo-card's (possibly modified) value transferred to and for how much, if the active center effect makes that kind of transfer. */
   centerAward: { value: number; ownerId: string } | null;
-  /** Kingslayer: instanceIds of the highest-value face-up card(s) hit. */
+  /** instanceIds of any card(s) hit by a center effect that subtracts from the board's highest value, if the active center effect does that. */
   kingslayerHit: string[];
 }
 
 /**
- * Step 1 — Suppression pass. Cards with a `negatesNeighborsIf` hook (currently just
- * Suppressor) negate adjacent cards whose hook condition is met: their own modifiers
- * and outgoing effects are cancelled (base value only). Cards with the hook are immune
- * to negation themselves (so e.g. two adjacent Suppressors never negate each other).
- * See lib/content/cards.ts.
+ * Step 1 — Suppression pass. Cards with a `negatesNeighborsIf` hook negate adjacent
+ * cards whose hook condition is met: their own modifiers and outgoing effects are
+ * cancelled (base value only). Cards with the hook are immune to negation themselves
+ * (so e.g. two adjacent negating cards never negate each other). See lib/content/cards.ts.
  */
 function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Set<string> {
   const negated = new Set<string>();
@@ -64,12 +63,12 @@ function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Set<strin
  * Step 2 — Value-modifying pass. Every non-negated card's `valueModifier` hook
  * computes simultaneously off base values, positions, identities, ownership, and
  * flip-state — never another card's resolved value. Effects are either "self" (the
- * source card modifies its own value, e.g. Commander) or "outgoing" (the source
- * modifies neighbors, e.g. Bannerman); both are skipped entirely if the source is
- * negated. Incoming effects still land on negated targets — negation only cancels a
- * card's own modifiers and outgoing effects, not its identity/base/flip-state as read
- * by others (a negated Footman still links its neighbors' line; a negated Warlord
- * still counts toward other Warlords' penalty). See lib/content/cards.ts.
+ * source card modifies its own value) or "outgoing" (the source modifies neighbors);
+ * both are skipped entirely if the source is negated. Incoming effects still land on
+ * negated targets — negation only cancels a card's own modifiers and outgoing effects,
+ * not its identity/base/flip-state as read by others (e.g. a negated card that other
+ * cards' effects key off by type or by counting still reads correctly to them). See
+ * lib/content/cards.ts.
  *
  * Returns each card's contributions (not just their sum) so a scoring breakdown UI can
  * show exactly where the points came from.
@@ -101,7 +100,7 @@ function computeValueModifiers(
   return contributions;
 }
 
-/** Step 3 — Floors. Cards with `floorAtZero` (Warlord, Exile) floor at 0. Returns the instanceIds actually floored. */
+/** Step 3 — Floors. Cards with `floorAtZero` floor at 0. Returns the instanceIds actually floored. */
 function applyFloors(board: Board, values: Map<string, number>): Set<string> {
   const floored = new Set<string>();
   for (const c of board.values()) {

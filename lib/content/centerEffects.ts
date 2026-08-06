@@ -12,7 +12,7 @@ import { Board, BoardBounds, CardInstance, CenterEffectId, GameConfig, GameState
  */
 export interface CenterEffectDef {
   label: string;
-  /** Static text, or a fn for effects whose wording depends on config (Shadowlands @ 2p). */
+  /** Static text, or a fn for effects whose wording depends on config. */
   description: string | ((config: GameConfig) => string);
   /** Shows up in the New Game picker. Default true — set false to hide (e.g. "none"). */
   selectable?: boolean;
@@ -25,13 +25,13 @@ export interface CenterEffectDef {
   /** If true, this effect is unavailable at every player count -- overrides `minPlayerCount`/`maxPlayerCount`. */
   disabled?: boolean;
 
-  /** Extra per-card value deltas applied during resolution (mirrorPool, shadowlands). */
+  /** Extra per-card value deltas applied during resolution. */
   valueModifiers?: (board: Board, bounds: BoardBounds, addDelta: (instanceId: string, amount: number, label: string) => void) => void;
 
   /**
-   * Post-resolution award/zeroing off final totals (championOfTheWeak, kingslayer).
-   * May mutate `cards`/`totalsByOwner` in place (e.g. zeroing a card's finalValue);
-   * returned fields become part of the ResolutionResult.
+   * Post-resolution award/zeroing off final totals. May mutate `cards`/`totalsByOwner`
+   * in place (e.g. zeroing a card's finalValue); returned fields become part of the
+   * ResolutionResult.
    */
   postResolution?: (ctx: {
     board: Board;
@@ -47,20 +47,20 @@ export interface CenterEffectDef {
   /** Restricts which face-down cards may be flip targets. Unused by any current effect -- kept for a future targeting effect. */
   flipTargetFilter?: (targets: CardInstance[], playerId: string) => CardInstance[];
 
-  /** Fires when a new round starts; return the (possibly unchanged) players/deck (reckoning). */
+  /** Fires when a new round starts; return the (possibly unchanged) players/deck. */
   onRoundStart?: (state: GameState, newRound: number, rng: Rng) => Pick<GameState, "players" | "deck">;
 
   /**
    * Overrides the full set of ownerless/unplaceable tiles (default: just the center)
-   * -- e.g. Three Headed Dragon adds two extra tiles, Two Towers moves them off
-   * center entirely. Populated into `BoardBounds.ownerless` once, at config-build time
+   * -- e.g. an effect could add extra tiles, or move them off center entirely.
+   * Populated into `BoardBounds.ownerless` once, at config-build time
    * (configForPlayerCount).
    */
   ownerlessPositions?: (bounds: BoardBounds) => Position[];
-  /** UI label shown on each ownerless tile when set (e.g. "Dragon Head", "Tower"). Defaults to `label`. */
+  /** UI label shown on each ownerless tile when set. Defaults to `label`. */
   ownerlessLabel?: string;
 
-  /** Drops the normal adjacency requirement -- any empty, non-ownerless cell is a legal placement (freelands). */
+  /** Drops the normal adjacency requirement -- any empty, non-ownerless cell is a legal placement. */
   placementAnywhere?: boolean;
 }
 

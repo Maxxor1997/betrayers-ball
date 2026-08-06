@@ -9,7 +9,7 @@ export interface CardEffectContext {
   round: number;
   pos: Position;
   self: CardInstance;
-  /** `label` identifies the source in a per-card scoring breakdown (e.g. "Bannerman (neighbor)"). */
+  /** `label` identifies the source in a per-card scoring breakdown, e.g. "<card name> (neighbor)". */
   addDelta: (instanceId: string, amount: number, label: string) => void;
 }
 
@@ -49,16 +49,16 @@ export interface CardDef {
   /** If true, this card is excluded from the deck at every player count -- overrides `count`. */
   disabled?: boolean;
 
-  /** Forces this card face-up whenever placed -- can't be played or stay face-down (Giant). */
+  /** Forces this card face-up whenever placed -- can't be played or stay face-down. */
   forceFaceUp?: boolean;
-  /** Value floors at 0 after all modifiers are applied (Warlord, Exile). */
+  /** Value floors at 0 after all modifiers are applied. */
   floorAtZero?: boolean;
 
   /** Value-modifying effect during resolution -- most cards with printed scoring text. */
   valueModifier?: (ctx: CardEffectContext) => void;
-  /** Suppressor-only: with 3+ adjacent occupied cells, negates adjacent non-negating cards. */
+  /** If true for this card's position, negates adjacent non-negating cards' own modifiers and outgoing effects (base value only). Cards with this hook are immune to negation. */
   negatesNeighborsIf?: (ctx: CardPositionContext) => boolean;
-  /** Placement-time trigger, distinct from valueModifier -- mutates `board` directly (Truthseeker). */
+  /** Placement-time trigger, distinct from valueModifier -- mutates `board` directly. */
   onPlace?: (ctx: CardPositionContext) => void;
 }
 
@@ -74,11 +74,13 @@ export function copiesForPlayerCount(def: CardDef, playerCount: number): number 
 }
 
 /**
- * The card set, per game_spec.md v2 plus additions (Truthseeker, Mercenary) — the
- * single source of truth for a card's stats, text, deck quantity (per player count),
- * bucket, and effect. Bucket totals and the deck size aren't locked to the spec's
- * original numbers; see lib/engine/__tests__/deck.test.ts for the current totals. The
- * counts below don't yet vary by player count, but the data shape supports it.
+ * The card set -- the single source of truth for a card's stats, text, deck quantity
+ * (per player count), bucket, and effect. Add, remove, disable, or rebalance a card
+ * entirely by editing an entry here (and updating `CardId` in types.ts to match); no
+ * other file should need a matching edit -- see lib/engine/__tests__/deck.test.ts and
+ * game_spec.md for how downstream totals/docs stay derived rather than duplicated.
+ * Deck size and bucket totals are computed, not fixed; the counts below don't yet vary
+ * by player count, but the data shape supports it.
  */
 export const CARD_DEFS: Record<CardId, CardDef> = {
   Footman: {
@@ -254,7 +256,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Control",
     text: "Steals 2 from each same-type pair+",
     fullText:
-      "For every card type that appears 2 or more times among its orthogonal neighbors (any owner, including another Plague Bearer), each of those neighbors loses 2 base points, and Plague Bearer gains that same 2 from each one -- a straight 1:1 transfer, not doubled. A neighbor type that appears only once is untouched; multiple qualifying types at once (e.g. two Footmen and two Warlords) each pay out separately.",
+      "For every card type that appears 2 or more times among its neighbors (any owner), each of those neighbors has 2 points stolen by Plague Bearer. Multiple qualifying types at once (e.g. two Footmen and two Warlords) each pay out separately.",
     count: flatCount(2),
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const neighborsByType = new Map<CardId, CardInstance[]>();

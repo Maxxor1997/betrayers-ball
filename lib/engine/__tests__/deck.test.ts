@@ -2,21 +2,30 @@ import { describe, expect, it } from "vitest";
 import { buildDeck, deal, dealNewGame, redrawHands, shuffle } from "../deck";
 import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
-import { CardId, CardInstance, DeckCard, PlayerState } from "../types";
+import { CardBucket, CardId, CardInstance, DeckCard, PlayerState } from "../types";
+
+/** Sum of every card's copy count at `playerCount`, derived from CARD_DEFS -- the
+ * expected total, computed independently of `buildDeck`'s own iteration. */
+function totalCopiesAt(playerCount: number): number {
+  return ALL_CARD_IDS.reduce((sum, id) => sum + copiesForPlayerCount(CARD_DEFS[id], playerCount), 0);
+}
+
+/** Same sum as `totalCopiesAt`, broken down by bucket. */
+function bucketTotalsAt(playerCount: number): Record<CardBucket, number> {
+  const totals: Record<CardBucket, number> = { Slam: 0, Engine: 0, Control: 0 };
+  for (const id of ALL_CARD_IDS) totals[CARD_DEFS[id].bucket] += copiesForPlayerCount(CARD_DEFS[id], playerCount);
+  return totals;
+}
 
 describe("cards", () => {
-  it("has all 17 cards (Headsman + Darkspawn merged into Infiltrator)", () => {
-    expect(ALL_CARD_IDS).toHaveLength(17);
-  });
-
   it("Footman is the base-value benchmark", () => {
     expect(CARD_DEFS.Footman.base).toBe(5);
   });
 });
 
 describe("buildDeck", () => {
-  it("totals 78 cards at 2 players", () => {
-    expect(buildDeck(2)).toHaveLength(78);
+  it("totals the sum of every card's copy count at 2 players", () => {
+    expect(buildDeck(2)).toHaveLength(totalCopiesAt(2));
   });
 
   it("matches each card's per-player-count copy count, at every supported player count", () => {
@@ -30,12 +39,11 @@ describe("buildDeck", () => {
     }
   });
 
-  it("bucket totals match current CARD_DEFS bucket assignments at 2 players (Slam 18 / Engine 36 / Control 24)", () => {
-    const totals = { Slam: 0, Engine: 0, Control: 0 };
-    for (const cardId of ALL_CARD_IDS) {
-      totals[CARD_DEFS[cardId].bucket] += copiesForPlayerCount(CARD_DEFS[cardId], 2);
+  it("every bucket has at least one deck copy at 2 players", () => {
+    const totals = bucketTotalsAt(2);
+    for (const bucket of Object.keys(totals) as CardBucket[]) {
+      expect(totals[bucket]).toBeGreaterThan(0);
     }
-    expect(totals).toEqual({ Slam: 18, Engine: 36, Control: 24 });
   });
 
   it("assigns every card a unique instanceId", () => {
@@ -109,7 +117,7 @@ describe("dealNewGame", () => {
     const { players, remainingDeck } = dealNewGame(["p1", "p2"], 7, () => 0.42);
     expect(players).toHaveLength(2);
     expect(players[0].hand).toHaveLength(7);
-    expect(remainingDeck).toHaveLength(78 - 14);
+    expect(remainingDeck).toHaveLength(totalCopiesAt(2) - 14);
   });
 });
 

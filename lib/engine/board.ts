@@ -47,10 +47,10 @@ export function getAdjacentCards(board: Board, bounds: BoardBounds, pos: Positio
 
 /**
  * Whether `pos` reads as "face-up" for an effect that keys off a neighbor's face
- * state (Pretender, ...). An ownerless tile (center,
- * or an extra tile like Three Headed Dragon's heads) is always face-up -- it holds no
- * hidden info, so there's nothing to be face-down about (see CLAUDE.md). Returns false
- * for an empty, non-ownerless cell -- there's no card there to be face-up or -down.
+ * state. An ownerless tile (center, or an extra tile a center effect adds) is always
+ * face-up -- it holds no hidden info, so there's nothing to be face-down about (see
+ * CLAUDE.md). Returns false for an empty, non-ownerless cell -- there's no card there
+ * to be face-up or -down.
  */
 export function isPositionFaceUp(board: Board, bounds: BoardBounds, pos: Position): boolean {
   if (isOwnerlessPosition(pos, bounds)) return true;
@@ -59,10 +59,9 @@ export function isPositionFaceUp(board: Board, bounds: BoardBounds, pos: Positio
 
 /**
  * Count of orthogonally-adjacent cells that are "occupied" — a placed card, or an
- * ownerless tile (the center, or an extra tile like Three Headed Dragon's heads). Per
- * the locked core invariant, these are real neighbors for adjacency/trigger/penalty
- * purposes (e.g. Exile's per-neighbor penalty, Suppressor's 3+ trigger) even though
- * they hold no CardInstance and are never placed on.
+ * ownerless tile (the center, or an extra tile a center effect adds). Per the locked
+ * core invariant, these are real neighbors for adjacency/trigger/penalty purposes even
+ * though they hold no CardInstance and are never placed on.
  */
 export function countAdjacentOccupied(board: Board, bounds: BoardBounds, pos: Position): number {
   let count = 0;

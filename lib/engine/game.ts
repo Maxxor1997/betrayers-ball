@@ -8,9 +8,9 @@ import { CastVoteAction, CenterEffectId, GameAction, GameConfig, GameState } fro
 export function configForPlayerCount(playerCount: number, centerEffect: CenterEffectId = "none"): GameConfig {
   const baseBounds = BOARD_BOUNDS_BY_PLAYER_COUNT[playerCount];
   if (!baseBounds) throw new Error(`No board sizing configured for ${playerCount} players (supported: 2-6)`);
-  // Effects like Three Headed Dragon or Two Towers override which tiles are ownerless
-  // -- baked into boardBounds here, once, so every downstream board.ts lookup that
-  // only ever took `bounds` (not centerEffect) keeps working unchanged.
+  // A center effect can override which tiles are ownerless -- baked into boardBounds
+  // here, once, so every downstream board.ts lookup that only ever took `bounds` (not
+  // centerEffect) keeps working unchanged.
   const ownerlessPositions = CENTER_EFFECTS[centerEffect].ownerlessPositions?.(baseBounds);
   const boardBounds = ownerlessPositions ? { ...baseBounds, ownerless: ownerlessPositions } : baseBounds;
   return {
@@ -139,7 +139,7 @@ function applyCastVote(state: GameState, action: CastVoteAction, rng: Rng): Game
   // currentPlayerIndex is left as-is -- advanceTurn already set it to the correct next
   // player (turn order rotates continuously, it doesn't reset to 0 each round). This is
   // the *default* path into a new round (minRoundFloor is 3 by default), so it needs
-  // the same Reckoning check as advanceTurn's plain continue-branch.
+  // the same onRoundStart check as advanceTurn's plain continue-branch.
   const nextRound = state.round + 1;
   const roundStart = applyRoundStart(state, nextRound, rng);
   return { ...state, ...roundStart, phase: "playing", votes: {}, voteHistory, round: nextRound, hasFlippedThisTurn: false };
