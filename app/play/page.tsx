@@ -18,6 +18,7 @@ import { CardBucket, CardId, CenterEffectId, GameAction, GameState, Position, po
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, PLAYER_BORDER_COLOR_CLASSES, PLAYER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 import { BoardGridProps, HandProps, NewGameSetup, PendingFlip, PlayerTableProps } from "./types";
+import { ThemeToggle } from "@/app/components/ThemeToggle";
 
 const HUMAN = "human";
 
@@ -368,6 +369,7 @@ function Game() {
         <h1 className="text-xl font-semibold">Board Game — engine playtest</h1>
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-zinc-500">{playerCount} players</span>
+          <ThemeToggle />
           <button
             onClick={() => setShowInstructions(true)}
             className="rounded-full border border-zinc-300 px-4 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
