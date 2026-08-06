@@ -5,8 +5,8 @@ import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { CardId, CardInstance, DeckCard, PlayerState } from "../types";
 
 describe("cards", () => {
-  it("has all 18 cards (the spec's 16 + Truthseeker + Mercenary)", () => {
-    expect(ALL_CARD_IDS).toHaveLength(18);
+  it("has all 17 cards (Headsman + Darkspawn merged into Infiltrator)", () => {
+    expect(ALL_CARD_IDS).toHaveLength(17);
   });
 
   it("Footman is the base-value benchmark", () => {
@@ -15,8 +15,8 @@ describe("cards", () => {
 });
 
 describe("buildDeck", () => {
-  it("totals 72 cards at 2 players", () => {
-    expect(buildDeck(2)).toHaveLength(72);
+  it("totals 78 cards at 2 players", () => {
+    expect(buildDeck(2)).toHaveLength(78);
   });
 
   it("matches each card's per-player-count copy count, at every supported player count", () => {
@@ -30,12 +30,12 @@ describe("buildDeck", () => {
     }
   });
 
-  it("bucket totals match current CARD_DEFS bucket assignments at 2 players (Slam 14 / Engine 37 / Control 21)", () => {
+  it("bucket totals match current CARD_DEFS bucket assignments at 2 players (Slam 18 / Engine 36 / Control 24)", () => {
     const totals = { Slam: 0, Engine: 0, Control: 0 };
     for (const cardId of ALL_CARD_IDS) {
       totals[CARD_DEFS[cardId].bucket] += copiesForPlayerCount(CARD_DEFS[cardId], 2);
     }
-    expect(totals).toEqual({ Slam: 14, Engine: 37, Control: 21 });
+    expect(totals).toEqual({ Slam: 18, Engine: 36, Control: 24 });
   });
 
   it("assigns every card a unique instanceId", () => {
@@ -109,7 +109,7 @@ describe("dealNewGame", () => {
     const { players, remainingDeck } = dealNewGame(["p1", "p2"], 7, () => 0.42);
     expect(players).toHaveLength(2);
     expect(players[0].hand).toHaveLength(7);
-    expect(remainingDeck).toHaveLength(72 - 14);
+    expect(remainingDeck).toHaveLength(78 - 14);
   });
 });
 

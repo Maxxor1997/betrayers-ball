@@ -41,14 +41,15 @@ describe("resolveBoard — Footman line bonus", () => {
 });
 
 describe("resolveBoard — Warlord", () => {
-  it("penalizes -3 per other Warlord (any owner), floored at 0", () => {
+  it("penalizes -2 per other Warlord (any owner), floored at 0", () => {
     const board: Board = new Map();
     const w1 = place(board, 0, 0, "Warlord", "p1");
     place(board, 1, 0, "Warlord", "p1");
     place(board, 2, 0, "Warlord", "p2");
     place(board, 3, 0, "Warlord", "p2");
+    place(board, 4, 0, "Warlord", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    // 3 other warlords -> base - 9, which floors to 0 for this card's base
+    // 4 other warlords -> base - 8, which floors to 0 for this card's base
     expect(find(cards, w1.instanceId).finalValue).toBe(0);
   });
 
@@ -79,24 +80,13 @@ describe("resolveBoard — scoring breakdown", () => {
     place(board, 1, 0, "Warlord", "p1");
     place(board, 2, 0, "Warlord", "p2");
     place(board, 3, 0, "Warlord", "p2");
+    place(board, 4, 0, "Warlord", "p2");
+    place(board, 5, 0, "Warlord", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolved = find(cards, w1.instanceId);
     expect(resolved.finalValue).toBe(0);
     const last = resolved.breakdown[resolved.breakdown.length - 1];
     expect(last.label).toBe("Floored at 0");
-    expect(resolved.breakdown.reduce((sum, d) => sum + d.amount, 0)).toBe(0);
-  });
-
-  it("appends a zeroed-by-PlagueBearer entry", () => {
-    const board: Board = new Map();
-    const footman = place(board, 0, 1, "Footman", "p1");
-    place(board, 2, 1, "Footman", "p1");
-    place(board, 1, 1, "PlagueBearer", "p2");
-    const { cards } = resolveBoard(board, BOUNDS, 3);
-    const resolved = find(cards, footman.instanceId);
-    expect(resolved.finalValue).toBe(0);
-    const last = resolved.breakdown[resolved.breakdown.length - 1];
-    expect(last.label).toBe("Zeroed by Plague Bearer");
     expect(resolved.breakdown.reduce((sum, d) => sum + d.amount, 0)).toBe(0);
   });
 
@@ -135,12 +125,12 @@ describe("resolveBoard — Exile", () => {
 });
 
 describe("resolveBoard — Pretender", () => {
-  it("loses -5 if adjacent to a face-up base>=7 card", () => {
+  it("loses -5 if adjacent to a face-up card with base >= its own", () => {
     const board: Board = new Map();
     const p = place(board, 0, 0, "Pretender", "p1");
     place(board, 1, 0, "Exile", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, p.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 5);
+    expect(find(cards, p.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 3);
   });
 
   it("is safe if the dangerous neighbor is face-down", () => {
@@ -149,6 +139,15 @@ describe("resolveBoard — Pretender", () => {
     place(board, 1, 0, "Exile", "p2", false);
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, p.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base);
+  });
+
+  it("triggers off a neighbor whose base merely equals its own, not just a hardcoded 7", () => {
+    const board: Board = new Map();
+    // Two Pretenders, adjacent -- each other's base is exactly equal, not greater.
+    const p1 = place(board, 0, 0, "Pretender", "p1");
+    place(board, 1, 0, "Pretender", "p2", true);
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, p1.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 3);
   });
 });
 
@@ -217,26 +216,6 @@ describe("resolveBoard — Gloryseeker", () => {
   });
 });
 
-describe("resolveBoard — Darkspawn", () => {
-  it("gains +5 with 2+ adjacent face-down cards", () => {
-    const board: Board = new Map();
-    const d = place(board, 1, 1, "Darkspawn", "p1");
-    place(board, 0, 1, "Footman", "p2", false);
-    place(board, 2, 1, "Footman", "p2", false);
-    const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, d.instanceId).finalValue).toBe(CARD_DEFS.Darkspawn.base + 5);
-  });
-
-  it("no bonus with only 1 adjacent face-down card", () => {
-    const board: Board = new Map();
-    const d = place(board, 1, 1, "Darkspawn", "p1");
-    place(board, 0, 1, "Footman", "p2", false);
-    place(board, 2, 1, "Footman", "p2", true);
-    const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, d.instanceId).finalValue).toBe(CARD_DEFS.Darkspawn.base);
-  });
-});
-
 describe("resolveBoard — Chronicler", () => {
   it.each([3, 4, 5, 6].map((round) => [round, CARD_DEFS.Chronicler.base + round]))(
     "round %i -> value %i",
@@ -292,60 +271,130 @@ describe("resolveBoard — Bannerman", () => {
   });
 });
 
-describe("resolveBoard — Plague Bearer zeroing", () => {
-  it("zeroes 2+ adjacent Footmen but keeps its own base", () => {
+describe("resolveBoard — Plague Bearer", () => {
+  it("steals 2 from each of 2+ same-type neighbors, gaining 2 per point stolen", () => {
     const board: Board = new Map();
     const pb = place(board, 1, 1, "PlagueBearer", "p1");
     const f1 = place(board, 0, 1, "Footman", "p2");
     const f2 = place(board, 2, 1, "Footman", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, f1.instanceId).finalValue).toBe(0);
-    expect(find(cards, f2.instanceId).finalValue).toBe(0);
-    expect(find(cards, pb.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base);
+    expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+    expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+    expect(find(cards, pb.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base + 4);
   });
 
-  it("does nothing with only 1 adjacent Footman", () => {
+  it("does nothing with only 1 neighbor of a given type", () => {
     const board: Board = new Map();
-    place(board, 1, 1, "PlagueBearer", "p1");
+    const pb = place(board, 1, 1, "PlagueBearer", "p1");
     const f1 = place(board, 0, 1, "Footman", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+    expect(find(cards, pb.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base);
   });
 
-  it("overrides other bonuses (e.g. a Footman line) down to 0", () => {
+  it("pays out multiple qualifying type-groups independently (two Footmen + two Giants)", () => {
     const board: Board = new Map();
-    const f0 = place(board, 0, 0, "Footman", "p1");
-    const f1 = place(board, 1, 0, "Footman", "p1");
-    const f2 = place(board, 2, 0, "Footman", "p1");
-    const pb = place(board, 1, 1, "PlagueBearer", "p2");
-    // pb is adjacent to f1 only (1 footman) -- add another footman neighbor to trigger
-    const f3 = place(board, 2, 1, "Footman", "p2");
+    const pb = place(board, 2, 2, "PlagueBearer", "p1");
+    const f1 = place(board, 1, 2, "Footman", "p2");
+    const f2 = place(board, 3, 2, "Footman", "p2");
+    const g1 = place(board, 2, 1, "Giant", "p2", true);
+    const g2 = place(board, 2, 3, "Giant", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, f1.instanceId).finalValue).toBe(0);
-    expect(find(cards, f3.instanceId).finalValue).toBe(0);
-    // f0 and f2 are not adjacent to the Plague Bearer, so their line bonus stands.
-    expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
-    expect(find(cards, pb.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base);
+    expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+    expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+    expect(find(cards, g1.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 2);
+    expect(find(cards, g2.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 2);
+    expect(find(cards, pb.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base + 8);
+  });
+
+  it("counts another Plague Bearer as a matching neighbor type -- 'same type' includes its own", () => {
+    const board: Board = new Map();
+    const center = place(board, 1, 1, "PlagueBearer", "p1");
+    const left = place(board, 0, 1, "PlagueBearer", "p2");
+    const right = place(board, 2, 1, "PlagueBearer", "p3");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, left.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base - 2);
+    expect(find(cards, right.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base - 2);
+    expect(find(cards, center.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base + 4);
   });
 });
 
-describe("resolveBoard — Headsman", () => {
-  it("gives -4 to adjacent face-up cards with base >= 6", () => {
+describe("resolveBoard — Infiltrator", () => {
+  it("face-up: neutralized, scores its own base with no swap even next to a much bigger card", () => {
     const board: Board = new Map();
-    const h = place(board, 1, 1, "Headsman", "p1");
-    const giant = place(board, 0, 1, "Giant", "p2", true);
+    const inf = place(board, 1, 1, "Infiltrator", "p1", true);
+    const warlord = place(board, 0, 1, "Warlord", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, giant.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 4);
+    expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+    expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
   });
 
-  it("does not affect face-down big cards or low-base cards", () => {
+  it("face-down: swaps base with the highest-base adjacent card", () => {
     const board: Board = new Map();
-    place(board, 1, 1, "Headsman", "p1");
-    const hiddenGiant = place(board, 0, 1, "Giant", "p2", false);
-    const footman = place(board, 2, 1, "Footman", "p2", true);
+    // Warlord carries no self-modifying effect here (no other Warlords on the board),
+    // so its finalValue is just its base -- a clean comparison.
+    const inf = place(board, 1, 1, "Infiltrator", "p1", false);
+    const warlord = place(board, 0, 1, "Warlord", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, hiddenGiant.instanceId).finalValue).toBe(CARD_DEFS.Giant.base);
-    expect(find(cards, footman.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+    expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
+    expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+  });
+
+  it("swap applies even if the neighbor is face-down -- resolution sees true identity", () => {
+    const board: Board = new Map();
+    const inf = place(board, 1, 1, "Infiltrator", "p1", false);
+    const warlord = place(board, 0, 1, "Warlord", "p2", false);
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
+    expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+  });
+
+  it("still swaps even when the only neighbor has a lower base -- a real downside, not just upside", () => {
+    const board: Board = new Map();
+    const inf = place(board, 1, 1, "Infiltrator", "p1", false);
+    const commander = place(board, 0, 1, "Commander", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Commander.base);
+    expect(find(cards, commander.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+  });
+
+  it("picks only the single highest-base neighbor among several", () => {
+    const board: Board = new Map();
+    // Warlord and Giant carry no self-modifying effect here (no other Warlords on the
+    // board), so their finalValue is just their base -- a clean comparison.
+    const inf = place(board, 1, 1, "Infiltrator", "p1", false);
+    const warlord = place(board, 0, 1, "Warlord", "p2"); // base 8, the highest
+    const giant = place(board, 2, 1, "Giant", "p2"); // base 6
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
+    expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+    // The lower-base neighbor is untouched -- only the highest is swapped with.
+    expect(find(cards, giant.instanceId).finalValue).toBe(CARD_DEFS.Giant.base);
+  });
+
+  it("no-op when there's no neighbor to swap with", () => {
+    const board: Board = new Map();
+    const inf = place(board, 1, 1, "Infiltrator", "p1", false);
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+  });
+
+  it("no-op when the highest-base neighbor's base equals its own", () => {
+    const board: Board = new Map();
+    const a = place(board, 1, 1, "Infiltrator", "p1", false);
+    const b = place(board, 0, 1, "Infiltrator", "p2", false);
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+    expect(find(cards, b.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+  });
+
+  it("flipping it face-up is the counter -- neutralizes an in-progress swap", () => {
+    const board: Board = new Map();
+    const inf = place(board, 1, 1, "Infiltrator", "p1", true); // flipped, neutralized
+    const warlord = place(board, 0, 1, "Warlord", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+    expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
   });
 });
 

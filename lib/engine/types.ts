@@ -7,14 +7,13 @@ export type CardId =
   | "Berserker"
   | "Commander"
   | "Gloryseeker"
-  | "Darkspawn"
   | "Chronicler"
   | "Earthshaker"
   | "Skysplitter"
   | "Bannerman"
   | "PlagueBearer"
   | "Suppressor"
-  | "Headsman"
+  | "Infiltrator"
   | "Truthseeker"
   | "Mercenary";
 

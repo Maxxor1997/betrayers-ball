@@ -138,14 +138,14 @@ describe("estimateMargin — fair, per-viewer evaluation", () => {
 
   it("resolveBoard (ground truth) and estimateMargin (viewer's estimate) genuinely diverge on hidden multi-card effects", () => {
     const board: Board = new Map();
-    // 3 isolated, hidden, same-owner Warlords: each takes the -3-per-other-Warlord penalty twice.
+    // 3 isolated, hidden, same-owner Warlords: each takes the -2-per-other-Warlord penalty twice.
     board.set(posKey({ x: 0, y: 0 }), card("Warlord", "p2", false));
     board.set(posKey({ x: 2, y: 0 }), card("Warlord", "p2", false));
     board.set(posKey({ x: 0, y: 2 }), card("Warlord", "p2", false));
     const state = makeState({ board });
 
     const trueResult = computeGameResult(board, BOUNDS, state.round, ["p1", "p2"]);
-    const trueWarlordValue = CARD_DEFS.Warlord.base - 3 * 2;
+    const trueWarlordValue = CARD_DEFS.Warlord.base - 2 * 2;
     expect(trueResult.scores.p2).toBe(3 * trueWarlordValue);
 
     // p1 can't see any of them are Warlords -- each is estimated as an isolated

@@ -37,8 +37,8 @@ function newGameState(playerCount: number, centerEffect: CenterEffectId): GameSt
 
 /** A card's own printed floor (Warlord/Exile) is rarely worth a breakdown line -- it's
  * not a surprise interaction, just the card's known rule, and is redundant with the
- * Final value already shown. Zeroed-by-Plague-Bearer/Kingslayer stay, since those ARE
- * a surprise interaction with another card worth calling out. */
+ * Final value already shown. Other contributions (Plague Bearer, Kingslayer, ...) stay,
+ * since those ARE a surprise interaction with another card worth calling out. */
 function visibleBreakdown(breakdown: { label: string; amount: number }[]) {
   return breakdown.filter((d) => d.label !== FLOORED_AT_ZERO_LABEL);
 }
@@ -322,11 +322,16 @@ function Game() {
   }
 
   const human = state.players.find((p) => p.id === HUMAN)!;
-  const handCardIds = new Set(human.hand.map((c) => c.cardId));
-  // Only cards visible to the human -- face-up (any owner) or face-down but their own
-  // -- never an opponent's still-hidden card, same redaction rule as getVisibleBoard.
-  const visibleBoardCardIds = new Set(
-    [...state.board.values()].filter((c) => c.faceUp || c.ownerId === HUMAN).map((c) => c.cardId)
+  // "Mine" spans both zones -- a card you own is still yours once it's on the board,
+  // not just while it's sitting in your hand.
+  const myCardIds = new Set([
+    ...human.hand.map((c) => c.cardId),
+    ...[...state.board.values()].filter((c) => c.ownerId === HUMAN).map((c) => c.cardId),
+  ]);
+  // An opponent's card, only once revealed -- never their still-hidden ones, same
+  // redaction rule as getVisibleBoard.
+  const opponentVisibleBoardCardIds = new Set(
+    [...state.board.values()].filter((c) => c.faceUp && c.ownerId !== HUMAN).map((c) => c.cardId)
   );
 
   // Computed once here (not inside EndScreen) so BoardGrid can also show each card's
@@ -354,8 +359,8 @@ function Game() {
     <div className="flex flex-1 flex-col gap-6 px-4 py-8 lg:flex-row lg:items-start lg:justify-center">
       <CardCatalog
         playerCount={state.config.playerCount}
-        handCardIds={handCardIds}
-        visibleBoardCardIds={visibleBoardCardIds}
+        myCardIds={myCardIds}
+        opponentVisibleBoardCardIds={opponentVisibleBoardCardIds}
         currentCenterEffect={state.config.centerEffect}
       />
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">
@@ -938,13 +943,13 @@ const BUCKET_DESCRIPTIONS: Record<CardBucket, string> = {
  */
 function CardCatalog({
   playerCount,
-  handCardIds,
-  visibleBoardCardIds,
+  myCardIds,
+  opponentVisibleBoardCardIds,
   currentCenterEffect,
 }: {
   playerCount: number;
-  handCardIds: Set<CardId>;
-  visibleBoardCardIds: Set<CardId>;
+  myCardIds: Set<CardId>;
+  opponentVisibleBoardCardIds: Set<CardId>;
   currentCenterEffect: CenterEffectId;
 }) {
   const [hoveredCard, setHoveredCard] = useState<{ id: CardId; rect: DOMRect } | null>(null);
@@ -1030,14 +1035,14 @@ function CardCatalog({
                   {ids.map((id) => {
                     const def = CARD_DEFS[id];
                     const copies = copiesForPlayerCount(def, playerCount);
-                    const inHand = handCardIds.has(id);
-                    const onBoard = visibleBoardCardIds.has(id);
+                    const mine = myCardIds.has(id);
+                    const onOpponentBoard = opponentVisibleBoardCardIds.has(id);
                     const boxToneClass =
                       copies === 0
                         ? "border-zinc-200 opacity-50 dark:border-zinc-800"
-                        : inHand
+                        : mine
                           ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
-                          : onBoard
+                          : onOpponentBoard
                             ? "border-emerald-300/70 bg-emerald-50/50 dark:border-emerald-800/70 dark:bg-emerald-950/40"
                             : "border-zinc-300 dark:border-zinc-700";
                     return (

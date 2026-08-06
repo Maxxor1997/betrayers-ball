@@ -47,7 +47,7 @@ export function getAdjacentCards(board: Board, bounds: BoardBounds, pos: Positio
 
 /**
  * Whether `pos` reads as "face-up" for an effect that keys off a neighbor's face
- * state (Headsman, Pretender, PlagueBearer, Darkspawn, ...). An ownerless tile (center,
+ * state (Pretender, ...). An ownerless tile (center,
  * or an extra tile like Three Headed Dragon's heads) is always face-up -- it holds no
  * hidden info, so there's nothing to be face-down about (see CLAUDE.md). Returns false
  * for an empty, non-ownerless cell -- there's no card there to be face-up or -down.

@@ -11,9 +11,9 @@ export interface ScoreContribution {
 
 /**
  * Breakdown label for a card's own printed floor (Warlord/Exile) hitting 0. Exported
- * so a breakdown UI can filter this one out if it wants to -- unlike "Zeroed by Plague
- * Bearer" or "Kingslayer", it's not a surprise interaction with another card, just the
- * card's own known rule, so it's often redundant with the Final value already shown.
+ * so a breakdown UI can filter this one out if it wants to -- unlike "Kingslayer", it's
+ * not a surprise interaction with another card, just the card's own known rule, so it's
+ * often redundant with the Final value already shown.
  */
 export const FLOORED_AT_ZERO_LABEL = "Floored at 0";
 
@@ -101,22 +101,7 @@ function computeValueModifiers(
   return contributions;
 }
 
-/** Step 3 — Zeroing pass. Non-negated cards with a `zeroesAdjacentIf` hook (Plague Bearer) zero the cards it returns. Returns the zeroed instanceIds. */
-function applyZeroingPass(board: Board, bounds: BoardBounds, negated: Set<string>, values: Map<string, number>): Set<string> {
-  const zeroed = new Set<string>();
-  for (const [key, c] of board.entries()) {
-    const zeroesAdjacentIf = CARD_DEFS[c.cardId].zeroesAdjacentIf;
-    if (!zeroesAdjacentIf || negated.has(c.instanceId)) continue;
-    const pos = parsePosKey(key);
-    for (const instanceId of zeroesAdjacentIf({ board, bounds, pos })) {
-      values.set(instanceId, 0);
-      zeroed.add(instanceId);
-    }
-  }
-  return zeroed;
-}
-
-/** Step 4 — Floors. Cards with `floorAtZero` (Warlord, Exile) floor at 0. Returns the instanceIds actually floored. */
+/** Step 3 — Floors. Cards with `floorAtZero` (Warlord, Exile) floor at 0. Returns the instanceIds actually floored. */
 function applyFloors(board: Board, values: Map<string, number>): Set<string> {
   const floored = new Set<string>();
   for (const c of board.values()) {
@@ -131,8 +116,8 @@ function applyFloors(board: Board, values: Map<string, number>): Set<string> {
 }
 
 /**
- * Runs the full spec resolution order (suppression -> value-modifying -> zeroing ->
- * floors -> freeze -> post-resolution) and returns each card's frozen final value plus
+ * Runs the full spec resolution order (suppression -> value-modifying -> floors ->
+ * freeze -> post-resolution) and returns each card's frozen final value plus
  * per-owner totals. `round` is the global round the game ended on (feeds Chronicler).
  *
  * `centerEffect` and `playerIds` are optional and default to the pre-center-effects
@@ -156,7 +141,6 @@ export function resolveBoard(
     values.set(c.instanceId, rawTotal);
   }
 
-  const plagueBearerZeroed = applyZeroingPass(board, bounds, negated, values);
   applyFloors(board, values);
 
   const cards: ResolvedCard[] = [];
@@ -171,8 +155,7 @@ export function resolveBoard(
     const breakdown: ScoreContribution[] = [{ label: "Base", amount: base }, ...cardContributions];
     const rawTotal = base + cardContributions.reduce((sum, d) => sum + d.amount, 0);
     if (finalValue !== rawTotal) {
-      const label = plagueBearerZeroed.has(c.instanceId) ? "Zeroed by Plague Bearer" : FLOORED_AT_ZERO_LABEL;
-      breakdown.push({ label, amount: finalValue - rawTotal });
+      breakdown.push({ label: FLOORED_AT_ZERO_LABEL, amount: finalValue - rawTotal });
     }
 
     cards.push({
