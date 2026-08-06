@@ -1,11 +1,7 @@
 import { ResolvedCard } from "@/lib/engine/resolution";
-import { CardId, CardInstance, CenterEffectId, GameState, Position } from "@/lib/engine/types";
+import { CardId, CardInstance, GameState, Position } from "@/lib/engine/types";
 
-/** Player count and center effect chosen from the "New game" setup popup. */
-export interface NewGameSetup {
-  playerCount: number;
-  centerEffect: CenterEffectId | "random";
-}
+export type { NewGameSetup } from "@/app/components/NewGameModal";
 
 /** A flip the human has tapped/clicked but not yet confirmed. */
 export interface PendingFlip {

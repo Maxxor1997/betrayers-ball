@@ -280,6 +280,7 @@ describe("applyAction — centerEffect threads through to a real end-of-game res
       hasFlippedThisTurn: false,
       votes: {},
       voteHistory: [],
+      flipHistory: [],
       placementOrder: [],
       phase: "playing",
       result: null,

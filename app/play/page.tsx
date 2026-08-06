@@ -1,25 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
-import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { CARD_DEFS } from "@/lib/content/cards";
 import { inBounds, isOwnerlessPosition } from "@/lib/engine/board";
-import {
-  CENTER_EFFECTS,
-  centerEffectDescription,
-  isAvailableAtPlayerCount,
-  pseudoCardLiveValue,
-  randomCenterEffectPool,
-  selectableCenterEffects,
-} from "@/lib/content/centerEffects";
+import { CENTER_EFFECTS, centerEffectDescription, pseudoCardLiveValue, randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { computeNegatedInstanceIds, FLOORED_AT_ZERO_LABEL, ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
-import { CardBucket, CardId, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
+import { CardId, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, PLAYER_BORDER_COLOR_CLASSES, PLAYER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 import { BoardGridProps, HandProps, NewGameSetup, PendingFlip, PlayerTableProps } from "./types";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
+import { CardCatalog } from "@/app/components/CardCatalog";
+import { InstructionsModal } from "@/app/components/InstructionsModal";
+import { NewGameModal } from "@/app/components/NewGameModal";
 
 const HUMAN = "human";
 
@@ -27,6 +24,29 @@ const DRAG_MIME = "application/x-card-instance-id";
 
 function buildPlayerIds(playerCount: number): string[] {
   return [HUMAN, ...Array.from({ length: playerCount - 1 }, (_, i) => `ai-${i + 1}`)];
+}
+
+/**
+ * Reads the `players`/`center` query params the home screen's setup popup encodes
+ * into its /play link -- lets this page skip showing its own setup prompt when it
+ * arrives with a real choice already made. Null (missing or invalid, e.g. a direct
+ * param-less visit to /play) falls back to opening the prompt here instead.
+ *
+ * Takes whatever useSearchParams() returns (not a raw `window.location.search` read)
+ * -- that's the router's own live params, guaranteed to reflect the destination URL of
+ * a client-side navigation by the time this component's first render runs. A direct
+ * `window.location` read landed here first and turned out unreliable for that exact
+ * case: the router hasn't necessarily flushed the address bar to the DOM string
+ * `window.location.search` exposes at the moment this component's function body
+ * executes, so it could see the *previous* page's (param-less) URL and wrongly fall
+ * back to the prompt -- a real double-setup bug, not just a theoretical one.
+ */
+function readGameSetupFromQuery(params: { get(name: string): string | null }): { playerCount: number; centerEffect: CenterEffectId } | null {
+  const playerCount = Number(params.get("players"));
+  const centerEffect = params.get("center") as CenterEffectId | null;
+  if (!Number.isInteger(playerCount) || playerCount < MIN_PLAYERS || playerCount > MAX_PLAYERS) return null;
+  if (!centerEffect || !(centerEffect in CENTER_EFFECTS)) return null;
+  return { playerCount, centerEffect };
 }
 
 function newGameState(playerCount: number, centerEffect: CenterEffectId): GameState {
@@ -183,18 +203,37 @@ export default function PlayPage() {
     return <div className="flex flex-1 items-center justify-center p-8 text-sm text-zinc-500">Loading…</div>;
   }
 
-  return <Game />;
+  // useSearchParams() (used inside Game, to read the setup the home screen encoded
+  // into the URL) requires a Suspense boundary -- Next.js opts the tree using it out
+  // of static rendering otherwise. This whole page is already effectively client-only
+  // rendered (see the mount gate above), so this never visibly suspends in practice.
+  return (
+    <Suspense fallback={<div className="flex flex-1 items-center justify-center p-8 text-sm text-zinc-500">Loading…</div>}>
+      <Game />
+    </Suspense>
+  );
 }
 
 function Game() {
-  const [playerCount, setPlayerCount] = useState(2);
-  const [state, setState] = useState<GameState>(() => newGameState(2, "none"));
+  // The router's own live query params (see readGameSetupFromQuery's doc comment for
+  // why this has to be useSearchParams() and not a raw window.location read) -- read
+  // directly during render, not in an effect, so the very first render already
+  // reflects a setup chosen on the home screen, with no flash of the 2p/"none"
+  // placeholder beforehand.
+  const searchParams = useSearchParams();
+  const initialSetup = readGameSetupFromQuery(searchParams);
+
+  const [playerCount, setPlayerCount] = useState(initialSetup?.playerCount ?? 2);
+  const [state, setState] = useState<GameState>(() => newGameState(initialSetup?.playerCount ?? 2, initialSetup?.centerEffect ?? "none"));
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [pendingFlip, setPendingFlip] = useState<PendingFlip | null>(null);
   // Player count and center effect are only ever chosen from this setup popup (opened
-  // by "New game"), never editable while a game is in progress.
-  const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(null);
+  // by "New game"), never editable while a game is in progress. Starts open only as a
+  // fallback (a direct, param-less visit to /play) -- arriving from the home screen's
+  // own setup popup already carries a real choice via the query params above, so there's
+  // nothing left to prompt for.
+  const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(initialSetup ? null : { playerCount: 2, centerEffect: "random" });
   const [showInstructions, setShowInstructions] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [highlightedCardId, setHighlightedCardId] = useState<CardId | null>(null);
@@ -372,6 +411,12 @@ function Game() {
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-zinc-500">{playerCount} players</span>
           <ThemeToggle />
+          <Link
+            href="/"
+            className="rounded-full border border-zinc-300 px-4 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            ◀ Home
+          </Link>
           <button
             onClick={() => setShowInstructions(true)}
             className="rounded-full border border-zinc-300 px-4 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
@@ -492,64 +537,7 @@ function Game() {
       )}
 
       {newGameSetup && (
-        <div className="fixed top-20 left-1/2 z-50 w-[min(90vw,20rem)] -translate-x-1/2 rounded-lg border border-zinc-300 bg-white p-3 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-          <p className="mb-2 font-medium">Start a new game</p>
-          <label className="mb-2 flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
-            Players
-            <select
-              value={newGameSetup.playerCount}
-              onChange={(e) => {
-                const playerCount = Number(e.target.value);
-                // Reset to "random" if the effect currently picked isn't available at
-                // the new player count -- e.g. an effect that's only for larger boards.
-                const centerEffect =
-                  newGameSetup.centerEffect === "random" ||
-                  newGameSetup.centerEffect === "none" ||
-                  isAvailableAtPlayerCount(newGameSetup.centerEffect, playerCount)
-                    ? newGameSetup.centerEffect
-                    : "random";
-                setNewGameSetup({ ...newGameSetup, playerCount, centerEffect });
-              }}
-              className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700"
-            >
-              {Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i).map((n) => (
-                <option key={n} value={n}>
-                  {n} (you + {n - 1} AI)
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="mb-3 flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
-            Center effect
-            <select
-              value={newGameSetup.centerEffect}
-              onChange={(e) => setNewGameSetup({ ...newGameSetup, centerEffect: e.target.value as CenterEffectId | "random" })}
-              className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700"
-            >
-              <option value="random">Random</option>
-              <option value="none">None</option>
-              {selectableCenterEffects(newGameSetup.playerCount).map((id) => (
-                <option key={id} value={id}>
-                  {CENTER_EFFECTS[id].label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={() => setNewGameSetup(null)}
-              className="rounded-full border border-zinc-300 px-3 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={confirmNewGame}
-              className="rounded-full bg-zinc-900 px-3 py-1 text-xs text-white dark:bg-zinc-100 dark:text-black"
-            >
-              Start
-            </button>
-          </div>
-        </div>
+        <NewGameModal setup={newGameSetup} onChange={setNewGameSetup} onCancel={() => setNewGameSetup(null)} onConfirm={confirmNewGame} />
       )}
       </div>
       <GameStatusPanel
@@ -758,26 +746,6 @@ function BoardGrid({
   );
 }
 
-/**
- * A tooltip rendered into document.body via a portal, positioned with `fixed` from
- * the anchor's real screen coordinates -- unlike a plain `absolute` tooltip nested
- * inside a scrollable ancestor, this can't get clipped by that ancestor's overflow
- * (CSS forces overflow-x to clip too whenever overflow-y is scrollable, so any
- * tooltip meant to extend sideways out of a vertically-scrolling sidebar needs this).
- */
-function FixedTooltip({ rect, children }: { rect: DOMRect; children: React.ReactNode }) {
-  if (typeof document === "undefined") return null;
-  return createPortal(
-    <div
-      className="pointer-events-none fixed z-50 w-max max-w-[14rem] rounded bg-zinc-900 px-2 py-1 text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black"
-      style={{ top: rect.top, left: rect.right + 4 }}
-    >
-      {children}
-    </div>,
-    document.body
-  );
-}
-
 function RoundBadge({ round, roundCap }: { round: number; roundCap: number }) {
   return (
     <div className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-full border-2 border-zinc-400 dark:border-zinc-600">
@@ -857,6 +825,66 @@ function TurnChecklist({
   );
 }
 
+/**
+ * Per-opponent summary of what they've revealed and how they voted last -- both drawn
+ * from state history rather than the live board/votes, so it can't leak anything a
+ * player wouldn't otherwise already know: `flipHistory` entries are only ever cards
+ * that already got flipped face-up (already public the moment it happened), and only
+ * the *last completed* voting round is shown (`voteHistory`), never the in-progress
+ * `votes` -- those stay private until everyone's voted, per the locked-vote protocol.
+ * Collapsed by default, same reasoning as CardCatalog's Locations section -- useful
+ * reference, not something that needs to eat vertical space on every turn.
+ */
+function OpponentActivityPanel({ state }: { state: GameState }) {
+  const [collapsed, setCollapsed] = useState(true);
+  const opponents = state.players.filter((p) => p.id !== HUMAN);
+  if (opponents.length === 0) return null;
+
+  const lastVoteRound = state.voteHistory[state.voteHistory.length - 1];
+
+  return (
+    <div className="flex w-full flex-col gap-2 text-left">
+      <button
+        onClick={() => setCollapsed((prev) => !prev)}
+        className="flex w-full items-center justify-center gap-1 text-[10px] font-semibold tracking-wide text-zinc-500 uppercase hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+      >
+        <span className="inline-block w-3 shrink-0">{collapsed ? "▶" : "▼"}</span>
+        Opponent activity
+      </button>
+      {!collapsed && (
+        <div className="flex flex-col gap-3">
+          {opponents.map((p) => {
+            const flips = state.flipHistory.filter((f) => f.playerId === p.id);
+            const vote = lastVoteRound?.votes[p.id];
+            return (
+              <div key={p.id} className="flex flex-col gap-0.5">
+                <span className={`text-xs font-semibold ${ownerTextColorClass(state, p.id)}`}>{ownerDisplayName(state, p.id)}</span>
+                <span className="text-[10px] leading-snug text-zinc-500 dark:text-zinc-400">
+                  Flipped:{" "}
+                  {flips.length === 0
+                    ? "none yet"
+                    : flips.map((f, i) => (
+                        // Colored by the flipped card's owner, not the flipper -- a
+                        // player can blind-flip an opponent's face-down card too, so
+                        // this is what actually tells you whose card got revealed.
+                        <span key={f.instanceId}>
+                          {i > 0 && ", "}
+                          <span className={ownerTextColorClass(state, f.ownerId)}>{CARD_DEFS[f.cardId].name}</span>
+                        </span>
+                      ))}
+                </span>
+                <span className="text-[10px] leading-snug text-zinc-500 dark:text-zinc-400">
+                  Last vote: {vote === undefined ? "none yet" : `${vote ? "end" : "continue"} (round ${lastVoteRound!.round})`}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Compact status readout for the header: round, flip/vote availability, center effect, and the turn checklist. */
 function GameStatusPanel({
   state,
@@ -921,230 +949,16 @@ function GameStatusPanel({
           </>
         )}
         <div className="h-px w-full shrink-0 bg-zinc-300 dark:bg-zinc-700" />
+        <div className="w-full overflow-x-hidden lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+          <OpponentActivityPanel state={state} />
+        </div>
+        <div className="h-px w-full shrink-0 bg-zinc-300 dark:bg-zinc-700" />
         <button
           onClick={onCopyState}
           className="w-full rounded-full border border-zinc-300 px-3 py-1.5 text-xs whitespace-nowrap hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
         >
           {copyFeedback ? "Copied!" : "Copy board state"}
         </button>
-      </div>
-    </aside>
-  );
-}
-
-const BUCKET_ORDER: CardBucket[] = ["Slam", "Engine", "Control"];
-
-/** Locations sidebar order, simplest rule to understand first -- not alphabetical or insertion order. */
-const LOCATION_COMPLEXITY_ORDER: CenterEffectId[] = [
-  "none",
-  "twoTowers",
-  "threeHeadedDragon",
-  "freeCities",
-  "reckoning",
-  "shadowlands",
-  "mirrorPool",
-  "championOfTheWeak",
-  "kingslayer",
-];
-
-const BUCKET_DESCRIPTIONS: Record<CardBucket, string> = {
-  Slam: "High base value with a built-in downside or condition that can cut it back down -- big numbers, but risky.",
-  Engine: "Low base value that grows from board state or synergy with other cards -- value comes from setup, not the printed number.",
-  Control: "Doesn't boost itself -- manipulates neighbors' values or bends the normal rules (negation, forced flips, zeroing).",
-};
-
-/**
- * Reference sidebar listing every card in the game, grouped by bucket, with its copy
- * count at the current game's player count -- lets a new player see the whole card
- * pool up front instead of only discovering cards as they're drawn. Shows every card
- * regardless of count (a card disabled or absent at this player count still appears,
- * just annotated "x0 in deck").
- */
-function CardCatalog({
-  playerCount,
-  myCardIds,
-  opponentVisibleBoardCardIds,
-  currentCenterEffect,
-}: {
-  playerCount: number;
-  myCardIds: Set<CardId>;
-  opponentVisibleBoardCardIds: Set<CardId>;
-  currentCenterEffect: CenterEffectId;
-}) {
-  const [hoveredCard, setHoveredCard] = useState<{ id: CardId; rect: DOMRect } | null>(null);
-  const [hoveredBucket, setHoveredBucket] = useState<{ bucket: CardBucket; rect: DOMRect } | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
-  const [collapsedBuckets, setCollapsedBuckets] = useState<Set<CardBucket>>(new Set());
-  // Collapsed by default, unlike the card buckets -- center effects are secondary
-  // reference info, not something a new player needs open by default.
-  const [locationsCollapsed, setLocationsCollapsed] = useState(true);
-
-  function toggleBucket(bucket: CardBucket) {
-    setCollapsedBuckets((prev) => {
-      const next = new Set(prev);
-      if (next.has(bucket)) next.delete(bucket);
-      else next.add(bucket);
-      return next;
-    });
-  }
-
-  if (collapsed) {
-    return (
-      <aside className="shrink-0 lg:sticky lg:top-8 lg:self-start">
-        <button
-          onClick={() => setCollapsed(false)}
-          className="rounded-full border border-zinc-300 px-3 py-1.5 text-xs whitespace-nowrap hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-        >
-          ▶ Cards
-        </button>
-      </aside>
-    );
-  }
-
-  return (
-    <aside className="w-full shrink-0 overflow-x-hidden lg:sticky lg:top-8 lg:w-48 lg:self-start lg:border-r-2 lg:border-zinc-400 lg:pr-4 dark:lg:border-zinc-600">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">
-          Card catalog <span className="font-normal text-zinc-500">({playerCount}p)</span>
-        </h2>
-        <button
-          onClick={() => setCollapsed(true)}
-          title="Collapse"
-          className="shrink-0 rounded-full border border-zinc-300 px-2 py-0.5 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-        >
-          ◀
-        </button>
-      </div>
-      <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-zinc-500 dark:text-zinc-400">
-        <span className="flex items-center gap-1">
-          <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" /> My Cards
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" /> Cards on Board
-        </span>
-      </div>
-      <div className="flex flex-col gap-4 overflow-x-hidden lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
-        {BUCKET_ORDER.map((bucket) => {
-          const ids = ALL_CARD_IDS.filter((id) => CARD_DEFS[id].bucket === bucket).sort((a, b) => {
-            const countDiff = copiesForPlayerCount(CARD_DEFS[b], playerCount) - copiesForPlayerCount(CARD_DEFS[a], playerCount);
-            return countDiff !== 0 ? countDiff : CARD_DEFS[a].name.localeCompare(CARD_DEFS[b].name);
-          });
-          const bucketCollapsed = collapsedBuckets.has(bucket);
-          return (
-            <div key={bucket}>
-              <div className="relative mb-1.5">
-                <button
-                  onClick={() => toggleBucket(bucket)}
-                  onMouseEnter={(e) => setHoveredBucket({ bucket, rect: e.currentTarget.getBoundingClientRect() })}
-                  onMouseLeave={() => setHoveredBucket((prev) => (prev?.bucket === bucket ? null : prev))}
-                  className="flex w-full items-center gap-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-                >
-                  <span className="inline-block w-3 shrink-0">{bucketCollapsed ? "▶" : "▼"}</span>
-                  {bucket}
-                  <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-400 text-[9px] normal-case text-zinc-400 dark:border-zinc-500 dark:text-zinc-500">
-                    i
-                  </span>
-                </button>
-                {hoveredBucket?.bucket === bucket && (
-                  <FixedTooltip rect={hoveredBucket.rect}>{BUCKET_DESCRIPTIONS[bucket]}</FixedTooltip>
-                )}
-              </div>
-              {!bucketCollapsed && (
-                <div className="flex flex-col gap-1.5">
-                  {ids.map((id) => {
-                    const def = CARD_DEFS[id];
-                    const copies = copiesForPlayerCount(def, playerCount);
-                    const mine = myCardIds.has(id);
-                    const onOpponentBoard = opponentVisibleBoardCardIds.has(id);
-                    const boxToneClass =
-                      copies === 0
-                        ? "border-zinc-200 opacity-50 dark:border-zinc-800"
-                        : mine
-                          ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
-                          : onOpponentBoard
-                            ? "border-emerald-300/70 bg-emerald-50/50 dark:border-emerald-800/70 dark:bg-emerald-950/40"
-                            : "border-zinc-300 dark:border-zinc-700";
-                    return (
-                      <div
-                        key={id}
-                        className="relative flex min-w-0 items-center gap-2"
-                        onMouseEnter={(e) => setHoveredCard({ id, rect: e.currentTarget.getBoundingClientRect() })}
-                        onMouseLeave={() => setHoveredCard((prev) => (prev?.id === id ? null : prev))}
-                      >
-                        <div
-                          className={`relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${boxToneClass}`}
-                        >
-                          <span className="text-[8px] font-semibold leading-tight break-words">{def.name}</span>
-                          <span className="text-base font-bold leading-none">{def.base}</span>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-xs font-medium">
-                            {def.name} <span className="text-zinc-500 dark:text-zinc-400">×{copies}</span>
-                          </div>
-                          <div className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">{def.text}</div>
-                        </div>
-                        {hoveredCard?.id === id && <FixedTooltip rect={hoveredCard.rect}>{def.fullText}</FixedTooltip>}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-        <div>
-          <button
-            onClick={() => setLocationsCollapsed((prev) => !prev)}
-            className="flex w-full items-center gap-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-          >
-            <span className="inline-block w-3 shrink-0">{locationsCollapsed ? "▶" : "▼"}</span>
-            Locations
-          </button>
-          {!locationsCollapsed && (
-            <div className="mt-1.5 flex flex-col gap-2">
-              {LOCATION_COMPLEXITY_ORDER
-                .slice()
-                .sort((a, b) => Number(!!CENTER_EFFECTS[a].disabled) - Number(!!CENTER_EFFECTS[b].disabled))
-                .map((id) => {
-                const def = CENTER_EFFECTS[id];
-                const available = isAvailableAtPlayerCount(id, playerCount);
-                const isCurrent = id === currentCenterEffect;
-                const config = configForPlayerCount(playerCount, id);
-                const restriction =
-                  def.minPlayerCount && def.maxPlayerCount
-                    ? `${def.minPlayerCount}-${def.maxPlayerCount}p only`
-                    : def.minPlayerCount
-                      ? `${def.minPlayerCount}p+ only`
-                      : def.maxPlayerCount
-                        ? `up to ${def.maxPlayerCount}p only`
-                        : null;
-                return (
-                  <div
-                    key={id}
-                    className={`rounded-md border p-1.5 ${
-                      isCurrent
-                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
-                        : available
-                          ? "border-zinc-300 dark:border-zinc-700"
-                          : "border-zinc-200 opacity-50 dark:border-zinc-800"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-xs font-medium">{def.label}</span>
-                      {isCurrent && (
-                        <span className="shrink-0 rounded-full bg-blue-500 px-1.5 py-0.5 text-[9px] font-semibold text-white">
-                          Current
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[10px] text-zinc-500 dark:text-zinc-400">{centerEffectDescription(id, config)}</div>
-                    {restriction && <div className="mt-0.5 text-[9px] text-zinc-400 dark:text-zinc-500">{restriction}</div>}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
       </div>
     </aside>
   );
@@ -1377,163 +1191,3 @@ function EndScreen({ state, result }: { state: GameState; result: ResolutionResu
   );
 }
 
-function StepBadge({ n }: { n: number }) {
-  return (
-    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[11px] font-semibold text-white dark:bg-zinc-100 dark:text-black">
-      {n}
-    </span>
-  );
-}
-
-function MiniBoard() {
-  // A tiny mockup of the opening board: only the center tile's 4 orthogonal
-  // neighbors are legal on an empty board, exactly like the real thing.
-  const legal = new Set(["1,0", "0,1", "2,1", "1,2"]);
-  const cells: string[] = [];
-  for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) cells.push(`${x},${y}`);
-
-  return (
-    <div className="grid w-max grid-cols-3 gap-1">
-      {cells.map((key) => {
-        if (key === "1,1") {
-          return (
-            <div
-              key={key}
-              className="flex h-8 w-8 items-center justify-center rounded border-2 border-dashed border-zinc-400 text-[7px] text-zinc-400"
-            >
-              center
-            </div>
-          );
-        }
-        return (
-          <div
-            key={key}
-            className={`h-8 w-8 rounded border ${
-              legal.has(key)
-                ? "border-emerald-300/70 bg-emerald-50/50 dark:border-emerald-800/70 dark:bg-emerald-950/40"
-                : "border-zinc-200 dark:border-zinc-800"
-            }`}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-function MiniCard() {
-  return (
-    <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 border-blue-500 bg-blue-50 p-1 text-center dark:bg-blue-950">
-      <span className="text-[9px] font-semibold leading-tight">Footman</span>
-      <span className="text-lg font-bold leading-none">5</span>
-      <span className="text-[7px] leading-tight text-zinc-500 dark:text-zinc-400">+1 if 3+ owned in row/col</span>
-    </div>
-  );
-}
-
-function InstructionsModal({ onClose }: { onClose: () => void }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-zinc-300 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">How to play</h2>
-          <button
-            onClick={onClose}
-            className="rounded-full border border-zinc-300 px-3 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="space-y-5 text-sm">
-          <section>
-            <h3 className="mb-1 font-semibold">Goal</h3>
-            <p className="text-zinc-600 dark:text-zinc-400">
-              Place cards on the board to build the highest total score. Cards start face-down and are worth their
-              base value plus whatever their effect adds or subtracts — position, ownership, and who's face-up all
-              matter. Scores are only revealed at the very end.
-            </p>
-          </section>
-
-          <section>
-            <h3 className="mb-1 font-semibold">Your turn</h3>
-            <ol className="space-y-2 text-zinc-600 dark:text-zinc-400">
-              <li className="flex items-start gap-2">
-                <StepBadge n={1} />
-                <span>
-                  <strong className="text-zinc-800 dark:text-zinc-200">Optionally flip</strong> one face-down card
-                  face-up (once flipping unlocks) — at most one per turn, and it's permanent.
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <StepBadge n={2} />
-                <span>
-                  <strong className="text-zinc-800 dark:text-zinc-200">Place one card</strong> from your hand onto a
-                  highlighted cell — drag it there, or tap the card then tap the cell.
-                </span>
-              </li>
-            </ol>
-          </section>
-
-          <section>
-            <h3 className="mb-1 font-semibold">The board</h3>
-            <div className="flex flex-wrap items-center gap-4">
-              <MiniBoard />
-              <p className="max-w-xs text-zinc-600 dark:text-zinc-400">
-                Faint green cells are empty and legal to place on right now — they're not cards, just open targets. A
-                placement must be orthogonally adjacent to an existing card or the center tile — nothing goes on the
-                center itself, but it always counts as a neighbor.
-              </p>
-            </div>
-          </section>
-
-          <section>
-            <h3 className="mb-1 font-semibold">Cards</h3>
-            <div className="flex flex-wrap items-center gap-4">
-              <MiniCard />
-              <ul className="max-w-xs list-disc space-y-1 pl-4 text-zinc-600 dark:text-zinc-400">
-                <li>Name and base value, shown in your hand and once revealed.</li>
-                <li>A short effect summary — hover any card (hand or board) for the full rules text.</li>
-                <li>You can always see your own hand and any face-up card; opponents' face-down cards stay hidden.</li>
-              </ul>
-            </div>
-          </section>
-
-          <section>
-            <h3 className="mb-1 font-semibold">Scoring</h3>
-            <p className="text-zinc-600 dark:text-zinc-400">
-              Nothing is scored during play. When the game ends, every card's final value is computed at once from
-              its base value plus its effect — adjacency, ownership, and flip-state all feed in, but never another
-              card's already-modified value. Highest total wins; ties share the win.
-            </p>
-          </section>
-
-          <section>
-            <h3 className="mb-1 font-semibold">Ending the game</h3>
-            <ul className="list-disc space-y-1 pl-4 text-zinc-600 dark:text-zinc-400">
-              <li>The board fills up, or</li>
-              <li>The round cap is reached, or</li>
-              <li>
-                Starting from the min-round floor, every round opens a private vote to end — it only ends if a
-                majority says yes; ties keep the game going.
-              </li>
-            </ul>
-          </section>
-
-          <section>
-            <h3 className="mb-1 font-semibold">Center effects</h3>
-            <p className="text-zinc-600 dark:text-zinc-400">
-              Each game picks one special rule for the center tile (or none) — shown in the header and on the
-              center tile itself. Hover the center tile any time to see what it does.
-            </p>
-          </section>
-        </div>
-      </div>
-    </div>
-  );
-}

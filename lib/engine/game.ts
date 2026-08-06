@@ -49,6 +49,7 @@ export function createGame(
     hasFlippedThisTurn: false,
     votes: {},
     voteHistory: [],
+    flipHistory: [],
     placementOrder: [],
     phase: "playing",
     result: null,

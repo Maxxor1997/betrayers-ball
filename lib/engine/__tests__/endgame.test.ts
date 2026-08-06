@@ -36,6 +36,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     hasFlippedThisTurn: false,
     votes: {},
     voteHistory: [],
+    flipHistory: [],
     placementOrder: [],
     phase: "playing",
     result: null,
@@ -126,8 +127,8 @@ describe("estimateMargin — fair, per-viewer evaluation", () => {
   it("does NOT apply an opponent's hidden card's true effect -- uses the neutral placeholder instead", () => {
     const board: Board = new Map();
     board.set(posKey({ x: 0, y: 0 }), card("Exile", "p2", false)); // hidden from p1; true value would be Exile.base
-    // p1 can't see it's an Exile, so it's valued as the Footman placeholder instead.
-    expect(estimateMargin(makeState({ board }), "p1")).toBe(0 - CARD_DEFS.Footman.base);
+    // p1 can't see it's an Exile, so it's valued as the flat Unknown placeholder instead.
+    expect(estimateMargin(makeState({ board }), "p1")).toBe(0 - CARD_DEFS.Unknown.base);
   });
 
   it("applies the opponent's true effect once the same card is face-up", () => {
@@ -148,34 +149,53 @@ describe("estimateMargin — fair, per-viewer evaluation", () => {
     const trueWarlordValue = CARD_DEFS.Warlord.base - 2 * 2;
     expect(trueResult.scores.p2).toBe(3 * trueWarlordValue);
 
-    // p1 can't see any of them are Warlords -- each is estimated as an isolated
-    // Footman placeholder (base only, no line), so p1's own estimate is way off from
-    // the ground truth. That's the point: the estimate never leaks the hidden identity.
-    expect(estimateMargin(state, "p1")).toBe(0 - 3 * CARD_DEFS.Footman.base);
+    // p1 can't see any of them are Warlords -- each is estimated as an isolated,
+    // effect-free Unknown placeholder, so p1's own estimate is way off from the ground
+    // truth. That's the point: the estimate never leaks the hidden identity.
+    expect(estimateMargin(state, "p1")).toBe(0 - 3 * CARD_DEFS.Unknown.base);
+  });
+
+  it("the Unknown placeholder still gets pushed around by a real neighbor's effect", () => {
+    const board: Board = new Map();
+    board.set(posKey({ x: 0, y: 0 }), card("Exile", "p2", false)); // hidden from p1 -> Unknown placeholder
+    board.set(posKey({ x: 1, y: 0 }), card("Bannerman", "p1", true)); // +1 to non-Footman neighbors
+    // The placeholder has no printed effect of its own, but it's still a normal
+    // neighbor for Bannerman's own effect to land on: p2's Unknown gets +1 from p1's
+    // Bannerman, while Bannerman's own value is untouched (its effect only targets
+    // neighbors, not itself).
+    expect(estimateMargin(makeState({ board }), "p1")).toBe(CARD_DEFS.Bannerman.base - (CARD_DEFS.Unknown.base + 1));
   });
 });
 
 describe("computeAiVote", () => {
-  it("votes yes when currently ahead by its own fair estimate", () => {
+  it("is more likely to vote yes the further ahead it is, but never certain", () => {
     const board: Board = new Map();
     board.set(posKey({ x: 0, y: 0 }), card("Footman", "p1"));
     board.set(posKey({ x: 0, y: 1 }), card("Footman", "p1"));
-    const state = makeState({ board, round: 3 });
-    expect(computeAiVote(state, "p1", () => 0.99)).toBe(true); // rng doesn't matter -- clearly ahead
+    const state = makeState({ board }); // p1 ahead 10-0 -> margin 10 -> yes-probability ~0.88, clamped
+    expect(computeAiVote(state, "p1", () => 0.5)).toBe(true); // well below the probability
+    expect(computeAiVote(state, "p1", () => 0.99)).toBe(false); // even a landslide lead isn't a sure thing
   });
 
-  it("falls back to round-based probability when tied", () => {
-    const state = makeState({ round: 3 }); // empty board -> 0-0 tie
-    expect(computeAiVote(state, "p1", () => 0.05)).toBe(true); // below aiVoteProbability(3,6)=0.5
+  it("is 50/50 when tied", () => {
+    const state = makeState(); // empty board -> 0-0 tie
+    expect(computeAiVote(state, "p1", () => 0.05)).toBe(true);
     expect(computeAiVote(state, "p1", () => 0.95)).toBe(false);
   });
 
-  it("dampens the probability while behind", () => {
+  it("is more likely to vote no the further behind it is, but never certain", () => {
     const board: Board = new Map();
     board.set(posKey({ x: 0, y: 0 }), card("Footman", "p2"));
-    const state = makeState({ board, round: 3 }); // p1 behind (0 vs 5)
-    // aiVoteProbability(3,6)=0.5, dampened *0.6=0.3 -- 0.35 clears the tied threshold but not the dampened one.
-    expect(computeAiVote(state, "p1", () => 0.35)).toBe(false);
-    expect(computeAiVote(state, "p1", () => 0.1)).toBe(true);
+    const state = makeState({ board }); // p1 behind 0-5 -> margin -5 -> yes-probability ~0.27
+    expect(computeAiVote(state, "p1", () => 0.2)).toBe(true); // below the probability
+    expect(computeAiVote(state, "p1", () => 0.35)).toBe(false); // above it
+  });
+
+  it("ignores the round entirely -- same margin votes the same way regardless", () => {
+    const board: Board = new Map();
+    board.set(posKey({ x: 0, y: 0 }), card("Footman", "p2"));
+    const early = computeAiVote(makeState({ board, round: 1 }), "p1", () => 0.3);
+    const late = computeAiVote(makeState({ board, round: 5 }), "p1", () => 0.3);
+    expect(early).toBe(late);
   });
 });

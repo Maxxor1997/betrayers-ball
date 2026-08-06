@@ -70,7 +70,12 @@ export function applyFlip(state: GameState, action: FlipAction): GameState {
   const board = new Map(state.board);
   board.set(key, { ...target, faceUp: true });
 
-  return { ...state, board, hasFlippedThisTurn: true };
+  const flipHistory = [
+    ...state.flipHistory,
+    { round: state.round, playerId: action.playerId, ownerId: target.ownerId, instanceId: target.instanceId, cardId: target.cardId },
+  ];
+
+  return { ...state, board, hasFlippedThisTurn: true, flipHistory };
 }
 
 export function applyPlace(state: GameState, action: PlaceAction): GameState {

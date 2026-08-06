@@ -34,6 +34,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     hasFlippedThisTurn: false,
     votes: {},
     voteHistory: [],
+    flipHistory: [],
     placementOrder: [],
     phase: "playing",
     result: null,

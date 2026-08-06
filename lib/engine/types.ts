@@ -15,7 +15,14 @@ export type CardId =
   | "Suppressor"
   | "Infiltrator"
   | "Truthseeker"
-  | "Mercenary";
+  | "Mercenary"
+  /**
+   * Synthetic, non-drawable placeholder for "an opponent's face-down card I can't
+   * identify" -- used only by estimateMargin's fair evaluation board (see
+   * UNKNOWN_CARD_PLACEHOLDER in endgame.ts), never dealt into a real deck. Excluded
+   * from every UI listing of real cards (see the ALL_CARD_IDS filter in play/page.tsx).
+   */
+  | "Unknown";
 
 export type CardBucket = "Slam" | "Engine" | "Control";
 
@@ -124,6 +131,16 @@ export interface GameState {
    * go" summary reads from. A round is appended here as soon as its tally resolves
    * (everyone's voted), whether it passed or not. */
   voteHistory: { round: number; votes: Record<string, boolean> }[];
+  /**
+   * Every card a player chose to flip face-up, oldest first -- a genuine reveal
+   * decision, not a card that started face-up because it was placed that way (Giant,
+   * Truthseeker's forceFaceUp) or flipped as someone else's side effect (Truthseeker's
+   * onPlace). `playerId` is who did the flipping; `ownerId` is who the flipped card
+   * belongs to -- these differ whenever a player blind-flips an *opponent's* face-down
+   * card (a legal move -- see getLegalFlipTargets), not just their own. Drives a "what
+   * has each opponent flipped" summary UI.
+   */
+  flipHistory: { round: number; playerId: string; ownerId: string; instanceId: string; cardId: CardId }[];
   /** instanceIds in the order they were placed on the board — for turn-order UI/history. */
   placementOrder: string[];
   phase: "playing" | "voting" | "ended";

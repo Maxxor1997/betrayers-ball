@@ -1,4 +1,4 @@
-import { getAdjacentCards, parsePosKey } from "../engine/board";
+import { parsePosKey } from "../engine/board";
 import { computeAiVote, estimateMargin } from "../engine/endgame";
 import { applyPlace, currentPlayerId, getLegalFlipTargets, getLegalPlacementCells } from "../engine/turns";
 import { CardInstance, GameAction, GameState, Position } from "../engine/types";
@@ -38,18 +38,27 @@ function hypotheticalFlipMargin(state: GameState, playerId: string, target: { in
 }
 
 /**
- * How many of the AI's own cards sit adjacent to `target` -- used to rank blind
- * opponent flip targets. The AI can't know an opponent's hidden identity before
- * flipping, but a card touching its own board presence is still worth more to reveal
- * than one off in a corner: several of the AI's cards (Berserker, Mercenary, Commander,
- * Bannerman...) score off a neighbor's or the board's true identity, and those
- * evaluations stay blind to a hidden neighbor until it's flipped. Revealing near its
- * own cards first resolves that uncertainty where it actually affects its next move.
+ * Manhattan distance from `target` to the nearest of the AI's own cards, negated so
+ * higher (closer to 0) ranks better -- used to rank blind opponent flip targets. The
+ * AI can't know an opponent's hidden identity before flipping, but a card touching (or
+ * near) its own board presence is still worth more to reveal than one off in a corner:
+ * several of the AI's cards (Berserker, Mercenary, Commander, Bannerman...) score off a
+ * neighbor's or the board's true identity, and those evaluations stay blind to a hidden
+ * card nearby until it's flipped. A neighbor (distance 1) is the closest a non-own
+ * card can be, so it naturally ranks first; ties -- including "no own cards yet" --
+ * fall back to pickBest's random tiebreak.
  */
-function opponentTargetPriority(board: GameState["board"], bounds: GameState["config"]["boardBounds"], playerId: string, target: CardInstance): number {
+function opponentTargetPriority(board: GameState["board"], playerId: string, target: CardInstance): number {
   const entry = [...board.entries()].find(([, c]) => c.instanceId === target.instanceId)!;
   const pos = parsePosKey(entry[0]);
-  return getAdjacentCards(board, bounds, pos).filter((n) => n.ownerId === playerId).length;
+  let nearestOwnDistance = Infinity;
+  for (const [key, c] of board.entries()) {
+    if (c.ownerId !== playerId) continue;
+    const otherPos = parsePosKey(key);
+    const distance = Math.abs(otherPos.x - pos.x) + Math.abs(otherPos.y - pos.y);
+    if (distance < nearestOwnDistance) nearestOwnDistance = distance;
+  }
+  return -nearestOwnDistance;
 }
 
 /**
@@ -111,7 +120,7 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
   if (opponentTargets.length > 0 && rng() < OPPONENT_FLIP_EXPLORATION_PROBABILITY) {
     const best = pickBest(
       opponentTargets,
-      (target) => opponentTargetPriority(state.board, state.config.boardBounds, playerId, target),
+      (target) => opponentTargetPriority(state.board, playerId, target),
       rng
     );
     return best.instanceId;

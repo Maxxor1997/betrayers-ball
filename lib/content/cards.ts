@@ -354,6 +354,19 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       }
     },
   },
+  Unknown: {
+    id: "Unknown",
+    name: "Unknown",
+    // Roughly the deck-wide average base value -- a flat, effect-free stand-in for "an
+    // opponent's face-down card I can't identify," not a real playable card. See the
+    // CardId union in types.ts for why it exists and where it's used/excluded.
+    base: 5.5,
+    bucket: "Engine",
+    text: "",
+    fullText: "",
+    count: flatCount(0),
+    disabled: true,
+  },
 };
 
 export const ALL_CARD_IDS: CardId[] = Object.keys(CARD_DEFS) as CardId[];

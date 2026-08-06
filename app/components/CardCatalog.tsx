@@ -1,0 +1,277 @@
+"use client";
+
+import { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
+import { CENTER_EFFECTS, centerEffectDescription, isAvailableAtPlayerCount } from "@/lib/content/centerEffects";
+import { configForPlayerCount } from "@/lib/engine/game";
+import { CardBucket, CardId, CenterEffectId } from "@/lib/engine/types";
+
+/**
+ * A tooltip rendered into document.body via a portal, positioned with `fixed` from
+ * the anchor's real screen coordinates -- unlike a plain `absolute` tooltip nested
+ * inside a scrollable ancestor, this can't get clipped by that ancestor's overflow
+ * (CSS forces overflow-x to clip too whenever overflow-y is scrollable, so any
+ * tooltip meant to extend sideways out of a vertically-scrolling sidebar needs this).
+ */
+/** Minimum gap kept between a FixedTooltip and the top/bottom viewport edges. */
+const TOOLTIP_VIEWPORT_MARGIN = 8;
+
+export function FixedTooltip({ rect, children }: { rect: DOMRect; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Starts aligned to the hovered element's top; clamped down to the tooltip's actual
+  // rendered height once known (a hovered element near the bottom of the viewport --
+  // e.g. a scrolled sidebar entry -- would otherwise position the tooltip's *top* on
+  // screen while its body extends off the bottom edge, invisible).
+  const [top, setTop] = useState(rect.top);
+
+  useLayoutEffect(() => {
+    const height = ref.current?.offsetHeight ?? 0;
+    const maxTop = window.innerHeight - height - TOOLTIP_VIEWPORT_MARGIN;
+    setTop(Math.min(Math.max(rect.top, TOOLTIP_VIEWPORT_MARGIN), Math.max(maxTop, TOOLTIP_VIEWPORT_MARGIN)));
+  }, [rect]);
+
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      ref={ref}
+      className="pointer-events-none fixed z-50 w-max max-w-[14rem] rounded bg-zinc-900 px-2 py-1 text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black"
+      style={{ top, left: rect.right + 4 }}
+    >
+      {children}
+    </div>,
+    document.body
+  );
+}
+
+const BUCKET_ORDER: CardBucket[] = ["Slam", "Engine", "Control"];
+
+/** Locations sidebar order, simplest rule to understand first -- not alphabetical or insertion order. */
+const LOCATION_COMPLEXITY_ORDER: CenterEffectId[] = [
+  "none",
+  "twoTowers",
+  "threeHeadedDragon",
+  "freeCities",
+  "reckoning",
+  "shadowlands",
+  "mirrorPool",
+  "championOfTheWeak",
+  "kingslayer",
+];
+
+const BUCKET_DESCRIPTIONS: Record<CardBucket, string> = {
+  Slam: "High base value with a built-in downside or condition that can cut it back down -- big numbers, but risky.",
+  Engine: "Low base value that grows from board state or synergy with other cards -- value comes from setup, not the printed number.",
+  Control: "Doesn't boost itself -- manipulates neighbors' values or bends the normal rules (negation, forced flips, zeroing).",
+};
+
+const LOCATIONS_DESCRIPTION =
+  "A location is a game-wide rule this match is being played with -- it changes what the center tile does, adds a special win condition, or bends a normal rule (adjacency, flipping, ...) for everyone. Exactly one is active per game, picked at New Game.";
+
+/**
+ * Reference sidebar listing every card in the game, grouped by bucket, with its copy
+ * count at the current game's player count -- lets a new player see the whole card
+ * pool up front instead of only discovering cards as they're drawn. Shows every card
+ * regardless of count (a card disabled or absent at this player count still appears,
+ * just annotated "x0 in deck"). Also used standalone (no active game) on the home
+ * screen, via the myCardIds/opponentVisibleBoardCardIds/currentCenterEffect defaults.
+ */
+export function CardCatalog({
+  playerCount,
+  myCardIds = new Set(),
+  opponentVisibleBoardCardIds = new Set(),
+  currentCenterEffect = "none",
+}: {
+  playerCount: number;
+  myCardIds?: Set<CardId>;
+  opponentVisibleBoardCardIds?: Set<CardId>;
+  currentCenterEffect?: CenterEffectId;
+}) {
+  const [hoveredCard, setHoveredCard] = useState<{ id: CardId; rect: DOMRect } | null>(null);
+  const [hoveredBucket, setHoveredBucket] = useState<{ bucket: CardBucket; rect: DOMRect } | null>(null);
+  const [hoveredLocationsHeader, setHoveredLocationsHeader] = useState<DOMRect | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [collapsedBuckets, setCollapsedBuckets] = useState<Set<CardBucket>>(new Set());
+  // Collapsed by default, unlike the card buckets -- center effects are secondary
+  // reference info, not something a new player needs open by default.
+  const [locationsCollapsed, setLocationsCollapsed] = useState(true);
+
+  function toggleBucket(bucket: CardBucket) {
+    setCollapsedBuckets((prev) => {
+      const next = new Set(prev);
+      if (next.has(bucket)) next.delete(bucket);
+      else next.add(bucket);
+      return next;
+    });
+  }
+
+  if (collapsed) {
+    return (
+      <aside className="shrink-0 lg:sticky lg:top-8 lg:self-start">
+        <button
+          onClick={() => setCollapsed(false)}
+          className="rounded-full border border-zinc-300 px-3 py-1.5 text-xs whitespace-nowrap hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          ▶ Cards
+        </button>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="w-full shrink-0 overflow-x-hidden lg:sticky lg:top-8 lg:w-48 lg:self-start lg:border-r-2 lg:border-zinc-400 lg:pr-4 dark:lg:border-zinc-600">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">
+          Card catalog <span className="font-normal text-zinc-500">({playerCount}p)</span>
+        </h2>
+        <button
+          onClick={() => setCollapsed(true)}
+          title="Collapse"
+          className="shrink-0 rounded-full border border-zinc-300 px-2 py-0.5 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          ◀
+        </button>
+      </div>
+      <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-zinc-500 dark:text-zinc-400">
+        <span className="flex items-center gap-1">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" /> My Cards
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" /> Cards on Board
+        </span>
+      </div>
+      <div className="flex flex-col gap-4 overflow-x-hidden lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+        {BUCKET_ORDER.map((bucket) => {
+          // "Unknown" is a synthetic placeholder for AI evaluation, not a real playable
+          // card -- see the CardId union in types.ts -- so it never belongs in a
+          // player-facing card reference.
+          const ids = ALL_CARD_IDS.filter((id) => id !== "Unknown" && CARD_DEFS[id].bucket === bucket).sort((a, b) => {
+            const countDiff = copiesForPlayerCount(CARD_DEFS[b], playerCount) - copiesForPlayerCount(CARD_DEFS[a], playerCount);
+            return countDiff !== 0 ? countDiff : CARD_DEFS[a].name.localeCompare(CARD_DEFS[b].name);
+          });
+          const bucketCollapsed = collapsedBuckets.has(bucket);
+          return (
+            <div key={bucket}>
+              <div className="relative mb-1.5">
+                <button
+                  onClick={() => toggleBucket(bucket)}
+                  onMouseEnter={(e) => setHoveredBucket({ bucket, rect: e.currentTarget.getBoundingClientRect() })}
+                  onMouseLeave={() => setHoveredBucket((prev) => (prev?.bucket === bucket ? null : prev))}
+                  className="flex w-full items-center gap-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                >
+                  <span className="inline-block w-3 shrink-0">{bucketCollapsed ? "▶" : "▼"}</span>
+                  {bucket}
+                  <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-400 text-[9px] normal-case text-zinc-400 dark:border-zinc-500 dark:text-zinc-500">
+                    i
+                  </span>
+                </button>
+                {hoveredBucket?.bucket === bucket && (
+                  <FixedTooltip rect={hoveredBucket.rect}>{BUCKET_DESCRIPTIONS[bucket]}</FixedTooltip>
+                )}
+              </div>
+              {!bucketCollapsed && (
+                <div className="flex flex-col gap-1.5">
+                  {ids.map((id) => {
+                    const def = CARD_DEFS[id];
+                    const copies = copiesForPlayerCount(def, playerCount);
+                    const mine = myCardIds.has(id);
+                    const onOpponentBoard = opponentVisibleBoardCardIds.has(id);
+                    const boxToneClass =
+                      copies === 0
+                        ? "border-zinc-200 opacity-50 dark:border-zinc-800"
+                        : mine
+                          ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
+                          : onOpponentBoard
+                            ? "border-emerald-300/70 bg-emerald-50/50 dark:border-emerald-800/70 dark:bg-emerald-950/40"
+                            : "border-zinc-300 dark:border-zinc-700";
+                    return (
+                      <div
+                        key={id}
+                        className="relative flex min-w-0 items-center gap-2"
+                        onMouseEnter={(e) => setHoveredCard({ id, rect: e.currentTarget.getBoundingClientRect() })}
+                        onMouseLeave={() => setHoveredCard((prev) => (prev?.id === id ? null : prev))}
+                      >
+                        <div
+                          className={`relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${boxToneClass}`}
+                        >
+                          <span className="text-[8px] font-semibold leading-tight break-words">{def.name}</span>
+                          <span className="text-base font-bold leading-none">{def.base}</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-medium">
+                            {def.name} <span className="text-zinc-500 dark:text-zinc-400">×{copies}</span>
+                          </div>
+                          <div className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">{def.text}</div>
+                        </div>
+                        {hoveredCard?.id === id && <FixedTooltip rect={hoveredCard.rect}>{def.fullText}</FixedTooltip>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div className="relative">
+          <button
+            onClick={() => setLocationsCollapsed((prev) => !prev)}
+            onMouseEnter={(e) => setHoveredLocationsHeader(e.currentTarget.getBoundingClientRect())}
+            onMouseLeave={() => setHoveredLocationsHeader(null)}
+            className="flex w-full items-center gap-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+          >
+            <span className="inline-block w-3 shrink-0">{locationsCollapsed ? "▶" : "▼"}</span>
+            Locations
+            <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-400 text-[9px] normal-case text-zinc-400 dark:border-zinc-500 dark:text-zinc-500">
+              i
+            </span>
+          </button>
+          {hoveredLocationsHeader && <FixedTooltip rect={hoveredLocationsHeader}>{LOCATIONS_DESCRIPTION}</FixedTooltip>}
+          {!locationsCollapsed && (
+            <div className="mt-1.5 flex flex-col gap-2">
+              {LOCATION_COMPLEXITY_ORDER.slice()
+                .sort((a, b) => Number(!!CENTER_EFFECTS[a].disabled) - Number(!!CENTER_EFFECTS[b].disabled))
+                .map((id) => {
+                  const def = CENTER_EFFECTS[id];
+                  const available = isAvailableAtPlayerCount(id, playerCount);
+                  const isCurrent = id === currentCenterEffect;
+                  const config = configForPlayerCount(playerCount, id);
+                  const restriction =
+                    def.minPlayerCount && def.maxPlayerCount
+                      ? `${def.minPlayerCount}-${def.maxPlayerCount}p only`
+                      : def.minPlayerCount
+                        ? `${def.minPlayerCount}p+ only`
+                        : def.maxPlayerCount
+                          ? `up to ${def.maxPlayerCount}p only`
+                          : null;
+                  const description = centerEffectDescription(id, config);
+                  return (
+                    <div
+                      key={id}
+                      className={`rounded-md border p-1.5 ${
+                        isCurrent
+                          ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
+                          : available
+                            ? "border-zinc-300 dark:border-zinc-700"
+                            : "border-zinc-200 opacity-50 dark:border-zinc-800"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs font-medium">{def.label}</span>
+                        {isCurrent && (
+                          <span className="shrink-0 rounded-full bg-blue-500 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                            Current
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-zinc-500 dark:text-zinc-400">{description}</div>
+                      {restriction && <div className="mt-0.5 text-[9px] text-zinc-400 dark:text-zinc-500">{restriction}</div>}
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+      </div>
+    </aside>
+  );
+}

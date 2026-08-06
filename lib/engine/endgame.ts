@@ -49,13 +49,17 @@ export function computeGameResult(
 
 /**
  * A card whose identity a viewer can't see (an opponent's face-down card) is treated
- * as this when estimating standing -- the single most common card in the deck (12/68),
- * a documented approximation rather than a probability model. This deliberately
- * undercounts how dangerous a truly-hidden Warlord/Exile might be; the alternative
- * (Bayesian reasoning over remaining deck composition) is real work this 1-ply
- * heuristic doesn't attempt.
+ * as this when estimating standing -- a flat, effect-free stand-in worth roughly the
+ * deck-wide average base value (CARD_DEFS.Unknown.base), a documented approximation
+ * rather than a probability model. Deliberately has no valueModifier of its own (unlike
+ * substituting a real card, e.g. Footman, which would incorrectly apply that card's
+ * printed effect to something that isn't actually it) -- it can still be pushed around
+ * by *other* cards' neighbor effects (Bannerman, Skysplitter, ...), same as any real
+ * card would be. This deliberately undercounts how dangerous a truly-hidden Warlord/
+ * Exile might be; the alternative (Bayesian reasoning over remaining deck composition)
+ * is real work this 1-ply heuristic doesn't attempt.
  */
-const UNKNOWN_CARD_PLACEHOLDER = "Footman" as const;
+const UNKNOWN_CARD_PLACEHOLDER = "Unknown" as const;
 
 function toEvaluationBoard(board: Board, viewerId: string): Board {
   const visible = getVisibleBoard(board, viewerId);
@@ -95,14 +99,36 @@ export function estimateMargin(state: GameState, viewerId: string): number {
 }
 
 /**
- * Vote yes if currently ahead by the player's own (fair) estimate -- lock in the win.
- * Otherwise fall back to the round-based pressure, dampened while behind (worth
- * catching up first) but still climbing as the game goes on.
+ * How many margin points correspond to one e-fold of odds in the logistic curve below
+ * -- smaller means the AI's vote reacts more sharply to a given point gap. 5 was
+ * picked so a single mid-value card's worth of lead (e.g. one Footman) noticeably
+ * moves the needle without already being a near-certain yes on its own.
+ */
+const VOTE_MARGIN_SCALE = 5;
+
+/** Floor/ceiling on the yes-vote probability -- keeps the vote genuinely random even at a landslide margin, never fully deterministic either way. */
+const MIN_VOTE_YES_PROBABILITY = 0.05;
+const MAX_VOTE_YES_PROBABILITY = 0.95;
+
+/**
+ * Chance of voting yes, purely as a function of the current fair margin -- a logistic
+ * curve centered on 0 (tied game -> 50/50), growing more likely to end the further
+ * ahead the AI is and less likely the further behind, clamped so it's never fully
+ * certain either way.
+ */
+function marginToVoteYesProbability(margin: number): number {
+  const logistic = 1 / (1 + Math.exp(-margin / VOTE_MARGIN_SCALE));
+  return Math.min(MAX_VOTE_YES_PROBABILITY, Math.max(MIN_VOTE_YES_PROBABILITY, logistic));
+}
+
+/**
+ * Vote yes/no purely off the player's own (fair) margin estimate, via
+ * marginToVoteYesProbability -- deliberately ignores the round. Whether to end is a
+ * fresh decision every time voting comes up, not a countdown; the round cap already
+ * force-ends the game on its own once reached, so there's no separate need to ramp
+ * pressure by round here too.
  */
 export function computeAiVote(state: GameState, playerId: string, rng: () => number): boolean {
   const margin = estimateMargin(state, playerId);
-  if (margin > 0) return true;
-  const base = aiVoteProbability(state.round, state.config.roundCap);
-  const probability = margin === 0 ? base : base * 0.6;
-  return rng() < probability;
+  return rng() < marginToVoteYesProbability(margin);
 }

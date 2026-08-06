@@ -23,3 +23,8 @@ Stack: Next.js (App Router), TypeScript, Tailwind, Socket.IO.
 
 Numbers (bases, counts, board size) are tuning knobs, not fixed. When something
 here conflicts with a more recent decision, the newer decision wins.
+
+## Testing changes
+Never start the dev server or test in a browser yourself (no `npm run dev`, no
+launching/driving the app) — the user runs and checks it themselves. Verify changes
+with typecheck (`npx tsc --noEmit`) and the test suite (`npx vitest run`) instead.
