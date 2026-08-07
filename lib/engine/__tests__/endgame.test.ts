@@ -137,21 +137,24 @@ describe("estimateMargin — fair, per-viewer evaluation", () => {
     expect(estimateMargin(makeState({ board }), "p1")).toBe(0 - CARD_DEFS.Exile.base);
   });
 
-  it("resolveBoard (ground truth) and estimateMargin (viewer's estimate) genuinely diverge on hidden multi-card effects", () => {
+  it("resolveBoard (ground truth) and estimateMargin (viewer's estimate) genuinely diverge on hidden cards", () => {
     const board: Board = new Map();
-    // 3 isolated, hidden, same-owner Warlords: each takes the -2-per-other-Warlord penalty twice.
+    // 3 isolated, hidden, same-owner Warlords -- Warlord's own penalty only counts a
+    // *different* player's Warlords (see cards.ts), so same-owner copies like these
+    // don't interact with each other at all; each is worth its full, unpenalized base.
     board.set(posKey({ x: 0, y: 0 }), card("Warlord", "p2", false));
     board.set(posKey({ x: 2, y: 0 }), card("Warlord", "p2", false));
     board.set(posKey({ x: 0, y: 2 }), card("Warlord", "p2", false));
     const state = makeState({ board });
 
     const trueResult = computeGameResult(board, BOUNDS, state.round, ["p1", "p2"]);
-    const trueWarlordValue = CARD_DEFS.Warlord.base - 2 * 2;
-    expect(trueResult.scores.p2).toBe(3 * trueWarlordValue);
+    expect(trueResult.scores.p2).toBe(3 * CARD_DEFS.Warlord.base);
 
     // p1 can't see any of them are Warlords -- each is estimated as an isolated,
-    // effect-free Unknown placeholder, so p1's own estimate is way off from the ground
-    // truth. That's the point: the estimate never leaks the hidden identity.
+    // effect-free Unknown placeholder (worth less than Warlord's real base), so p1's
+    // own estimate is off from the ground truth. That's the point: the estimate never
+    // leaks the hidden identity, even though here it happens to underestimate rather
+    // than miss a hidden penalty.
     expect(estimateMargin(state, "p1")).toBe(0 - 3 * CARD_DEFS.Unknown.base);
   });
 

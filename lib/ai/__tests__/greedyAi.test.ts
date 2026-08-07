@@ -270,3 +270,114 @@ describe("chooseGreedyAiAction — flip actually looks ahead", () => {
     expect(footmanPicks).toBeGreaterThan(0);
   });
 });
+
+/**
+ * A one-ply greedy evaluation only ever sees the board "as if scoring the instant
+ * after this placement" -- it has no way to know how the game unfolds on later turns.
+ * These cover the round/hand/board-aware nudges (see greedyAi.ts's
+ * placementHeuristicAdjustment) that correct for that blind spot on specific cards.
+ * Each test sets up a hand with two cards whose *naive* (unadjusted) margins favor the
+ * "wrong" one, and confirms the adjustment flips which one the AI actually picks --
+ * not just that the targeted card's own score moved somewhere internally.
+ */
+describe("chooseGreedyAiAction — placement heuristics correct for what a one-ply evaluation can't see", () => {
+  it("values Chronicler at the expected end-of-game round instead of the current (early) round", () => {
+    // Naive (round-1) values: Chronicler = base+1, Bannerman = base (no neighbors yet
+    // to boost) -- Bannerman wins on its own. The expected-final-round top-up should
+    // flip it.
+    const chronicler = card("Chronicler", "p1");
+    const bannerman = card("Bannerman", "p1");
+    const state = makeState({
+      round: 1,
+      players: [
+        { id: "p1", hand: [chronicler, bannerman], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
+    expect(action.type).toBe("place");
+    if (action.type === "place") expect(action.instanceId).toBe(chronicler.instanceId);
+  });
+
+  it("discounts Exile's early placements for the extra neighbors it'll likely gain before scoring", () => {
+    // On an empty board, every legal (center-adjacent) cell already counts the center
+    // itself as one occupied neighbor, so naive Exile = base - 2; Giant is a flat,
+    // effect-free base value. Naively Exile still wins (base-2 > Giant's base) -- the
+    // future-neighbor discount, placed this early with 3 remaining rounds, should flip it.
+    const exile = card("Exile", "p1");
+    const giant = card("Giant", "p1");
+    const state = makeState({
+      round: 1,
+      players: [
+        { id: "p1", hand: [exile, giant], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
+    expect(action.type).toBe("place");
+    if (action.type === "place") expect(action.instanceId).toBe(giant.instanceId);
+  });
+
+  it("values Commander more highly when the player still has a Footman in hand to set up next to it", () => {
+    // Naively (no Footman adjacent yet) Bannerman's flat base beats Commander's bare
+    // base -- the hand-Footman credit plus the early-game setup bonus should flip it.
+    const commander = card("Commander", "p1");
+    const bannerman = card("Bannerman", "p1");
+    const footman = card("Footman", "p1"); // stays in hand either way -- not itself a candidate here
+    const state = makeState({
+      round: 1,
+      players: [
+        { id: "p1", hand: [commander, bannerman, footman], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
+    expect(action.type).toBe("place");
+    if (action.type === "place") expect(action.instanceId).toBe(commander.instanceId);
+  });
+
+  it("values a face-down Gloryseeker more highly the earlier it's placed, for the chance it gets flipped before scoring", () => {
+    // Naively (face-down, no +3 yet) a flat Footman beats it -- the earlier-round flip
+    // chance should flip which one wins, in Gloryseeker's favor.
+    const gloryseeker = card("Gloryseeker", "p1");
+    const footman = card("Footman", "p1");
+    const state = makeState({
+      round: 1,
+      players: [
+        { id: "p1", hand: [gloryseeker, footman], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
+    expect(action.type).toBe("place");
+    if (action.type === "place") expect(action.instanceId).toBe(gloryseeker.instanceId);
+  });
+
+  it("discounts a face-down Infiltrator's current swap value for the risk of getting flipped, with few face-down peers on the board", () => {
+    // A same-owner Giant is already down for Infiltrator to swap with (its true base
+    // is visible to its own owner, no hidden-info issue) -- naively that swap makes
+    // Infiltrator worth more than a flat Footman. Placed this early, with hardly any
+    // face-down cards on the board yet, the flip-risk/exposure discount should flip it.
+    const giant = card("Giant", "p1", true);
+    const board: Board = new Map();
+    board.set(posKey({ x: 3, y: 2 }), giant);
+    const infiltrator = card("Infiltrator", "p1");
+    const footman = card("Footman", "p1");
+    const state = makeState({
+      board,
+      round: 1,
+      players: [
+        { id: "p1", hand: [infiltrator, footman], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
+    expect(action.type).toBe("place");
+    if (action.type === "place") expect(action.instanceId).toBe(footman.instanceId);
+  });
+});

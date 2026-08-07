@@ -118,25 +118,31 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Warlord",
     base: 8,
     bucket: "Slam",
-    text: "−2 per other Warlord",
-    fullText: "−2 per other Warlord on the board (any owner), floored at 0.",
-    count: flatCount(6),
+    text: "−3 per unique enemy Warlord owner",
+    fullText:
+      "−3 for each distinct opposing player with a Warlord anywhere on the board -- multiple Warlords from the same rival still only count once, and your own other Warlords don't count against you at all -- floored at 0.",
+    count: [6, 6, 6, 6, 0, 0, 0],
     floorAtZero: true,
     valueModifier: ({ board, self, addDelta }) => {
-      let otherWarlords = 0;
-      for (const other of board.values()) {
-        if (other.instanceId !== self.instanceId && other.cardId === "Warlord") otherWarlords++;
+      const uniqueEnemyWarlordOwners = new Set(
+        [...board.values()].filter((c) => c.cardId === "Warlord" && c.ownerId !== self.ownerId).map((c) => c.ownerId)
+      ).size;
+      if (uniqueEnemyWarlordOwners > 0) {
+        addDelta(
+          self.instanceId,
+          -3 * uniqueEnemyWarlordOwners,
+          `Warlord (${uniqueEnemyWarlordOwners} unique enemy Warlord owner${uniqueEnemyWarlordOwners > 1 ? "s" : ""})`
+        );
       }
-      if (otherWarlords > 0) addDelta(self.instanceId, -2 * otherWarlords, `Warlord (${otherWarlords} other Warlord${otherWarlords > 1 ? "s" : ""})`);
     },
   },
   Exile: {
     id: "Exile",
     name: "Exile",
-    base: 9,
+    base: 10,
     bucket: "Slam",
     text: "−2 per neighbor",
-    fullText: "−2 per orthogonal neighbor (any owner), floored at 0.",
+    fullText: "−2 per neighbor (any owner), floored at 0.",
     count: flatCount(4),
     floorAtZero: true,
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
@@ -161,11 +167,11 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Berserker: {
     id: "Berserker",
     name: "Berserker",
-    base: 3,
+    base: 2,
     bucket: "Engine",
     text: "+2 per opposing Berserker",
     fullText: "+2 for each Berserker owned by a different player, anywhere on the board.",
-    count: flatCount(8),
+    count: [0, 0, 0, 8, 8, 8, 8],
     valueModifier: ({ board, self, addDelta }) => {
       let otherOwnerBerserkers = 0;
       for (const other of board.values()) {
@@ -179,7 +185,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Commander: {
     id: "Commander",
     name: "Commander",
-    base: 2,
+    base: 3,
     bucket: "Engine",
     text: "+2 per adjacent Footman",
     fullText: "+2 for each adjacent Footman (any owner).",
@@ -204,7 +210,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Chronicler: {
     id: "Chronicler",
     name: "Chronicler",
-    base: 2,
+    base: 1,
     bucket: "Engine",
     text: "+1 per round elapsed",
     fullText: "+1 for every round elapsed when the game ends.",
@@ -218,24 +224,24 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Earthshaker",
     base: 3,
     bucket: "Control",
-    text: "−1 to rest of its row",
-    fullText: "−1 to every other card in its row (any owner, not itself).",
-    count: flatCount(4),
+    text: "−2 to rest of its row",
+    fullText: "−2 to every other card in its row (any owner, not itself).",
+    count: [0, 0, 0, 4, 4, 4, 4],
     valueModifier: ({ board, pos, self, addDelta }) => {
       for (const [otherKey, other] of board.entries()) {
         if (other.instanceId === self.instanceId) continue;
-        if (parsePosKey(otherKey).y === pos.y) addDelta(other.instanceId, -1, "Earthshaker (same row)");
+        if (parsePosKey(otherKey).y === pos.y) addDelta(other.instanceId, -2, "Earthshaker (same row)");
       }
     },
   },
   Skysplitter: {
     id: "Skysplitter",
     name: "Skysplitter",
-    base: 3,
+    base: 4,
     bucket: "Control",
     text: "−3 above and below",
     fullText: "−3 to the card directly above and directly below.",
-    count: flatCount(4),
+    count: [4, 4, 4, 0, 0, 0, 0],
     valueModifier: ({ board, pos, addDelta }) => {
       const above = board.get(posKey({ x: pos.x, y: pos.y - 1 }));
       const below = board.get(posKey({ x: pos.x, y: pos.y + 1 }));
@@ -322,7 +328,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Truthseeker: {
     id: "Truthseeker",
     name: "Truthseeker",
-    base: 4,
+    base: 5,
     bucket: "Control",
     text: "Placed face-up; flips all adjacent",
     fullText:
@@ -344,13 +350,17 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Mercenary",
     base: 2,
     bucket: "Engine",
-    text: "+2 per adj. different owner",
-    fullText: "+2 for each adjacent card owned by a different player.",
+    text: "+2 per unique adj. enemy",
+    fullText: "+2 for each distinct opposing player with a card adjacent to it -- two neighbors owned by the same enemy still only count once.",
     count: flatCount(4),
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
-      const differentOwnerNeighbors = getAdjacentCards(board, bounds, pos).filter((n) => n.ownerId !== self.ownerId).length;
-      if (differentOwnerNeighbors > 0) {
-        addDelta(self.instanceId, 2 * differentOwnerNeighbors, `Mercenary (${differentOwnerNeighbors} different-owner neighbors)`);
+      const uniqueEnemyOwners = new Set(
+        getAdjacentCards(board, bounds, pos)
+          .filter((n) => n.ownerId !== self.ownerId)
+          .map((n) => n.ownerId)
+      ).size;
+      if (uniqueEnemyOwners > 0) {
+        addDelta(self.instanceId, 2 * uniqueEnemyOwners, `Mercenary (${uniqueEnemyOwners} unique adj. enem${uniqueEnemyOwners > 1 ? "ies" : "y"})`);
       }
     },
   },

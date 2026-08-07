@@ -66,16 +66,13 @@ describe("resolveBoard — Footman row/column bonus", () => {
 });
 
 describe("resolveBoard — Warlord", () => {
-  it("penalizes -2 per other Warlord (any owner), floored at 0", () => {
+  it("penalizes -3 per unique enemy player with a Warlord on the board", () => {
     const board: Board = new Map();
     const w1 = place(board, 0, 0, "Warlord", "p1");
-    place(board, 1, 0, "Warlord", "p1");
-    place(board, 2, 0, "Warlord", "p2");
-    place(board, 3, 0, "Warlord", "p2");
-    place(board, 4, 0, "Warlord", "p2");
+    place(board, 1, 0, "Warlord", "p2");
+    place(board, 2, 0, "Warlord", "p3");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    // 4 other warlords -> base - 8, which floors to 0 for this card's base
-    expect(find(cards, w1.instanceId).finalValue).toBe(0);
+    expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 3 * 2);
   });
 
   it("is unaffected with no other Warlords", () => {
@@ -83,6 +80,36 @@ describe("resolveBoard — Warlord", () => {
     const w1 = place(board, 0, 0, "Warlord", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
+  });
+
+  it("does not penalize for other Warlords owned by the same player", () => {
+    const board: Board = new Map();
+    const w1 = place(board, 0, 0, "Warlord", "p1");
+    place(board, 1, 0, "Warlord", "p1");
+    place(board, 2, 0, "Warlord", "p1");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
+  });
+
+  it("counts multiple Warlords from the same enemy only once", () => {
+    const board: Board = new Map();
+    const w1 = place(board, 0, 0, "Warlord", "p1");
+    place(board, 1, 0, "Warlord", "p2");
+    place(board, 2, 0, "Warlord", "p2");
+    place(board, 3, 0, "Warlord", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 3 * 1);
+  });
+
+  it("floors at 0 once enough unique enemy owners are in play", () => {
+    const board: Board = new Map();
+    const w1 = place(board, 0, 0, "Warlord", "p1");
+    place(board, 1, 0, "Warlord", "p2");
+    place(board, 2, 0, "Warlord", "p3");
+    place(board, 3, 0, "Warlord", "p4");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    // 3 unique enemy owners -> base - 9, which floors to 0
+    expect(find(cards, w1.instanceId).finalValue).toBe(0);
   });
 });
 
@@ -102,11 +129,9 @@ describe("resolveBoard — scoring breakdown", () => {
   it("appends a floor adjustment entry when a card is floored at 0", () => {
     const board: Board = new Map();
     const w1 = place(board, 0, 0, "Warlord", "p1");
-    place(board, 1, 0, "Warlord", "p1");
-    place(board, 2, 0, "Warlord", "p2");
-    place(board, 3, 0, "Warlord", "p2");
-    place(board, 4, 0, "Warlord", "p2");
-    place(board, 5, 0, "Warlord", "p2");
+    place(board, 1, 0, "Warlord", "p2");
+    place(board, 2, 0, "Warlord", "p3");
+    place(board, 3, 0, "Warlord", "p4");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolved = find(cards, w1.instanceId);
     expect(resolved.finalValue).toBe(0);
@@ -196,7 +221,7 @@ describe("resolveBoard — Berserker", () => {
 });
 
 describe("resolveBoard — Mercenary", () => {
-  it("gains +2 per adjacent card owned by a different player", () => {
+  it("gains +2 per unique adjacent enemy owner", () => {
     const board: Board = new Map();
     const merc = place(board, 1, 1, "Mercenary", "p1");
     place(board, 0, 1, "Footman", "p2");
@@ -211,6 +236,25 @@ describe("resolveBoard — Mercenary", () => {
     place(board, 0, 1, "Footman", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, merc.instanceId).finalValue).toBe(CARD_DEFS.Mercenary.base);
+  });
+
+  it("counts two neighbors owned by the same enemy only once", () => {
+    const board: Board = new Map();
+    const merc = place(board, 1, 1, "Mercenary", "p1");
+    place(board, 0, 1, "Footman", "p2");
+    place(board, 2, 1, "Warlord", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, merc.instanceId).finalValue).toBe(CARD_DEFS.Mercenary.base + 2 * 1);
+  });
+
+  it("counts a third neighbor from an already-seen enemy the same as a brand new one -- only the number of unique owners matters", () => {
+    const board: Board = new Map();
+    const merc = place(board, 1, 1, "Mercenary", "p1");
+    place(board, 0, 1, "Footman", "p2");
+    place(board, 2, 1, "Warlord", "p2");
+    place(board, 1, 0, "Giant", "p3");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, merc.instanceId).finalValue).toBe(CARD_DEFS.Mercenary.base + 2 * 2); // p2 (x2) + p3, 2 unique enemies
   });
 });
 
@@ -254,7 +298,7 @@ describe("resolveBoard — Chronicler", () => {
 });
 
 describe("resolveBoard — Earthshaker", () => {
-  it("gives -1 to every other card in its row, not itself, not other rows", () => {
+  it("gives -2 to every other card in its row, not itself, not other rows", () => {
     const board: Board = new Map();
     const e = place(board, 1, 1, "Earthshaker", "p1");
     const sameRow1 = place(board, 0, 1, "Footman", "p2");
@@ -262,8 +306,8 @@ describe("resolveBoard — Earthshaker", () => {
     const otherRow = place(board, 1, 2, "Footman", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, e.instanceId).finalValue).toBe(CARD_DEFS.Earthshaker.base);
-    expect(find(cards, sameRow1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 1);
-    expect(find(cards, sameRow2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 1);
+    expect(find(cards, sameRow1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+    expect(find(cards, sameRow2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
     expect(find(cards, otherRow.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
   });
 });

@@ -1,7 +1,7 @@
-import { parsePosKey } from "../engine/board";
+import { adjacentPositions, isOwnerlessPosition, parsePosKey, posKey } from "../engine/board";
 import { computeAiVote, estimateMargin } from "../engine/endgame";
 import { applyPlace, currentPlayerId, getLegalFlipTargets, getLegalPlacementCells } from "../engine/turns";
-import { CardInstance, GameAction, GameState, Position } from "../engine/types";
+import { Board, BoardBounds, CardInstance, GameAction, GameConfig, GameState, Position } from "../engine/types";
 
 export type Rng = () => number;
 
@@ -142,6 +142,112 @@ const SPECULATIVE_CARD_IDS = new Set(["Berserker"]);
 /** Chance, each time the AI has a speculative card in hand, that it plays that card instead of the margin-best one. */
 const SPECULATIVE_PLAY_PROBABILITY = 0.25;
 
+/**
+ * Rough expected round the game actually ends on. game.ts's config keeps roundCap and
+ * minRoundFloor flat regardless of player count (6 and 3 respectively, see
+ * configForPlayerCount), so the midpoint doesn't need to vary by player count either
+ * -- it's not meant to be precise, just a stand-in "how much game is probably left"
+ * for heuristics below that need to reason about rounds that haven't happened yet.
+ */
+function expectedFinalRound(config: GameConfig): number {
+  return (config.minRoundFloor + config.roundCap) / 2;
+}
+
+/** Empty (unoccupied, non-ownerless) cells orthogonally adjacent to `pos` -- candidate spots a future placement could still fill in before scoring. */
+function countEmptyAdjacentCells(board: Board, bounds: BoardBounds, pos: Position): number {
+  return adjacentPositions(pos, bounds).filter((p) => !isOwnerlessPosition(p, bounds) && !board.has(posKey(p))).length;
+}
+
+/** Rough fraction of a currently-empty neighbor cell expected to fill in per remaining round, for Exile's future-neighbor discount below. Not derived from anything -- a modest, clearly-bounded playtesting estimate. */
+const EXILE_NEIGHBOR_FILL_RATE_PER_ROUND = 0.4;
+
+/** Value credited per Footman still in the player's own hand when considering a Commander placement -- a fraction of the full +2 adjacency bonus, since there's no guarantee that Footman ever actually lands adjacent to this Commander. */
+const COMMANDER_HAND_FOOTMAN_WEIGHT = 1;
+/** Flat per-remaining-round nudge for Commander, on top of any hand-Footman credit -- more turns left means more chances to draw and set up a Footman next to it even with none in hand yet. */
+const COMMANDER_EARLY_GAME_BONUS_PER_ROUND = 0.5;
+
+/** Rough chance, per remaining round once flips are actually unlocked, that a face-down Gloryseeker ends up face-up (by either player) before scoring. */
+const GLORYSEEKER_FLIP_CHANCE_PER_ROUND = 0.15;
+
+/** Flat per-remaining-round discount on a face-down Infiltrator's current swap value, reflecting the cumulative risk it gets flipped (forfeiting the swap) before scoring. */
+const INFILTRATOR_FLIP_RISK_PER_ROUND = 0.5;
+/** Below this many face-down cards on the board, a face-down Infiltrator reads as unusually exposed (few peers to blend in with, and few plausible future swap targets), so it takes an extra flat penalty. */
+const INFILTRATOR_FEW_FACE_DOWN_THRESHOLD = 3;
+const INFILTRATOR_FEW_FACE_DOWN_PENALTY = 2;
+
+/**
+ * Additive nudge to a placement candidate's raw (fair, "as if scoring the instant
+ * after this placement") margin score -- corrects for cards whose true value depends
+ * on how the game unfolds on *later* turns, which a one-ply greedy evaluation can't
+ * see at all. Each branch targets one specific card identified from playtesting data;
+ * see each one's own comment for the reasoning. This never touches the engine's real
+ * (fair) scoring -- it's purely a decision-making nudge for this module, same spirit
+ * as SPECULATIVE_CARD_IDS/BLUFF_FLIP_CARD_IDS above.
+ */
+function placementHeuristicAdjustment(
+  preState: GameState,
+  playerId: string,
+  action: { instanceId: string; position: Position },
+  postState: GameState
+): number {
+  const placedCard = postState.board.get(posKey(action.position));
+  if (!placedCard) return 0;
+  const roundsRemaining = Math.max(0, expectedFinalRound(preState.config) - preState.round);
+
+  switch (placedCard.cardId) {
+    case "Exile": {
+      // -2/neighbor is scored off however many neighbors it has *right now* -- but the
+      // board keeps filling in on later turns, so the earlier this is placed, the more
+      // its real final penalty is being underestimated.
+      const emptyAdjacent = countEmptyAdjacentCells(postState.board, postState.config.boardBounds, action.position);
+      const expectedNewNeighbors = Math.min(emptyAdjacent, roundsRemaining * EXILE_NEIGHBOR_FILL_RATE_PER_ROUND);
+      return -2 * expectedNewNeighbors;
+    }
+
+    case "Commander": {
+      // +2 per adjacent Footman -- credit any Footmen still in hand (they might end up
+      // next to this Commander later) plus a small flat early-game bonus reflecting
+      // more turns left to draw and set one up, even with none in hand yet.
+      const footmenInHand = postState.players.find((p) => p.id === playerId)!.hand.filter((c) => c.cardId === "Footman").length;
+      return footmenInHand * 2 * COMMANDER_HAND_FOOTMAN_WEIGHT + roundsRemaining * COMMANDER_EARLY_GAME_BONUS_PER_ROUND;
+    }
+
+    case "Gloryseeker": {
+      // +3 only if face-up at scoring -- placed face-down (the common case), the fair
+      // margin sees none of that yet. The earlier it's placed (once flips are actually
+      // unlocked), the more turns remain for it to plausibly get flipped by either
+      // player before the game ends.
+      if (placedCard.faceUp) return 0;
+      const roundsWithFlipAvailable = Math.max(0, expectedFinalRound(postState.config) - Math.max(preState.round, postState.config.flipUnlockRound));
+      const flipChance = Math.min(1, roundsWithFlipAvailable * GLORYSEEKER_FLIP_CHANCE_PER_ROUND);
+      return 3 * flipChance;
+    }
+
+    case "Infiltrator": {
+      // Its swap bonus only applies while face-down -- the more turns remain before
+      // scoring, the higher the cumulative chance it gets flipped (by either player)
+      // and forfeits it, and a board with very few other face-down cards leaves it
+      // unusually exposed. The fair margin has no way to see either risk.
+      if (placedCard.faceUp) return 0;
+      const faceDownOnBoard = [...postState.board.values()].filter((c) => !c.faceUp).length;
+      let adjustment = -roundsRemaining * INFILTRATOR_FLIP_RISK_PER_ROUND;
+      if (faceDownOnBoard < INFILTRATOR_FEW_FACE_DOWN_THRESHOLD) adjustment -= INFILTRATOR_FEW_FACE_DOWN_PENALTY;
+      return adjustment;
+    }
+
+    case "Chronicler": {
+      // +1 per round elapsed *when the game ends* -- the fair margin only ever counts
+      // postState.round (the current round, frozen at "as if scoring right now"), so
+      // it's systematically undervalued the earlier it's placed. Top it up to what
+      // it's really expected to be worth once the game actually ends.
+      return expectedFinalRound(postState.config) - postState.round;
+    }
+
+    default:
+      return 0;
+  }
+}
+
 /** Places whichever (card, cell) combination yields the best resulting margin. */
 function choosePlacement(state: GameState, playerId: string, rng: Rng): GameAction {
   const player = state.players.find((p) => p.id === playerId)!;
@@ -165,7 +271,10 @@ function choosePlacement(state: GameState, playerId: string, rng: Rng): GameActi
 
   const best = pickBest(
     candidates,
-    (candidate) => estimateMargin(applyPlace(state, { type: "place", playerId, ...candidate }), playerId),
+    (candidate) => {
+      const postState = applyPlace(state, { type: "place", playerId, ...candidate });
+      return estimateMargin(postState, playerId) + placementHeuristicAdjustment(state, playerId, candidate, postState);
+    },
     rng
   );
 
