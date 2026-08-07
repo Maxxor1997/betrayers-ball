@@ -1,5 +1,7 @@
 import { adjacentPositions, isOwnerlessPosition, parsePosKey, posKey } from "../engine/board";
 import { computeAiVote, estimateMargin } from "../engine/endgame";
+import { redactedBoardFor } from "../engine/playerView";
+import { resolveBoard } from "../engine/resolution";
 import { applyPlace, currentPlayerId, getLegalFlipTargets, getLegalPlacementCells } from "../engine/turns";
 import { Board, BoardBounds, CardInstance, GameAction, GameConfig, GameState, Position } from "../engine/types";
 
@@ -166,14 +168,72 @@ const COMMANDER_HAND_FOOTMAN_WEIGHT = 1;
 /** Flat per-remaining-round nudge for Commander, on top of any hand-Footman credit -- more turns left means more chances to draw and set up a Footman next to it even with none in hand yet. */
 const COMMANDER_EARLY_GAME_BONUS_PER_ROUND = 0.5;
 
-/** Rough chance, per remaining round once flips are actually unlocked, that a face-down Gloryseeker ends up face-up (by either player) before scoring. */
-const GLORYSEEKER_FLIP_CHANCE_PER_ROUND = 0.15;
+/**
+ * Rough chance, per remaining round once flips are actually unlocked, that a
+ * face-down Gloryseeker ends up face-up (by either player) before scoring. Calibrated
+ * off playtest data, not derived: across thousands of simulated games, played
+ * Gloryseekers actually end up face-up ~80-90% of the time (at every player count
+ * except 2p, which delays flipUnlockRound by a round and lands closer to ~50%) --
+ * well above what the old 0.15 implied (~37% for a typical round-1 placement), which
+ * was making the AI undervalue and underplay a card that was already earning a
+ * perfectly competitive final score whenever it did get played.
+ */
+const GLORYSEEKER_FLIP_CHANCE_PER_ROUND = 0.3;
 
 /** Flat per-remaining-round discount on a face-down Infiltrator's current swap value, reflecting the cumulative risk it gets flipped (forfeiting the swap) before scoring. */
 const INFILTRATOR_FLIP_RISK_PER_ROUND = 0.5;
 /** Below this many face-down cards on the board, a face-down Infiltrator reads as unusually exposed (few peers to blend in with, and few plausible future swap targets), so it takes an extra flat penalty. */
 const INFILTRATOR_FEW_FACE_DOWN_THRESHOLD = 3;
 const INFILTRATOR_FEW_FACE_DOWN_PENALTY = 2;
+
+/**
+ * Each opponent's total, from `viewerId`'s honest point of view (hidden cards read as
+ * the neutral Unknown placeholder, same redaction estimateMargin uses) -- unlike
+ * estimateMargin, this keeps every opponent's own total instead of collapsing them
+ * down to just the max.
+ */
+function totalsByOpponent(state: GameState, viewerId: string): Record<string, number> {
+  const playerIds = state.players.map((p) => p.id);
+  const evaluationBoard = redactedBoardFor(state.board, viewerId);
+  const { totalsByOwner } = resolveBoard(evaluationBoard, state.config.boardBounds, state.round, state.config.centerEffect, playerIds);
+  return totalsByOwner;
+}
+
+/** Fraction of a non-leader opponent's real score drop credited as margin -- see nonLeaderDisruptionBonus's comment for why this is needed at all, and why it stays a fraction rather than full credit. */
+const NON_LEADER_DISRUPTION_WEIGHT = 0.5;
+
+/**
+ * Extra margin credit for lowering *any* opponent's score this placement, not just
+ * the current leader's -- the real (fair) margin already fully credits hurting
+ * whoever ends up the best opponent post-placement (estimateMargin literally
+ * subtracts their total), but bestOther is a max, not a sum: knocking down a rival
+ * who isn't in the lead moves the margin not at all, even though it's genuinely
+ * lowering that player's score. Applies to any card whose effect touches another
+ * player's total -- Earthshaker, Skysplitter, Plague Bearer, a Suppressor negating a
+ * beneficial neighbor effect, etc. -- not just a fixed list, since it's measured off
+ * real pre/post totals rather than guessing at which cards are "disruptive".
+ * Weighted at a fraction of the real swing (never enough on its own to override a
+ * placement the true margin already recognizes as better), since a hit that doesn't
+ * land on the leader is still worth less certainty than one the margin can already
+ * see paying off directly.
+ */
+function nonLeaderDisruptionBonus(preState: GameState, playerId: string, postState: GameState): number {
+  const opponentIds = postState.players.map((p) => p.id).filter((id) => id !== playerId);
+  if (opponentIds.length === 0) return 0;
+
+  const preTotals = totalsByOpponent(preState, playerId);
+  const postTotals = totalsByOpponent(postState, playerId);
+  const leaderTotal = Math.max(0, ...opponentIds.map((id) => postTotals[id] ?? 0));
+
+  let bonus = 0;
+  for (const id of opponentIds) {
+    const postTotal = postTotals[id] ?? 0;
+    if (postTotal === leaderTotal) continue; // already fully priced into the real margin via bestOther
+    const drop = (preTotals[id] ?? 0) - postTotal;
+    if (drop > 0) bonus += drop * NON_LEADER_DISRUPTION_WEIGHT;
+  }
+  return bonus;
+}
 
 /**
  * Additive nudge to a placement candidate's raw (fair, "as if scoring the instant
@@ -194,58 +254,64 @@ function placementHeuristicAdjustment(
   if (!placedCard) return 0;
   const roundsRemaining = Math.max(0, expectedFinalRound(preState.config) - preState.round);
 
-  switch (placedCard.cardId) {
-    case "Exile": {
-      // -2/neighbor is scored off however many neighbors it has *right now* -- but the
-      // board keeps filling in on later turns, so the earlier this is placed, the more
-      // its real final penalty is being underestimated.
-      const emptyAdjacent = countEmptyAdjacentCells(postState.board, postState.config.boardBounds, action.position);
-      const expectedNewNeighbors = Math.min(emptyAdjacent, roundsRemaining * EXILE_NEIGHBOR_FILL_RATE_PER_ROUND);
-      return -2 * expectedNewNeighbors;
-    }
+  const disruptionBonus = nonLeaderDisruptionBonus(preState, playerId, postState);
 
-    case "Commander": {
-      // +2 per adjacent Footman -- credit any Footmen still in hand (they might end up
-      // next to this Commander later) plus a small flat early-game bonus reflecting
-      // more turns left to draw and set one up, even with none in hand yet.
-      const footmenInHand = postState.players.find((p) => p.id === playerId)!.hand.filter((c) => c.cardId === "Footman").length;
-      return footmenInHand * 2 * COMMANDER_HAND_FOOTMAN_WEIGHT + roundsRemaining * COMMANDER_EARLY_GAME_BONUS_PER_ROUND;
-    }
+  const cardSpecificAdjustment = ((): number => {
+    switch (placedCard.cardId) {
+      case "Exile": {
+        // -2/neighbor is scored off however many neighbors it has *right now* -- but the
+        // board keeps filling in on later turns, so the earlier this is placed, the more
+        // its real final penalty is being underestimated.
+        const emptyAdjacent = countEmptyAdjacentCells(postState.board, postState.config.boardBounds, action.position);
+        const expectedNewNeighbors = Math.min(emptyAdjacent, roundsRemaining * EXILE_NEIGHBOR_FILL_RATE_PER_ROUND);
+        return -2 * expectedNewNeighbors;
+      }
 
-    case "Gloryseeker": {
-      // +3 only if face-up at scoring -- placed face-down (the common case), the fair
-      // margin sees none of that yet. The earlier it's placed (once flips are actually
-      // unlocked), the more turns remain for it to plausibly get flipped by either
-      // player before the game ends.
-      if (placedCard.faceUp) return 0;
-      const roundsWithFlipAvailable = Math.max(0, expectedFinalRound(postState.config) - Math.max(preState.round, postState.config.flipUnlockRound));
-      const flipChance = Math.min(1, roundsWithFlipAvailable * GLORYSEEKER_FLIP_CHANCE_PER_ROUND);
-      return 3 * flipChance;
-    }
+      case "Commander": {
+        // +2 per adjacent Footman -- credit any Footmen still in hand (they might end up
+        // next to this Commander later) plus a small flat early-game bonus reflecting
+        // more turns left to draw and set one up, even with none in hand yet.
+        const footmenInHand = postState.players.find((p) => p.id === playerId)!.hand.filter((c) => c.cardId === "Footman").length;
+        return footmenInHand * 2 * COMMANDER_HAND_FOOTMAN_WEIGHT + roundsRemaining * COMMANDER_EARLY_GAME_BONUS_PER_ROUND;
+      }
 
-    case "Infiltrator": {
-      // Its swap bonus only applies while face-down -- the more turns remain before
-      // scoring, the higher the cumulative chance it gets flipped (by either player)
-      // and forfeits it, and a board with very few other face-down cards leaves it
-      // unusually exposed. The fair margin has no way to see either risk.
-      if (placedCard.faceUp) return 0;
-      const faceDownOnBoard = [...postState.board.values()].filter((c) => !c.faceUp).length;
-      let adjustment = -roundsRemaining * INFILTRATOR_FLIP_RISK_PER_ROUND;
-      if (faceDownOnBoard < INFILTRATOR_FEW_FACE_DOWN_THRESHOLD) adjustment -= INFILTRATOR_FEW_FACE_DOWN_PENALTY;
-      return adjustment;
-    }
+      case "Gloryseeker": {
+        // +3 only if face-up at scoring -- placed face-down (the common case), the fair
+        // margin sees none of that yet. The earlier it's placed (once flips are actually
+        // unlocked), the more turns remain for it to plausibly get flipped by either
+        // player before the game ends.
+        if (placedCard.faceUp) return 0;
+        const roundsWithFlipAvailable = Math.max(0, expectedFinalRound(postState.config) - Math.max(preState.round, postState.config.flipUnlockRound));
+        const flipChance = Math.min(1, roundsWithFlipAvailable * GLORYSEEKER_FLIP_CHANCE_PER_ROUND);
+        return 3 * flipChance;
+      }
 
-    case "Chronicler": {
-      // +1 per round elapsed *when the game ends* -- the fair margin only ever counts
-      // postState.round (the current round, frozen at "as if scoring right now"), so
-      // it's systematically undervalued the earlier it's placed. Top it up to what
-      // it's really expected to be worth once the game actually ends.
-      return expectedFinalRound(postState.config) - postState.round;
-    }
+      case "Infiltrator": {
+        // Its swap bonus only applies while face-down -- the more turns remain before
+        // scoring, the higher the cumulative chance it gets flipped (by either player)
+        // and forfeits it, and a board with very few other face-down cards leaves it
+        // unusually exposed. The fair margin has no way to see either risk.
+        if (placedCard.faceUp) return 0;
+        const faceDownOnBoard = [...postState.board.values()].filter((c) => !c.faceUp).length;
+        let adjustment = -roundsRemaining * INFILTRATOR_FLIP_RISK_PER_ROUND;
+        if (faceDownOnBoard < INFILTRATOR_FEW_FACE_DOWN_THRESHOLD) adjustment -= INFILTRATOR_FEW_FACE_DOWN_PENALTY;
+        return adjustment;
+      }
 
-    default:
-      return 0;
-  }
+      case "Chronicler": {
+        // +1 per round elapsed *when the game ends* -- the fair margin only ever counts
+        // postState.round (the current round, frozen at "as if scoring right now"), so
+        // it's systematically undervalued the earlier it's placed. Top it up to what
+        // it's really expected to be worth once the game actually ends.
+        return expectedFinalRound(postState.config) - postState.round;
+      }
+
+      default:
+        return 0;
+    }
+  })();
+
+  return cardSpecificAdjustment + disruptionBonus;
 }
 
 /** Places whichever (card, cell) combination yields the best resulting margin. */

@@ -516,6 +516,18 @@ function Playtest() {
           <div className="flex items-center gap-2">
             {running ? (
               <>
+                <div
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={totalGamesConfigured}
+                  aria-valuenow={progress}
+                  className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800"
+                >
+                  <div
+                    className="h-full rounded-full bg-zinc-900 transition-[width] duration-150 dark:bg-zinc-100"
+                    style={{ width: `${totalGamesConfigured > 0 ? Math.min(100, (progress / totalGamesConfigured) * 100) : 0}%` }}
+                  />
+                </div>
                 <span className="text-xs whitespace-nowrap">
                   {progress} / {totalGamesConfigured}
                 </span>

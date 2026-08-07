@@ -175,12 +175,12 @@ describe("resolveBoard — Exile", () => {
 });
 
 describe("resolveBoard — Pretender", () => {
-  it("loses -5 if adjacent to a face-up card with base >= its own", () => {
+  it("loses -4 if adjacent to a face-up card with base >= its own", () => {
     const board: Board = new Map();
     const p = place(board, 0, 0, "Pretender", "p1");
     place(board, 1, 0, "Exile", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, p.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 3);
+    expect(find(cards, p.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 4);
   });
 
   it("is safe if the dangerous neighbor is face-down", () => {
@@ -197,7 +197,7 @@ describe("resolveBoard — Pretender", () => {
     const p1 = place(board, 0, 0, "Pretender", "p1");
     place(board, 1, 0, "Pretender", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, p1.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 3);
+    expect(find(cards, p1.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 4);
   });
 });
 
@@ -221,13 +221,13 @@ describe("resolveBoard — Berserker", () => {
 });
 
 describe("resolveBoard — Mercenary", () => {
-  it("gains +2 per unique adjacent enemy owner", () => {
+  it("gains +1 per unique adjacent enemy owner", () => {
     const board: Board = new Map();
     const merc = place(board, 1, 1, "Mercenary", "p1");
     place(board, 0, 1, "Footman", "p2");
     place(board, 2, 1, "Footman", "p3");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, merc.instanceId).finalValue).toBe(CARD_DEFS.Mercenary.base + 2 * 2);
+    expect(find(cards, merc.instanceId).finalValue).toBe(CARD_DEFS.Mercenary.base + 1 * 2);
   });
 
   it("does not count same-owner neighbors", () => {
@@ -244,7 +244,7 @@ describe("resolveBoard — Mercenary", () => {
     place(board, 0, 1, "Footman", "p2");
     place(board, 2, 1, "Warlord", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, merc.instanceId).finalValue).toBe(CARD_DEFS.Mercenary.base + 2 * 1);
+    expect(find(cards, merc.instanceId).finalValue).toBe(CARD_DEFS.Mercenary.base + 1 * 1);
   });
 
   it("counts a third neighbor from an already-seen enemy the same as a brand new one -- only the number of unique owners matters", () => {
@@ -254,7 +254,7 @@ describe("resolveBoard — Mercenary", () => {
     place(board, 2, 1, "Warlord", "p2");
     place(board, 1, 0, "Giant", "p3");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, merc.instanceId).finalValue).toBe(CARD_DEFS.Mercenary.base + 2 * 2); // p2 (x2) + p3, 2 unique enemies
+    expect(find(cards, merc.instanceId).finalValue).toBe(CARD_DEFS.Mercenary.base + 1 * 2); // p2 (x2) + p3, 2 unique enemies
   });
 });
 

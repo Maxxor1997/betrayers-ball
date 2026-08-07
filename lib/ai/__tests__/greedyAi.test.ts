@@ -380,4 +380,109 @@ describe("chooseGreedyAiAction — placement heuristics correct for what a one-p
     expect(action.type).toBe("place");
     if (action.type === "place") expect(action.instanceId).toBe(footman.instanceId);
   });
+
+  it("prefers the row that hits the most enemy cards for Earthshaker, not just whichever helps against the current leader", () => {
+    const board: Board = new Map();
+    // p2 is a guaranteed, untouchable leader -- 7 Giants fill row 0 completely (no
+    // empty cell left in that row at all), so there's no legal way to hit p2 with
+    // Earthshaker here. That isolates the comparison below: since p2's total never
+    // moves either way, the *real* margin ties between hitting p3's row 2 (1 card) and
+    // row 4 (2 cards) -- only the disruption heuristic should tell them apart.
+    for (let x = 0; x < 7; x++) {
+      board.set(posKey({ x, y: 0 }), card("Giant", "p2", true));
+    }
+    board.set(posKey({ x: 0, y: 2 }), card("Footman", "p3"));
+    board.set(posKey({ x: 0, y: 4 }), card("Footman", "p3"));
+    board.set(posKey({ x: 3, y: 4 }), card("Footman", "p3"));
+
+    const earthshaker = card("Earthshaker", "p1");
+    const state = makeState({
+      board,
+      round: 1,
+      players: [
+        { id: "p1", hand: [earthshaker], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+        { id: "p3", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
+    expect(action.type).toBe("place");
+    if (action.type === "place") expect(action.position.y).toBe(4);
+  });
+
+  it("prefers a cell that hits both neighbors for Skysplitter, not just whichever helps against the current leader", () => {
+    const board: Board = new Map();
+    // Same untouchable-leader trick as the Earthshaker test above, but sealed by
+    // *column* instead of row -- Skysplitter only ever checks directly above/below
+    // (same column), so a fully-packed column (not row) is what makes p2 unreachable
+    // here. (A packed row would leak: every row-1 cell would sit directly below a p2
+    // card and become a legitimately better "hit the real leader" option, which is
+    // exactly what happened before this was column-sealed instead.)
+    for (let y = 0; y < 7; y++) {
+      board.set(posKey({ x: 6, y }), card("Giant", "p2", true));
+    }
+    // A "sandwich" at column 2 -- both above and below the empty middle cell are p3's.
+    board.set(posKey({ x: 2, y: 1 }), card("Footman", "p3"));
+    board.set(posKey({ x: 2, y: 3 }), card("Footman", "p3"));
+    // A lone p3 card elsewhere with nothing below it -- only a single hit available there.
+    board.set(posKey({ x: 4, y: 1 }), card("Footman", "p3"));
+
+    const skysplitter = card("Skysplitter", "p1");
+    const state = makeState({
+      board,
+      round: 1,
+      players: [
+        { id: "p1", hand: [skysplitter], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+        { id: "p3", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
+    expect(action).toEqual({ type: "place", playerId: "p1", instanceId: skysplitter.instanceId, position: { x: 2, y: 2 } });
+  });
+
+  it("prefers hurting a non-leader opponent over an equally-scoring placement that hurts no one, for any card -- not just Earthshaker/Skysplitter", () => {
+    // This is the generic nonLeaderDisruptionBonus mechanism, not a per-card special
+    // case -- proven here with Suppressor, which isn't in placementHeuristicAdjustment's
+    // switch at all. Suppressor has no self-scoring effect of its own, so the *real*
+    // margin comes out identical for both candidate cells below; only the generic
+    // disruption credit tells them apart.
+    const board: Board = new Map();
+    // p2 is a guaranteed, untouchable leader, far outscoring anything p3 can lose.
+    board.set(posKey({ x: 6, y: 6 }), card("Giant", "p2", true));
+    board.set(posKey({ x: 6, y: 5 }), card("Giant", "p2", true));
+
+    // p3's face-up Gloryseeker, currently earning its own +3 self-effect.
+    board.set(posKey({ x: 3, y: 1 }), card("Gloryseeker", "p3", true));
+
+    // Padding so both candidate Suppressor cells reach the 3-occupied-neighbor
+    // threshold (center at (3,3) already counts as one for each). Giants, not
+    // Footmen -- a Footman's own effect counts *any* owned card sharing its row/column,
+    // so Suppressor's own placement would accidentally complete row/column synergies
+    // for Footman padding (and negation would sometimes cancel them again), swamping
+    // the one signal this test means to isolate. Giants have no effect at all.
+    board.set(posKey({ x: 2, y: 2 }), card("Giant", "p1", true));
+    board.set(posKey({ x: 4, y: 2 }), card("Giant", "p1", true));
+    board.set(posKey({ x: 2, y: 4 }), card("Giant", "p1", true));
+
+    const suppressor = card("Suppressor", "p1");
+    const state = makeState({
+      board,
+      round: 1,
+      players: [
+        { id: "p1", hand: [suppressor], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+        { id: "p3", hand: [], isAI: true },
+      ],
+    });
+
+    // (3,2) is adjacent to p3's Gloryseeker -- negating it strips the +3, hurting p3
+    // (not the leader, so the real margin doesn't see it at all). Every other legal
+    // cell also clears the 3-neighbor threshold but touches nothing with an active
+    // effect to lose -- a real tie on paper (all candidates score margin 9).
+    const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
+    expect(action).toEqual({ type: "place", playerId: "p1", instanceId: suppressor.instanceId, position: { x: 3, y: 2 } });
+  });
 });

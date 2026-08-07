@@ -15,7 +15,7 @@ export function configForPlayerCount(playerCount: number, centerEffect: CenterEf
   const boardBounds = ownerlessPositions ? { ...baseBounds, ownerless: ownerlessPositions } : baseBounds;
   return {
     boardBounds,
-    handSize: 7,
+    handSize: 8,
     roundCap: 6,
     // 2p delays the flip unlock by a round -- with only one opponent, a single flip
     // removes all "unknown" for that card faster than in larger games.
