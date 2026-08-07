@@ -566,19 +566,10 @@ describe("resolveBoard — totals", () => {
 });
 
 describe("resolveBoard — center effect: Shadowlands", () => {
-  it("gives +1 to face-down cards; face-up cards are untouched", () => {
+  it("has no resolution-time effect -- it's a flip-timing rule (see turns.test.ts), not a scoring one", () => {
     const board: Board = new Map();
     const hidden = place(board, 0, 0, "Footman", "p1", false);
-    const shown = place(board, 5, 5, "Footman", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3, "shadowlands");
-    expect(find(cards, hidden.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
-    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
-  });
-
-  it("does not apply when a different center effect (or none) is active", () => {
-    const board: Board = new Map();
-    const hidden = place(board, 0, 0, "Footman", "p1", false);
-    const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, hidden.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
   });
 });

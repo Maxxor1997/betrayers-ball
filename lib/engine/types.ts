@@ -87,9 +87,10 @@ export interface GameConfig {
   /** Earliest round a vote can be called, per the spec's min-round floor. */
   minRoundFloor: number;
   /** Number of players -- affects flip rules (see isFlipUnlocked in turns.ts): 2p
-   * delays the normal flip unlock by a round, and 2p + Shadowlands disables flipping
-   * for the whole game, since with only one opponent a single flip removes all
-   * "unknown" for that card faster than in larger games. */
+   * delays the normal flip unlock by a round, since with only one opponent a single
+   * flip removes all "unknown" for that card faster than in larger games. Shadowlands
+   * (see centerEffects.ts's flipGate) delays it a further round on top of that,
+   * regardless of player count. */
   playerCount: number;
 }
 

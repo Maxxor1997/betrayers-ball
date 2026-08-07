@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { CARD_DEFS } from "@/lib/content/cards";
 import { applyAction, configForPlayerCount, createGame } from "../game";
 import { getLegalFlipTargets, getLegalPlacementCells } from "../turns";
-import { GameConfig, GameState } from "../types";
+import { Board, GameConfig, GameState, posKey } from "../types";
 
 function deterministicRng(seed: number) {
   let s = seed;
@@ -274,28 +273,28 @@ describe("applyAction — voting", () => {
 });
 
 describe("applyAction — centerEffect threads through to a real end-of-game result", () => {
-  it("Shadowlands measurably increases a face-down card's contribution to the final score", () => {
+  it("Shadowlands delays flip-unlock by one extra round, enforced through applyAction", () => {
     const config: GameConfig = {
       boardBounds: { width: 7, height: 7, center: { x: 3, y: 3 } },
       handSize: 1,
-      roundCap: 1,
+      roundCap: 6,
       flipUnlockRound: 2,
       centerEffect: "shadowlands",
       minRoundFloor: 10, // keep voting out of the way
       playerCount: 2,
     };
-    // Manually constructed (known Footman hands) rather than createGame's random deal,
-    // so the expected score math doesn't depend on which cards happen to be dealt.
-    let state: GameState = {
+    const board: Board = new Map();
+    board.set(posKey({ x: 3, y: 2 }), { instanceId: "c1", cardId: "Footman", ownerId: "p1", faceUp: false });
+    const baseState: GameState = {
       config,
-      board: new Map(),
+      board,
       deck: [],
       players: [
-        { id: "p1", hand: [{ instanceId: "h1", cardId: "Footman", ownerId: "p1", faceUp: false }], isAI: false },
-        { id: "p2", hand: [{ instanceId: "h2", cardId: "Footman", ownerId: "p2", faceUp: false }], isAI: false },
+        { id: "p1", hand: [], isAI: false },
+        { id: "p2", hand: [], isAI: false },
       ],
       currentPlayerIndex: 0,
-      round: 1,
+      round: 2,
       turnsThisRound: 0,
       passedPlayerIds: new Set(),
       hasFlippedThisTurn: false,
@@ -307,13 +306,12 @@ describe("applyAction — centerEffect threads through to a real end-of-game res
       result: null,
     };
 
-    // (3,2) and (3,4) are both adjacent to center (3,3) -- legal round-1 placements.
-    state = applyAction(state, { type: "place", playerId: "p1", instanceId: "h1", position: { x: 3, y: 2 } });
-    state = applyAction(state, { type: "place", playerId: "p2", instanceId: "h2", position: { x: 3, y: 4 } });
+    // Normally (flipUnlockRound: 2) round 2 would already allow flipping -- Shadowlands
+    // pushes that to round 3, threaded through the real reducer, not just isFlipUnlocked directly.
+    expect(() => applyAction(baseState, { type: "flip", playerId: "p1", instanceId: "c1" })).toThrow();
 
-    expect(state.phase).toBe("ended");
-    // Both cards stayed face-down (no flip occurred) -> +1 each from Shadowlands.
-    expect(state.result?.scores.p1).toBe(CARD_DEFS.Footman.base + 1);
+    const next = applyAction({ ...baseState, round: 3 }, { type: "flip", playerId: "p1", instanceId: "c1" });
+    expect(next.board.get(posKey({ x: 3, y: 2 }))?.faceUp).toBe(true);
   });
 });
 

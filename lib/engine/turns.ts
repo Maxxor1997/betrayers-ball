@@ -24,16 +24,19 @@ export function isFlipUnlocked(round: number, config: GameConfig): boolean {
 }
 
 /**
- * Any face-down card on the board, any owner — the legal flip targets right now. A
- * center effect can narrow this via `flipTargetFilter` (unused by any current effect).
+ * Any face-down card on the board, any owner — the legal flip targets right now.
+ * Except a card marked `opponentOnlyFlip` (see lib/content/cards.ts): its own owner
+ * can't flip it, only an opponent can. A center effect can further narrow this via
+ * `flipTargetFilter` (unused by any current effect).
  */
 export function getLegalFlipTargets(state: GameState): CardInstance[] {
   if (state.phase !== "playing") return [];
   if (!isFlipUnlocked(state.round, state.config)) return [];
   if (state.hasFlippedThisTurn) return [];
-  const targets = [...state.board.values()].filter((c) => !c.faceUp);
+  const flipperId = currentPlayerId(state);
+  const targets = [...state.board.values()].filter((c) => !c.faceUp && !(CARD_DEFS[c.cardId].opponentOnlyFlip && c.ownerId === flipperId));
   const flipTargetFilter = CENTER_EFFECTS[state.config.centerEffect].flipTargetFilter;
-  if (flipTargetFilter) return flipTargetFilter(targets, currentPlayerId(state));
+  if (flipTargetFilter) return flipTargetFilter(targets, flipperId);
   return targets;
 }
 
@@ -62,6 +65,9 @@ export function applyFlip(state: GameState, action: FlipAction): GameState {
   if (!entry) throw new Error(`No card ${action.instanceId} on the board`);
   const [key, target] = entry;
   if (target.faceUp) throw new Error("Card is already face-up");
+  if (CARD_DEFS[target.cardId].opponentOnlyFlip && target.ownerId === action.playerId) {
+    throw new Error(`${CARD_DEFS[target.cardId].name} can only be flipped by an opponent, not its own owner`);
+  }
   const flipTargetFilter = CENTER_EFFECTS[state.config.centerEffect].flipTargetFilter;
   if (flipTargetFilter && flipTargetFilter([target], action.playerId).length === 0) {
     throw new Error(`${CENTER_EFFECTS[state.config.centerEffect].label}: you cannot flip that card`);

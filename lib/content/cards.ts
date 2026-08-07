@@ -53,6 +53,8 @@ export interface CardDef {
   forceFaceUp?: boolean;
   /** Value floors at 0 after all modifiers are applied. */
   floorAtZero?: boolean;
+  /** While face-down, only an opponent can flip it -- its own owner can't cash in a self-triggered flip. */
+  opponentOnlyFlip?: boolean;
 
   /** Value-modifying effect during resolution -- most cards with printed scoring text. */
   valueModifier?: (ctx: CardEffectContext) => void;
@@ -207,9 +209,10 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Gloryseeker",
     base: 4,
     bucket: "Engine",
-    text: "+3 if face-up",
-    fullText: "+3 if this card is face-up at scoring.",
+    text: "+3 if face-up, only opp. can flip it",
+    fullText: "+3 if this card is face-up at scoring. Its own owner can't flip it -- only an opponent can.",
     count: [4, 4, 4, 4, 5, 6, 7],
+    opponentOnlyFlip: true,
     valueModifier: ({ self, addDelta }) => {
       if (self.faceUp) addDelta(self.instanceId, 3, "Gloryseeker (face-up)");
     },

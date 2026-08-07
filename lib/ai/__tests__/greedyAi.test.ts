@@ -220,14 +220,19 @@ describe("chooseGreedyAiAction — placement actually looks ahead", () => {
 });
 
 describe("chooseGreedyAiAction — flip actually looks ahead", () => {
-  it("flips its own face-down Gloryseeker face-up for the +3", () => {
+  it("never self-flips its own face-down Gloryseeker, even though the +3 would help -- opponentOnlyFlip forbids it", () => {
+    // Gloryseeker is the only card whose own value improves from being face-up, so
+    // this used to be the example proving chooseFlip's own-card, value-ranked branch
+    // works. Now that Gloryseeker is opponentOnlyFlip (see lib/content/cards.ts),
+    // getLegalFlipTargets excludes it from its own owner's options entirely -- the AI
+    // has nothing else to flip and an empty hand, so it passes instead.
     const board: Board = new Map();
     const gloryseeker = card("Gloryseeker", "p1", false);
     board.set(posKey({ x: 3, y: 2 }), gloryseeker);
     const state = makeState({ board, round: 3 });
 
     const action = chooseGreedyAiAction(state, "p1", deterministicRng(2));
-    expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: gloryseeker.instanceId });
+    expect(action).toEqual({ type: "pass", playerId: "p1" });
   });
 
   it("does not flip when nothing on the board would benefit", () => {
@@ -340,14 +345,18 @@ describe("chooseGreedyAiAction — placement heuristics correct for what a one-p
   });
 
   it("values a face-down Gloryseeker more highly the earlier it's placed, for the chance it gets flipped before scoring", () => {
-    // Naively (face-down, no +3 yet) a flat Footman beats it -- the earlier-round flip
-    // chance should flip which one wins, in Gloryseeker's favor.
+    // Naively (face-down, no +3 yet) a flat Bannerman (same base 4, no neighbors here
+    // to trigger its own effect either) ties it -- the earlier-round flip chance should
+    // flip which one wins, in Gloryseeker's favor. A flat Footman (base 5) is too big a
+    // gap for the flip-chance heuristic to close now that Gloryseeker is
+    // opponentOnlyFlip (see lib/content/cards.ts) -- its own owner can no longer
+    // self-flip it, so this only credits the chance an opponent bothers to.
     const gloryseeker = card("Gloryseeker", "p1");
-    const footman = card("Footman", "p1");
+    const bannerman = card("Bannerman", "p1");
     const state = makeState({
       round: 1,
       players: [
-        { id: "p1", hand: [gloryseeker, footman], isAI: true },
+        { id: "p1", hand: [gloryseeker, bannerman], isAI: true },
         { id: "p2", hand: [], isAI: true },
       ],
     });

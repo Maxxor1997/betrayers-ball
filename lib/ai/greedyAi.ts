@@ -25,12 +25,15 @@ function pickBest<T>(options: T[], score: (option: T) => number, rng: Rng): T {
 
 /**
  * Baseline chance of flipping an opponent's card speculatively, when no own-card flip
- * is worth it -- see the note in chooseFlip on why this can't be value-ranked. Set
- * high, not 50/50: only Gloryseeker clearly wants to stay hidden for its owner (+3 face-
- * up), so revealing is very rarely a gift to them, and the information is otherwise
- * free -- a real player grabs it almost every time rather than passing on a free look.
+ * is worth it -- see the note in chooseFlip on why this can't be value-ranked. Still
+ * high, not 50/50: only Gloryseeker clearly wants to stay hidden for its owner (+3
+ * face-up), and it's a small slice of the deck, so a blind flip is still usually a
+ * free look. But it's not *zero* risk either -- flipping a hidden card that happens to
+ * be an opponent's Gloryseeker hands them a free +3, so this is nudged down a bit
+ * from a flat "always grab the free look" to reflect that real downside instead of
+ * ignoring it entirely.
  */
-const OPPONENT_FLIP_EXPLORATION_PROBABILITY = 0.85;
+const OPPONENT_FLIP_EXPLORATION_PROBABILITY = 0.75;
 
 function hypotheticalFlipMargin(state: GameState, playerId: string, target: { instanceId: string }): number {
   const board = new Map(state.board);
@@ -169,16 +172,38 @@ const COMMANDER_HAND_FOOTMAN_WEIGHT = 1;
 const COMMANDER_EARLY_GAME_BONUS_PER_ROUND = 0.5;
 
 /**
- * Rough chance, per remaining round once flips are actually unlocked, that a
- * face-down Gloryseeker ends up face-up (by either player) before scoring. Calibrated
- * off playtest data, not derived: across thousands of simulated games, played
- * Gloryseekers actually end up face-up ~80-90% of the time (at every player count
- * except 2p, which delays flipUnlockRound by a round and lands closer to ~50%) --
- * well above what the old 0.15 implied (~37% for a typical round-1 placement), which
- * was making the AI undervalue and underplay a card that was already earning a
- * perfectly competitive final score whenever it did get played.
+ * Rough chance, per *opponent turn* once flips are actually unlocked, that a given
+ * opponent's blind exploration flip (see OPPONENT_FLIP_EXPLORATION_PROBABILITY /
+ * opponentTargetPriority) lands on this specific face-down Gloryseeker rather than
+ * some other face-down card. Gloryseeker is `opponentOnlyFlip` (see
+ * lib/content/cards.ts) -- its own owner can never flip it, so this is purely the
+ * chance *an opponent* bothers to; it doesn't depend on the card's own +4/+3/whatever
+ * magnitude, since opponent flip targets are chosen blind, not by value.
+ *
+ * This is per opponent *turn*, not per round, on purpose: a round only advances once
+ * every player has taken a turn (see advanceTurn in game.ts), so an 8p round packs in
+ * 8 individual flip-attempt opportunities while a 2p round only has 2 -- a flat
+ * per-round rate misses that entirely and badly underestimates at high player counts.
+ * See GLORYSEEKER_FLIP_CHANCE below for how this combines across opponents and rounds.
+ * Calibrated off the cleanest signal available -- 2p, where there's only ever one
+ * possible flipper -- where played Gloryseekers convert ~40%; 3p-8p data (own Δ base
+ * plateauing around +2.0 of +3, i.e. ~67%) is consistent with the same per-turn rate
+ * scaled up by opponent count, once you account for that population average also
+ * blending in later, more time-starved placements that never had this much of a
+ * window to begin with.
  */
-const GLORYSEEKER_FLIP_CHANCE_PER_ROUND = 0.3;
+const GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN = 0.18;
+
+/**
+ * Combines GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN across every opponent-turn still
+ * available before scoring, as "at least one of N independent attempts lands on it"
+ * (1 - (1-p)^N) -- saturating, not linear, so it never overshoots 1 the way naively
+ * multiplying opponentCount * roundsRemaining * p would once N gets large at 8p.
+ */
+function glorySeekerFlipChance(roundsWithFlipAvailable: number, opponentCount: number): number {
+  const opponentTurns = roundsWithFlipAvailable * opponentCount;
+  return 1 - (1 - GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN) ** opponentTurns;
+}
 
 /** Flat per-remaining-round discount on a face-down Infiltrator's current swap value, reflecting the cumulative risk it gets flipped (forfeiting the swap) before scoring. */
 const INFILTRATOR_FLIP_RISK_PER_ROUND = 0.5;
@@ -278,11 +303,12 @@ function placementHeuristicAdjustment(
       case "Gloryseeker": {
         // +3 only if face-up at scoring -- placed face-down (the common case), the fair
         // margin sees none of that yet. The earlier it's placed (once flips are actually
-        // unlocked), the more turns remain for it to plausibly get flipped by either
-        // player before the game ends.
+        // unlocked) and the more opponents there are, the more opponent-turns remain
+        // for one of them to plausibly flip it before the game ends.
         if (placedCard.faceUp) return 0;
         const roundsWithFlipAvailable = Math.max(0, expectedFinalRound(postState.config) - Math.max(preState.round, postState.config.flipUnlockRound));
-        const flipChance = Math.min(1, roundsWithFlipAvailable * GLORYSEEKER_FLIP_CHANCE_PER_ROUND);
+        const opponentCount = postState.players.length - 1;
+        const flipChance = glorySeekerFlipChance(roundsWithFlipAvailable, opponentCount);
         return 3 * flipChance;
       }
 

@@ -156,12 +156,30 @@ describe("flipping", () => {
     const target = state.board.get("2,1")!;
     expect(() => applyFlip(state, { type: "flip", playerId: "p1", instanceId: target.instanceId })).toThrow();
   });
+
+  it("excludes an opponentOnlyFlip card (Gloryseeker) from its own owner's legal flip targets", () => {
+    const board: Board = new Map();
+    board.set("2,1", handCard("Gloryseeker", "p1"));
+    const state = makeState({ board, round: 2 });
+    expect(getLegalFlipTargets(state)).toHaveLength(0);
+    const target = state.board.get("2,1")!;
+    expect(() => applyFlip(state, { type: "flip", playerId: "p1", instanceId: target.instanceId })).toThrow();
+  });
+
+  it("still allows an opponent to flip an opponentOnlyFlip card (Gloryseeker)", () => {
+    const board: Board = new Map();
+    const opponentGloryseeker = handCard("Gloryseeker", "p2");
+    board.set("2,1", opponentGloryseeker);
+    const state = makeState({ board, round: 2 });
+    expect(getLegalFlipTargets(state)).toHaveLength(1);
+    const next = applyFlip(state, { type: "flip", playerId: "p1", instanceId: opponentGloryseeker.instanceId });
+    expect(next.board.get("2,1")?.faceUp).toBe(true);
+  });
 });
 
 describe("flipping — Shadowlands", () => {
-  // Shadowlands no longer gates the flip action at all -- it's a scoring effect now
-  // (face-down +1 / face-up -1, see resolution.test.ts), so flipping should follow the
-  // plain default gate (round >= flipUnlockRound), same as "none".
+  // Shadowlands delays the normal flip unlock by one extra round, via flipGate --
+  // CONFIG.flipUnlockRound is 2, so Shadowlands pushes that to 3.
   const SHADOWLANDS_CONFIG: GameConfig = { ...CONFIG, centerEffect: "shadowlands" };
 
   function stateAtRound(round: number): GameState {
@@ -170,24 +188,26 @@ describe("flipping — Shadowlands", () => {
     return makeState({ board, round, config: SHADOWLANDS_CONFIG });
   }
 
-  it("allows flipping from flipUnlockRound on, every round -- not just 2, 4, 6", () => {
-    for (const round of [2, 3, 4, 5, 6]) {
+  it("allows flipping from flipUnlockRound + 1 on, every round -- not just 3, 5", () => {
+    for (const round of [3, 4, 5, 6]) {
       expect(getLegalFlipTargets(stateAtRound(round))).toHaveLength(1);
     }
   });
 
-  it("blocks flipping before flipUnlockRound", () => {
-    const state = stateAtRound(1);
-    expect(getLegalFlipTargets(state)).toHaveLength(0);
-    const target = state.board.get("2,1")!;
-    expect(() => applyFlip(state, { type: "flip", playerId: "p1", instanceId: target.instanceId })).toThrow();
+  it("blocks flipping through flipUnlockRound itself, one round later than normal", () => {
+    for (const round of [1, 2]) {
+      const state = stateAtRound(round);
+      expect(getLegalFlipTargets(state)).toHaveLength(0);
+      const target = state.board.get("2,1")!;
+      expect(() => applyFlip(state, { type: "flip", playerId: "p1", instanceId: target.instanceId })).toThrow();
+    }
   });
 
   it("still respects the once-per-turn limit on an unlocked round", () => {
     const board: Board = new Map();
     board.set("2,1", handCard("Footman", "p1"));
     board.set("2,3", handCard("Footman", "p1"));
-    const state = makeState({ board, round: 2, config: SHADOWLANDS_CONFIG });
+    const state = makeState({ board, round: 3, config: SHADOWLANDS_CONFIG });
     const c1 = state.board.get("2,1")!;
     const c2 = state.board.get("2,3")!;
     const next = applyFlip(state, { type: "flip", playerId: "p1", instanceId: c1.instanceId });

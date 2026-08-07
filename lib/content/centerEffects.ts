@@ -180,12 +180,8 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
 
   shadowlands: {
     label: "Shadowlands",
-    description: "Face-down cards score +1",
-    valueModifiers: (board, _bounds, addDelta) => {
-      for (const c of board.values()) {
-        addDelta(c.instanceId, c.faceUp ? 0 : 1, "Shadowlands");
-      }
-    },
+    description: "Flips unlock one round later than usual",
+    flipGate: (round, config) => round >= config.flipUnlockRound + 1,
   },
 
   reckoning: {
