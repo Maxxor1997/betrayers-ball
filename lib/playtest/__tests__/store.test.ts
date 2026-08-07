@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEmptyBucket, createEmptyStats } from "../cardStats";
+import { createEmptyBucket, createEmptyStats, placementBaseline } from "../cardStats";
 import { loadStats, resetStats, saveStats } from "../store";
 
 /**
@@ -149,6 +149,63 @@ describe("loadStats/saveStats round-trip", () => {
     withMockLocalStorage(() => {
       window.localStorage.setItem("board-game:playtest-stats", JSON.stringify({ cards: {}, overall: {}, byPlayerCount: "not an object" }));
       expect(loadStats().byPlayerCount).toEqual({});
+    });
+  });
+
+  // The actual bug report this covers: a stored blob from before placementDeltaSum
+  // existed has real placementSum/played data, so defaulting the new field to 0 isn't
+  // just imprecise -- it silently reports "exactly average" for every already-played
+  // card, i.e. "it shows 0 for everything". Since every game in a single
+  // player-count slice shares one baseline, placementDeltaSum is exactly recoverable
+  // from placementSum/played rather than defaulted.
+  it("reconstructs placementDeltaSum for a byPlayerCount slice from placementSum/played instead of defaulting to 0", () => {
+    withMockLocalStorage(() => {
+      // 5 placements at 2p (baseline 1.5) summing to rank total 6 -- e.g. some mix of
+      // 1st/2nd finishes. Old schema: no placementDeltaSum key anywhere.
+      const legacyShape = {
+        cards: {},
+        overall: {},
+        byPlayerCount: {
+          "2": { cards: { Footman: { played: 5, placementSum: 6 } }, overall: {} },
+        },
+      };
+      window.localStorage.setItem("board-game:playtest-stats", JSON.stringify(legacyShape));
+
+      const loaded = loadStats();
+      const expected = 6 - 5 * placementBaseline(2);
+      expect(loaded.byPlayerCount[2].cards.Footman.placementDeltaSum).toBeCloseTo(expected);
+      expect(expected).not.toBe(0); // sanity: this legacy fixture isn't a case where 0 would coincidentally be right
+    });
+  });
+
+  it("reconstructs the blended top-level placementDeltaSum by summing the recovered byPlayerCount slices, not by defaulting to 0", () => {
+    withMockLocalStorage(() => {
+      const legacyShape = {
+        cards: { Footman: { played: 8, placementSum: 12 } }, // no placementDeltaSum -- can't be derived here directly, mixes baselines
+        overall: {},
+        byPlayerCount: {
+          "2": { cards: { Footman: { played: 5, placementSum: 6 } }, overall: {} },
+          "8": { cards: { Footman: { played: 3, placementSum: 6 } }, overall: {} },
+        },
+      };
+      window.localStorage.setItem("board-game:playtest-stats", JSON.stringify(legacyShape));
+
+      const loaded = loadStats();
+      const expected = (6 - 5 * placementBaseline(2)) + (6 - 3 * placementBaseline(8));
+      expect(loaded.cards.Footman.placementDeltaSum).toBeCloseTo(expected);
+      expect(expected).not.toBe(0);
+    });
+  });
+
+  it("leaves placementDeltaSum at a safe 0 (can't be recovered) when there's no byPlayerCount data to reconstruct it from", () => {
+    withMockLocalStorage(() => {
+      // Data old enough to predate the byPlayerCount feature itself -- genuinely no way to know each game's player count.
+      const legacyShape = { cards: { Footman: { played: 4, placementSum: 6 } }, overall: {} };
+      window.localStorage.setItem("board-game:playtest-stats", JSON.stringify(legacyShape));
+
+      const loaded = loadStats();
+      expect(loaded.cards.Footman.played).toBe(4); // real fields still survive
+      expect(loaded.cards.Footman.placementDeltaSum).toBe(0); // last-resort safe default, not NaN/undefined
     });
   });
 });

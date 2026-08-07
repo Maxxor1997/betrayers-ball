@@ -66,12 +66,12 @@ function buildStatsMarkdown(rows: CardStatsRow[], overallRoundLength: number | n
   const lines = [
     `Overall average round length: ${fmt(overallRoundLength, 2)}`,
     "",
-    "| Card | Bucket | Played | Own Δ base | Final score | Avg placement | Avg round length |",
+    "| Card | Bucket | Played | Own Δ base | Final score | Placement Δ avg | Avg round length |",
     "|---|---|---|---|---|---|---|",
   ];
   for (const row of rows) {
     lines.push(
-      `| ${CARD_DEFS[row.cardId].name} | ${CARD_DEFS[row.cardId].bucket} | ${fmtPercent(row.playRate)} (${row.played}/${row.copiesInDeck}) | ${fmtSigned(ownScoreDelta(row))} | ${fmt(row.avgFinalScore)} | ${fmt(row.avgPlacement, 2)} | ${fmt(row.avgRoundLength, 2)} |`
+      `| ${CARD_DEFS[row.cardId].name} | ${CARD_DEFS[row.cardId].bucket} | ${fmtPercent(row.playRate)} (${row.played}/${row.copiesInDeck}) | ${fmtSigned(ownScoreDelta(row))} | ${fmt(row.avgFinalScore)} | ${fmtSigned(row.avgPlacementDelta, 2)} | ${fmt(row.avgRoundLength, 2)} |`
     );
   }
   return lines.join("\n") + "\n";
@@ -95,7 +95,7 @@ function compareNullable(a: number | null, b: number | null, dir: 1 | -1): numbe
 type HeatMetric = "placement" | "playRate" | "own" | "final" | "roundLength";
 
 const HEAT_METRIC_LABELS: Record<HeatMetric, string> = {
-  placement: "Avg placement",
+  placement: "Placement Δ avg",
   playRate: "Played",
   own: "Own Δ base",
   final: "Final score",
@@ -111,7 +111,7 @@ function heatMetricValue(row: CardStatsRow | undefined, metric: HeatMetric): num
   if (!row) return null;
   switch (metric) {
     case "placement":
-      return row.avgPlacement;
+      return row.avgPlacementDelta;
     case "playRate":
       return row.playRate;
     case "own":
@@ -127,7 +127,7 @@ function heatMetricFormat(row: CardStatsRow | undefined, metric: HeatMetric): st
   if (!row) return "—";
   switch (metric) {
     case "placement":
-      return fmt(row.avgPlacement, 2);
+      return fmtSigned(row.avgPlacementDelta, 2);
     case "playRate":
       return fmtPercent(row.playRate);
     case "own":
@@ -364,7 +364,7 @@ function Playtest() {
       case "final":
         return compareNullable(a.avgFinalScore, b.avgFinalScore, sortDir);
       case "placement":
-        return compareNullable(a.avgPlacement, b.avgPlacement, sortDir);
+        return compareNullable(a.avgPlacementDelta, b.avgPlacementDelta, sortDir);
       case "roundLength":
         return compareNullable(a.avgRoundLength, b.avgRoundLength, sortDir);
     }
@@ -700,13 +700,13 @@ function Playtest() {
                   title="Full resolved value as actually scored, including neighbor and center effects"
                 />
                 <SortableHeader
-                  label="Avg placement"
+                  label="Placement Δ avg"
                   sortKey="placement"
                   activeKey={sortKey}
                   dir={sortDir}
                   onClick={toggleSort}
                   align="right"
-                  title="Average final placement (1st/2nd/...) of the player who played this card"
+                  title="Average (placement rank - the random-baseline rank for that game's player count), e.g. baseline is 2.5 at 4p, 4.5 at 8p -- lets placement be compared fairly across a mix of player counts. Negative means better than a random seat would average; positive means worse."
                 />
                 <SortableHeader
                   label="Avg round length"
@@ -729,7 +729,7 @@ function Playtest() {
                   </td>
                   <td className="px-3 py-1.5 text-right">{fmtSigned(ownScoreDelta(row))}</td>
                   <td className="px-3 py-1.5 text-right">{fmt(row.avgFinalScore)}</td>
-                  <td className="px-3 py-1.5 text-right">{fmt(row.avgPlacement, 2)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmtSigned(row.avgPlacementDelta, 2)}</td>
                   <td className="px-3 py-1.5 text-right">{fmt(row.avgRoundLength, 2)}</td>
                 </tr>
               ))}

@@ -24,8 +24,23 @@ export interface CardStats {
   finalScoreSum: number;
   /** Sum of the owning player's standard-competition placement (1st/2nd/...) in each game this card appeared in. */
   placementSum: number;
+  /**
+   * Sum of (this placement's rank - placementBaseline(that game's playerCount)), once
+   * per appearance -- a raw placement number is meaningless to compare across player
+   * counts (1st of 8 and 1st of 2 aren't the same accomplishment, and a flat table
+   * blends games from every player count together), so this tracks each appearance's
+   * *relative* performance against "if this seat did exactly average for its own
+   * game," summed with the correct per-game baseline before any blending happens.
+   * See statsSummary's avgPlacementDelta.
+   */
+  placementDeltaSum: number;
   /** Sum of the ending round number (see OverallStats.roundLengthSum's doc comment) of every game this card appeared in -- once per placement, same weighting as every other per-card sum here. */
   roundLengthSum: number;
+}
+
+/** The average standard-competition placement a seat would get in a `playerCount`-player game with zero skill differentiation -- e.g. 2.5 at 4p, 4.5 at 8p. The reference point placementDeltaSum measures every real placement against. */
+export function placementBaseline(playerCount: number): number {
+  return (playerCount + 1) / 2;
 }
 
 /** Running totals that aren't about any one card -- currently just the game-length baseline every card's own avgRoundLength gets compared against. */
@@ -57,7 +72,7 @@ export function createEmptyBucket(): StatsBucket {
   for (const id of ALL_CARD_IDS) {
     // "Unknown" is the AI-fairness/redaction placeholder, never a real playable card -- see CardId's own doc comment.
     if (id === "Unknown") continue;
-    cards[id] = { played: 0, copiesInDeck: 0, ownScoreSum: 0, finalScoreSum: 0, placementSum: 0, roundLengthSum: 0 };
+    cards[id] = { played: 0, copiesInDeck: 0, ownScoreSum: 0, finalScoreSum: 0, placementSum: 0, placementDeltaSum: 0, roundLengthSum: 0 };
   }
   return { cards, overall: { gamesTallied: 0, roundLengthSum: 0 } };
 }
@@ -115,12 +130,15 @@ function tallyIntoBucket(
   bucket.overall.roundLengthSum += roundsPlayed;
 
   const ranks = computeRanks(scores);
+  const baseline = placementBaseline(playerCount);
   for (const card of resolvedCards) {
     const entry = bucket.cards[card.cardId];
     entry.played += 1;
     entry.ownScoreSum += ownValueFor(card);
     entry.finalScoreSum += card.finalValue;
-    entry.placementSum += ranks.get(card.ownerId)!;
+    const rank = ranks.get(card.ownerId)!;
+    entry.placementSum += rank;
+    entry.placementDeltaSum += rank - baseline;
     entry.roundLengthSum += roundsPlayed;
   }
 }
@@ -157,6 +175,15 @@ export interface CardStatsRow {
   avgOwnScore: number | null;
   avgFinalScore: number | null;
   avgPlacement: number | null;
+  /**
+   * Average (rank - placementBaseline(that game's playerCount)) across every
+   * appearance -- negative means this card's owner placed better than a random seat
+   * would on average, positive means worse. Unlike avgPlacement, this is meaningful to
+   * compare across cards even when they were tallied across a mix of player counts,
+   * since each appearance is measured against its own game's baseline before being
+   * summed.
+   */
+  avgPlacementDelta: number | null;
   /** Average ending round of games this card appeared in -- compare against overallAvgRoundLength to see whether this card tends to show up in longer or shorter games than average. */
   avgRoundLength: number | null;
 }
@@ -173,6 +200,7 @@ export function statsSummary(bucket: StatsBucket): CardStatsRow[] {
       avgOwnScore: s.played === 0 ? null : s.ownScoreSum / s.played,
       avgFinalScore: s.played === 0 ? null : s.finalScoreSum / s.played,
       avgPlacement: s.played === 0 ? null : s.placementSum / s.played,
+      avgPlacementDelta: s.played === 0 ? null : s.placementDeltaSum / s.played,
       avgRoundLength: s.played === 0 ? null : s.roundLengthSum / s.played,
     };
   });

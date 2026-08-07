@@ -7,6 +7,7 @@ import {
   createEmptyStats,
   overallAvgRoundLength,
   ownValueFor,
+  placementBaseline,
   simulateOneGame,
   simulateOneGameSteps,
   statsSummary,
@@ -43,6 +44,14 @@ describe("computeRanks", () => {
     expect(ranks.get("a")).toBe(1);
     expect(ranks.get("b")).toBe(1);
     expect(ranks.get("c")).toBe(3);
+  });
+});
+
+describe("placementBaseline", () => {
+  it("is the average rank in a playerCount-player game with no skill differentiation", () => {
+    expect(placementBaseline(2)).toBe(1.5);
+    expect(placementBaseline(4)).toBe(2.5);
+    expect(placementBaseline(8)).toBe(4.5);
   });
 });
 
@@ -109,6 +118,24 @@ describe("tallyGame", () => {
 
     // Untouched cards stay at zero.
     expect(stats.cards.Giant.played).toBe(0);
+  });
+
+  it("tallies placementDeltaSum against that game's own player-count baseline, not a global one", () => {
+    const stats = createEmptyStats();
+    const board2p: Board = new Map();
+    place(board2p, 0, 0, "Footman", "p1");
+    place(board2p, 1, 0, "Warlord", "p2");
+    // p1 (Footman) wins -> rank 1; p2 (Warlord) -> rank 2. Baseline at 2p is 1.5.
+    tallyGame(stats, resolveBoard(board2p, BOUNDS, 3).cards, { p1: 100, p2: 50 }, 2, 3);
+    expect(stats.cards.Footman.placementDeltaSum).toBeCloseTo(1 - placementBaseline(2)); // -0.5
+    expect(stats.cards.Warlord.placementDeltaSum).toBeCloseTo(2 - placementBaseline(2)); // +0.5
+
+    // Same rank-1 finish, but at 8p the baseline is 4.5 -- a much bigger accomplishment,
+    // and the delta should reflect that even though the raw rank (1) is identical.
+    const board8p: Board = new Map();
+    place(board8p, 0, 0, "Footman", "p1");
+    tallyGame(stats, resolveBoard(board8p, BOUNDS, 3).cards, { p1: 100 }, 8, 3);
+    expect(stats.cards.Footman.placementDeltaSum).toBeCloseTo((1 - placementBaseline(2)) + (1 - placementBaseline(8)));
   });
 
   it("accumulates across multiple games", () => {
@@ -219,6 +246,7 @@ describe("statsSummary", () => {
     expect(footman.avgOwnScore).toBeNull();
     expect(footman.avgFinalScore).toBeNull();
     expect(footman.avgPlacement).toBeNull();
+    expect(footman.avgPlacementDelta).toBeNull();
     expect(footman.avgRoundLength).toBeNull();
   });
 
@@ -232,7 +260,27 @@ describe("statsSummary", () => {
     const row = statsSummary(stats).find((r) => r.cardId === "Footman")!;
     expect(row.played).toBe(2);
     expect(row.avgPlacement).toBe(1.5); // one 1st (p2), one 2nd (p1)
+    expect(row.avgPlacementDelta).toBe(0); // exactly the 2p baseline (1.5) on average -- delta of 0
     expect(row.avgRoundLength).toBe(3);
+  });
+
+  it("avgPlacementDelta stays comparable across a mix of player counts, unlike avgPlacement", () => {
+    const stats = createEmptyStats();
+    // Two 1st-place finishes for Footman: one at 2p (a modest accomplishment, baseline
+    // 1.5), one at 8p (a huge accomplishment, baseline 4.5). avgPlacement can't tell
+    // these apart (both contribute a bare rank of 1); avgPlacementDelta should.
+    const board2p: Board = new Map();
+    place(board2p, 0, 0, "Footman", "p1");
+    tallyGame(stats, resolveBoard(board2p, BOUNDS, 3).cards, { p1: 10 }, 2, 3);
+
+    const board8p: Board = new Map();
+    place(board8p, 0, 0, "Footman", "p1");
+    tallyGame(stats, resolveBoard(board8p, BOUNDS, 3).cards, { p1: 10 }, 8, 3);
+
+    const row = statsSummary(stats).find((r) => r.cardId === "Footman")!;
+    expect(row.avgPlacement).toBe(1); // both appearances were rank 1
+    expect(row.avgPlacementDelta).toBeCloseTo(((1 - placementBaseline(2)) + (1 - placementBaseline(8))) / 2);
+    expect(row.avgPlacementDelta!).toBeLessThan(0); // beat the baseline both times
   });
 
   it("computes playRate as played divided by copies-in-deck, scaling for cards with different print counts", () => {
