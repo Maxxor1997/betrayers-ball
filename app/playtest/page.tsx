@@ -181,6 +181,41 @@ function buildHeatmapMarkdown(rows: CardStatsRow[], playerCounts: number[], look
 }
 
 /**
+ * The comprehensive export -- everything on the page in one paste, regardless of
+ * which view happens to be showing: the flat all-player-counts table, the average
+ * round length by player count breakdown, and every heatmap metric's own
+ * player-count table. Separate from buildStatsMarkdown (the flat table alone) and
+ * buildHeatmapMarkdown (one metric alone), which stay available as focused exports.
+ */
+function buildEverythingMarkdown(
+  rows: CardStatsRow[],
+  overallRoundLength: number | null,
+  stats: PlaytestStats,
+  heatmapRows: CardStatsRow[],
+  availablePlayerCounts: number[],
+  heatmapLookup: Map<number, Map<CardId, CardStatsRow>>
+): string {
+  const sections = [buildStatsMarkdown(rows, overallRoundLength)];
+
+  if (availablePlayerCounts.length > 0) {
+    const roundLengthLines = [
+      "Average round length by player count",
+      "",
+      "| Player count | Avg round length |",
+      "|---|---|",
+      ...availablePlayerCounts.map((pc) => `| ${pc}p | ${fmt(overallAvgRoundLength(stats.byPlayerCount[pc]), 2)} |`),
+    ];
+    sections.push(roundLengthLines.join("\n") + "\n");
+
+    for (const metric of Object.keys(HEAT_METRIC_LABELS) as HeatMetric[]) {
+      sections.push(buildHeatmapMarkdown(heatmapRows, availablePlayerCounts, heatmapLookup, metric));
+    }
+  }
+
+  return sections.join("\n---\n\n");
+}
+
+/**
  * Reads localStorage synchronously (no window access during SSR), so this can't run
  * until after mount -- same mount-gate pattern /play and /join use for their own
  * client-only state (random shuffles there, localStorage here).
@@ -210,6 +245,7 @@ function Playtest() {
   const [sortKey, setSortKey] = useState<SortKey>("bucket");
   const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [copyTableFeedback, setCopyTableFeedback] = useState(false);
   const [view, setView] = useState<"table" | "heatmap">("table");
   const [heatMetric, setHeatMetric] = useState<HeatMetric>("placement");
   // Checked once per batch, not once per game -- cancel doesn't need to be instant,
@@ -367,14 +403,20 @@ function Playtest() {
     heatColumnSizes.set(pc, ranked.length);
   }
 
-  function copyStats() {
-    const text =
-      view === "table"
-        ? buildStatsMarkdown(rows, overallRoundLength)
-        : buildHeatmapMarkdown(heatmapRows, availablePlayerCounts, heatmapLookup, heatMetric);
+  /** The top button -- everything on the page, regardless of which view is active. */
+  function copyEverything() {
+    const text = buildEverythingMarkdown(rows, overallRoundLength, stats, heatmapRows, availablePlayerCounts, heatmapLookup);
     navigator.clipboard.writeText(text).then(() => {
       setCopyFeedback(true);
       setTimeout(() => setCopyFeedback(false), 1500);
+    });
+  }
+
+  /** The button next to the flat table -- just that table, not the heatmap/round-length breakdowns too. */
+  function copyTable() {
+    navigator.clipboard.writeText(buildStatsMarkdown(rows, overallRoundLength)).then(() => {
+      setCopyTableFeedback(true);
+      setTimeout(() => setCopyTableFeedback(false), 1500);
     });
   }
 
@@ -597,11 +639,20 @@ function Playtest() {
               </button>
             </div>
             <button
-              onClick={copyStats}
+              onClick={copyTable}
               disabled={totalPlayed === 0}
+              title="Copies just the flat table, regardless of which view is currently showing"
               className="shrink-0 rounded-full border border-zinc-300 px-3 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
             >
-              {copyFeedback ? "Copied!" : "Copy stats"}
+              {copyTableFeedback ? "Copied!" : "Copy table"}
+            </button>
+            <button
+              onClick={copyEverything}
+              disabled={totalPlayed === 0}
+              title="Copies the flat table, the round-length-by-player-count breakdown, and every heatmap metric's table -- everything, not just the current view"
+              className="shrink-0 rounded-full border border-zinc-300 px-3 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              {copyFeedback ? "Copied!" : "Copy everything"}
             </button>
             <button
               onClick={() => setConfirmingReset(true)}
