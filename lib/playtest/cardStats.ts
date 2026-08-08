@@ -36,6 +36,17 @@ export interface CardStats {
   placementDeltaSum: number;
   /** Sum of the ending round number (see OverallStats.roundLengthSum's doc comment) of every game this card appeared in -- once per placement, same weighting as every other per-card sum here. */
   roundLengthSum: number;
+  /**
+   * Sum of each appearance's net disruption (see disruptionFor), each already divided
+   * by that appearance's own (playerCount - 1) opponents before summing -- so
+   * disruptionSum / played (see statsSummary's avgDisruption) reads as "average net
+   * damage dealt to the average single opponent," comparable across a mix of player
+   * counts the same way placementDeltaSum is. 0 for every appearance of a card with no
+   * outgoing effect on other cards (i.e. every non-Control card today), not just
+   * Control cards specifically -- this isn't bucket-gated, it's just what the real
+   * math naturally works out to for a card that never touches a neighbor.
+   */
+  disruptionSum: number;
 }
 
 /** The average standard-competition placement a seat would get in a `playerCount`-player game with zero skill differentiation -- e.g. 2.5 at 4p, 4.5 at 8p. The reference point placementDeltaSum measures every real placement against. */
@@ -72,7 +83,16 @@ export function createEmptyBucket(): StatsBucket {
   for (const id of ALL_CARD_IDS) {
     // "Unknown" is the AI-fairness/redaction placeholder, never a real playable card -- see CardId's own doc comment.
     if (id === "Unknown") continue;
-    cards[id] = { played: 0, copiesInDeck: 0, ownScoreSum: 0, finalScoreSum: 0, placementSum: 0, placementDeltaSum: 0, roundLengthSum: 0 };
+    cards[id] = {
+      played: 0,
+      copiesInDeck: 0,
+      ownScoreSum: 0,
+      finalScoreSum: 0,
+      placementSum: 0,
+      placementDeltaSum: 0,
+      roundLengthSum: 0,
+      disruptionSum: 0,
+    };
   }
   return { cards, overall: { gamesTallied: 0, roundLengthSum: 0 } };
 }
@@ -114,6 +134,38 @@ export function ownValueFor(card: ResolvedCard): number {
   return Math.max(0, ownRawTotal);
 }
 
+/**
+ * Net damage `card` dealt to *other* cards this game, via its own outgoing effect
+ * (Earthshaker's row, Skysplitter's above/below, Truthseeker's face-down neighbors,
+ * Plague Bearer's steal, ...) -- found by scanning every resolved card's breakdown
+ * for an "external" contribution whose sourceInstanceId is this card's (see
+ * ScoreContribution.sourceInstanceId), so two copies of the same card on the board
+ * never get their damage mixed up.
+ *
+ * Split by the target's owner and then netted against each other: damage to an
+ * opponent counts positively (that's the point of a disruption card), damage to the
+ * source's *own* side subtracts from it, since hurting your own board isn't a
+ * genuinely effective disruption even though the raw numbers might look similar --
+ * see cards.ts's Earthshaker/Truthseeker, which hit every qualifying neighbor
+ * regardless of owner. A card with no outgoing effect at all (every non-Control card
+ * today) always nets to exactly 0, no bucket check needed.
+ *
+ * Not divided by opponent count here -- see CardStats.disruptionSum's doc comment for
+ * where that normalization happens.
+ */
+export function disruptionFor(card: ResolvedCard, allCards: ResolvedCard[]): number {
+  let netToOwnSide = 0;
+  let netToOpponents = 0;
+  for (const other of allCards) {
+    for (const contribution of other.breakdown) {
+      if (contribution.source !== "external" || contribution.sourceInstanceId !== card.instanceId) continue;
+      if (other.ownerId === card.ownerId) netToOwnSide += contribution.amount;
+      else netToOpponents += contribution.amount;
+    }
+  }
+  return netToOwnSide - netToOpponents;
+}
+
 function tallyIntoBucket(
   bucket: StatsBucket,
   resolvedCards: ResolvedCard[],
@@ -131,6 +183,9 @@ function tallyIntoBucket(
 
   const ranks = computeRanks(scores);
   const baseline = placementBaseline(playerCount);
+  // "Average opponent" needs the *opponent* count, not the seat count -- floored at 1
+  // defensively, though MIN_PLAYERS is 2 so this never actually divides by 0 in a real game.
+  const opponentCount = Math.max(1, playerCount - 1);
   for (const card of resolvedCards) {
     const entry = bucket.cards[card.cardId];
     entry.played += 1;
@@ -140,6 +195,7 @@ function tallyIntoBucket(
     entry.placementSum += rank;
     entry.placementDeltaSum += rank - baseline;
     entry.roundLengthSum += roundsPlayed;
+    entry.disruptionSum += disruptionFor(card, resolvedCards) / opponentCount;
   }
 }
 
@@ -186,6 +242,8 @@ export interface CardStatsRow {
   avgPlacementDelta: number | null;
   /** Average ending round of games this card appeared in -- compare against overallAvgRoundLength to see whether this card tends to show up in longer or shorter games than average. */
   avgRoundLength: number | null;
+  /** Average net damage dealt to a single average opponent per appearance -- see disruptionFor and CardStats.disruptionSum. 0 (not null) for a card that's been played but never touches another card's value; null only if it's never been played at all, same convention as every other average here. */
+  avgDisruption: number | null;
 }
 
 /** Derived per-card averages for display -- null (not 0) for a card that's never been played, so a UI can render "—" instead of a misleading 0. Takes any StatsBucket -- the all-games total or one player count's slice are shaped identically. */
@@ -202,6 +260,7 @@ export function statsSummary(bucket: StatsBucket): CardStatsRow[] {
       avgPlacement: s.played === 0 ? null : s.placementSum / s.played,
       avgPlacementDelta: s.played === 0 ? null : s.placementDeltaSum / s.played,
       avgRoundLength: s.played === 0 ? null : s.roundLengthSum / s.played,
+      avgDisruption: s.played === 0 ? null : s.disruptionSum / s.played,
     };
   });
 }

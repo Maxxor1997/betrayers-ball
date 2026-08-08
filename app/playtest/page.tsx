@@ -55,6 +55,21 @@ function ownScoreDelta(row: CardStatsRow): number | null {
   return row.avgOwnScore === null ? null : row.avgOwnScore - CARD_DEFS[row.cardId].base;
 }
 
+/**
+ * The heatmap's "Value" metric -- a single number meant to read as "what is this card
+ * actually worth to play", using whichever half of its worth is the real story for its
+ * bucket: a Control card's own base rarely moves on its own (see cardStats.ts's
+ * disruptionFor), so its value is base + what it does to the average opponent; every
+ * other card's value already comes from its own base + conditions (avgOwnScore, which
+ * deliberately excludes anything a neighbor did *to* it -- a debuff from someone
+ * else's Earthshaker isn't this card's own worth, it's board misfortune).
+ */
+function cardValueMetric(row: CardStatsRow): number | null {
+  const def = CARD_DEFS[row.cardId];
+  if (def.bucket === "Control") return row.avgDisruption === null ? null : def.base + row.avgDisruption;
+  return row.avgOwnScore;
+}
+
 /** Same bucket-then-name ordering used everywhere in this file (the table's default sort, and the heatmap's fixed row order). */
 function byBucketThenName(a: CardStatsRow, b: CardStatsRow): number {
   const diff = BUCKET_ORDER.indexOf(CARD_DEFS[a.cardId].bucket) - BUCKET_ORDER.indexOf(CARD_DEFS[b.cardId].bucket);
@@ -66,12 +81,12 @@ function buildStatsMarkdown(rows: CardStatsRow[], overallRoundLength: number | n
   const lines = [
     `Overall average round length: ${fmt(overallRoundLength, 2)}`,
     "",
-    "| Card | Bucket | Played | Own Δ base | Final score | Placement Δ avg | Avg round length |",
-    "|---|---|---|---|---|---|---|",
+    "| Card | Bucket | Played | Own Δ base | Final score | Placement Δ avg | Avg round length | Disruption |",
+    "|---|---|---|---|---|---|---|---|",
   ];
   for (const row of rows) {
     lines.push(
-      `| ${CARD_DEFS[row.cardId].name} | ${CARD_DEFS[row.cardId].bucket} | ${fmtPercent(row.playRate)} (${row.played}/${row.copiesInDeck}) | ${fmtSigned(ownScoreDelta(row))} | ${fmt(row.avgFinalScore)} | ${fmtSigned(row.avgPlacementDelta, 2)} | ${fmt(row.avgRoundLength, 2)} |`
+      `| ${CARD_DEFS[row.cardId].name} | ${CARD_DEFS[row.cardId].bucket} | ${fmtPercent(row.playRate)} (${row.played}/${row.copiesInDeck}) | ${fmtSigned(ownScoreDelta(row))} | ${fmt(row.avgFinalScore)} | ${fmtSigned(row.avgPlacementDelta, 2)} | ${fmt(row.avgRoundLength, 2)} | ${fmtSigned(row.avgDisruption)} |`
     );
   }
   return lines.join("\n") + "\n";
@@ -83,7 +98,7 @@ function simPlayerLabel(id: string): string {
   return Number.isNaN(n) ? id : `P${n + 1}`;
 }
 
-type SortKey = "name" | "bucket" | "played" | "own" | "final" | "placement" | "roundLength";
+type SortKey = "name" | "bucket" | "played" | "own" | "final" | "placement" | "roundLength" | "disruption";
 
 function compareNullable(a: number | null, b: number | null, dir: 1 | -1): number {
   if (a === null && b === null) return 0;
@@ -92,7 +107,7 @@ function compareNullable(a: number | null, b: number | null, dir: 1 | -1): numbe
   return dir * (a - b);
 }
 
-type HeatMetric = "placement" | "playRate" | "own" | "final" | "roundLength";
+type HeatMetric = "placement" | "playRate" | "own" | "final" | "roundLength" | "disruption" | "value";
 
 const HEAT_METRIC_LABELS: Record<HeatMetric, string> = {
   placement: "Placement Δ avg",
@@ -100,6 +115,8 @@ const HEAT_METRIC_LABELS: Record<HeatMetric, string> = {
   own: "Own Δ base",
   final: "Final score",
   roundLength: "Avg round length",
+  disruption: "Disruption",
+  value: "Value (base + effect)",
 };
 
 /** Only "placement" has a real notion of better/worse (lower rank number wins) -- every other metric is purely informational, so its heatmap coloring is just a plain magnitude scale, not a judgment. */
@@ -120,6 +137,10 @@ function heatMetricValue(row: CardStatsRow | undefined, metric: HeatMetric): num
       return row.avgFinalScore;
     case "roundLength":
       return row.avgRoundLength;
+    case "disruption":
+      return row.avgDisruption;
+    case "value":
+      return cardValueMetric(row);
   }
 }
 
@@ -136,6 +157,10 @@ function heatMetricFormat(row: CardStatsRow | undefined, metric: HeatMetric): st
       return fmt(row.avgFinalScore);
     case "roundLength":
       return fmt(row.avgRoundLength, 2);
+    case "disruption":
+      return fmtSigned(row.avgDisruption);
+    case "value":
+      return fmt(cardValueMetric(row));
   }
 }
 
@@ -367,6 +392,8 @@ function Playtest() {
         return compareNullable(a.avgPlacementDelta, b.avgPlacementDelta, sortDir);
       case "roundLength":
         return compareNullable(a.avgRoundLength, b.avgRoundLength, sortDir);
+      case "disruption":
+        return compareNullable(a.avgDisruption, b.avgDisruption, sortDir);
     }
   });
   const totalPlayed = rows.reduce((sum, r) => sum + r.played, 0);
@@ -729,6 +756,15 @@ function Playtest() {
                   align="right"
                   title={`Average length (in rounds) of games this card appeared in. Overall average across every tallied game: ${fmt(overallRoundLength, 2)}`}
                 />
+                <SortableHeader
+                  label="Disruption"
+                  sortKey="disruption"
+                  activeKey={sortKey}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                  align="right"
+                  title="Average net damage dealt to a single average opponent, per appearance -- damage to opponents' cards minus damage to this card's own side, divided by opponent count. Always 0 for a card with no outgoing effect on other cards."
+                />
               </tr>
             </thead>
             <tbody>
@@ -743,6 +779,7 @@ function Playtest() {
                   <td className="px-3 py-1.5 text-right">{fmt(row.avgFinalScore)}</td>
                   <td className="px-3 py-1.5 text-right">{fmtSigned(row.avgPlacementDelta, 2)}</td>
                   <td className="px-3 py-1.5 text-right">{fmt(row.avgRoundLength, 2)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmtSigned(row.avgDisruption)}</td>
                 </tr>
               ))}
             </tbody>

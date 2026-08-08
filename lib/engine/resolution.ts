@@ -15,6 +15,15 @@ export interface ScoreContribution {
    * score from value it only got because of board context around it.
    */
   source: "self" | "external";
+  /**
+   * instanceId of the card whose own valueModifier caused this contribution -- only
+   * set for "external" contributions caused by another card's outgoing effect (not a
+   * center effect, which has no card responsible, and not "self" contributions, where
+   * the target itself is trivially the source). Lets a stats tool attribute a delta
+   * back to exactly which card instance caused it, even when multiple copies of the
+   * same card exist on the board -- see the playtest simulator's disruption tally.
+   */
+  sourceInstanceId?: string;
 }
 
 /**
@@ -89,9 +98,9 @@ function computeValueModifiers(
   centerEffect: CenterEffectId
 ): Map<string, ScoreContribution[]> {
   const contributions = new Map<string, ScoreContribution[]>();
-  const push = (instanceId: string, amount: number, label: string, source: ScoreContribution["source"]) => {
+  const push = (instanceId: string, amount: number, label: string, source: ScoreContribution["source"], sourceInstanceId?: string) => {
     const list = contributions.get(instanceId);
-    const entry: ScoreContribution = { label, amount, source };
+    const entry: ScoreContribution = { label, amount, source, sourceInstanceId };
     if (list) list.push(entry);
     else contributions.set(instanceId, [entry]);
   };
@@ -102,8 +111,10 @@ function computeValueModifiers(
     // A card's own hook can addDelta either onto itself (a self-effect) or onto a
     // neighbor (an outgoing effect) -- which one determines whether the *target*
     // should count this as its own printed rule or as something a neighbor did to it.
-    const addDelta = (instanceId: string, amount: number, label: string) =>
-      push(instanceId, amount, label, instanceId === c.instanceId ? "self" : "external");
+    const addDelta = (instanceId: string, amount: number, label: string) => {
+      const isSelf = instanceId === c.instanceId;
+      push(instanceId, amount, label, isSelf ? "self" : "external", isSelf ? undefined : c.instanceId);
+    };
     CARD_DEFS[c.cardId].valueModifier?.({ board, bounds, round, pos, self: c, addDelta });
   }
 

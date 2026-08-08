@@ -5,6 +5,7 @@ import { Board, BoardBounds, CardId, CardInstance, posKey } from "@/lib/engine/t
 import {
   computeRanks,
   createEmptyStats,
+  disruptionFor,
   overallAvgRoundLength,
   ownValueFor,
   placementBaseline,
@@ -97,6 +98,57 @@ describe("ownValueFor", () => {
     expect(resolved.finalValue).toBe(CARD_DEFS.Exile.base - 2 + 1);
     // Own value ignores the external +1 entirely: base - 2, floored at 0 only if negative.
     expect(ownValueFor(resolved)).toBe(Math.max(0, CARD_DEFS.Exile.base - 2));
+  });
+});
+
+describe("disruptionFor", () => {
+  it("is 0 for a card with no outgoing effect at all", () => {
+    const board: Board = new Map();
+    const f = place(board, 0, 0, "Footman", "p1");
+    place(board, 1, 0, "Warlord", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const resolved = cards.find((c) => c.instanceId === f.instanceId)!;
+    expect(disruptionFor(resolved, cards)).toBe(0);
+  });
+
+  it("is positive for damage dealt to an opponent's card", () => {
+    const board: Board = new Map();
+    const e = place(board, 1, 1, "Earthshaker", "p1");
+    place(board, 0, 1, "Footman", "p2"); // same row -- takes Earthshaker's -2
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const resolved = cards.find((c) => c.instanceId === e.instanceId)!;
+    expect(disruptionFor(resolved, cards)).toBe(2); // 0 (own) - (-2) (opponent) = 2
+  });
+
+  it("subtracts damage dealt to the source's own side", () => {
+    const board: Board = new Map();
+    const e = place(board, 1, 1, "Earthshaker", "p1");
+    place(board, 0, 1, "Footman", "p2"); // opponent, same row
+    place(board, 3, 1, "Footman", "p1"); // own side, same row -- also takes the -2
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const resolved = cards.find((c) => c.instanceId === e.instanceId)!;
+    // -2 (own) - (-2) (opponent) = 0 -- hurting your own side as much as the opponent
+    // is a net-neutral disruption, not a genuinely effective one.
+    expect(disruptionFor(resolved, cards)).toBe(0);
+  });
+
+  it("attributes damage to the correct instance when two copies of the same disruptive card are both on the board", () => {
+    const board: Board = new Map();
+    // Two Earthshakers, different owners, same row -- each hits every *other* card in
+    // the row, including each other, plus a third neutral target.
+    const e1 = place(board, 0, 1, "Earthshaker", "p1");
+    const e2 = place(board, 1, 1, "Earthshaker", "p2");
+    const target = place(board, 2, 1, "Footman", "p3");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const resolvedE1 = cards.find((c) => c.instanceId === e1.instanceId)!;
+    const resolvedE2 = cards.find((c) => c.instanceId === e2.instanceId)!;
+    const resolvedTarget = cards.find((c) => c.instanceId === target.instanceId)!;
+    // Each Earthshaker hits the other Earthshaker (-2, opponent) and the target (-2,
+    // opponent) -- 4 total disruption apiece, not double-counted or mixed up between
+    // the two sources despite sharing a cardId and an identical label.
+    expect(disruptionFor(resolvedE1, cards)).toBe(4);
+    expect(disruptionFor(resolvedE2, cards)).toBe(4);
+    expect(disruptionFor(resolvedTarget, cards)).toBe(0); // it has no outgoing effect of its own
   });
 });
 
@@ -212,6 +264,16 @@ describe("tallyGame", () => {
     // A player count never tallied has no entry at all (not a zeroed one).
     expect(stats.byPlayerCount[6]).toBeUndefined();
   });
+
+  it("tallies disruptionSum per appearance, divided by that game's opponent count", () => {
+    const stats = createEmptyStats();
+    const board: Board = new Map();
+    place(board, 1, 1, "Earthshaker", "p1");
+    place(board, 0, 1, "Footman", "p2"); // same row -- takes the -2
+    // 3 players -> 2 opponents; raw disruption is 2 (see disruptionFor's tests above).
+    tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10, p2: 5, p3: 0 }, 3, 3);
+    expect(stats.cards.Earthshaker.disruptionSum).toBeCloseTo(2 / 2);
+  });
 });
 
 describe("statsSummary / overallAvgRoundLength on a per-player-count slice", () => {
@@ -249,6 +311,7 @@ describe("statsSummary", () => {
     expect(footman.avgPlacement).toBeNull();
     expect(footman.avgPlacementDelta).toBeNull();
     expect(footman.avgRoundLength).toBeNull();
+    expect(footman.avgDisruption).toBeNull();
   });
 
   it("averages sums over played count once a card has appeared", () => {
@@ -263,6 +326,7 @@ describe("statsSummary", () => {
     expect(row.avgPlacement).toBe(1.5); // one 1st (p2), one 2nd (p1)
     expect(row.avgPlacementDelta).toBe(0); // exactly the 2p baseline (1.5) on average -- delta of 0
     expect(row.avgRoundLength).toBe(3);
+    expect(row.avgDisruption).toBe(0); // played, but Footman has no outgoing effect -- 0, not null
   });
 
   it("avgPlacementDelta stays comparable across a mix of player counts, unlike avgPlacement", () => {

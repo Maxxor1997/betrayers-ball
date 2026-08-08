@@ -15,8 +15,8 @@ import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { RoomSummary } from "@/lib/server/protocol";
 
-/** Just a representative deck-count snapshot for the home screen's reference catalog -- there's no active game yet to derive a real player count from. */
-const CATALOG_PLAYER_COUNT = 4;
+/** Default player count for the home screen's reference catalog -- there's no active game yet to derive a real one from. The catalog's own header lets a visitor switch it to preview deck counts/locations at any size. */
+const DEFAULT_CATALOG_PLAYER_COUNT = 4;
 
 /** Small stroke icons for each play option -- 20x20, currentColor, no external assets. */
 function SoloIcon() {
@@ -201,6 +201,7 @@ export default function HomePage() {
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => setIsMobile(isMobileViewport()), []);
   const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobile);
+  const [catalogPlayerCount, setCatalogPlayerCount] = useState(DEFAULT_CATALOG_PLAYER_COUNT);
 
   function openSoloSetup() {
     setMode("solo");
@@ -268,7 +269,12 @@ export default function HomePage() {
     // the row's full height, so it sits flush against the true left edge alongside
     // the header too, not just alongside the content underneath it.
     <div className="flex flex-1 flex-col gap-8 px-4 py-8 lg:flex-row lg:items-start">
-      <CardCatalog playerCount={CATALOG_PLAYER_COUNT} collapsed={cardsCollapsed} onCollapsedChange={setCardsCollapsed} />
+      <CardCatalog
+        playerCount={catalogPlayerCount}
+        onPlayerCountChange={setCatalogPlayerCount}
+        collapsed={cardsCollapsed}
+        onCollapsedChange={setCardsCollapsed}
+      />
       <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-1 flex-col items-center gap-8">
         <header className="flex w-full flex-col gap-2">
           <div className="flex w-full items-center justify-between gap-2">

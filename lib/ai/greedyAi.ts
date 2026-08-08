@@ -220,7 +220,7 @@ const SPECULATIVE_PLAY_PROBABILITY = 0.25;
 
 /**
  * Rough expected round the game actually ends on. game.ts's config keeps roundCap and
- * minRoundFloor flat regardless of player count (6 and 3 respectively, see
+ * minRoundFloor flat regardless of player count (6 and 2 respectively, see
  * configForPlayerCount), so the midpoint doesn't need to vary by player count either
  * -- it's not meant to be precise, just a stand-in "how much game is probably left"
  * for heuristics below that need to reason about rounds that haven't happened yet.

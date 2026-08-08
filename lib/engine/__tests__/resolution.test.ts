@@ -379,6 +379,15 @@ describe("resolveBoard — Earthshaker", () => {
     expect(find(cards, sameRow2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
     expect(find(cards, otherRow.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
   });
+
+  it("tags the resulting external contribution with the Earthshaker's own instanceId", () => {
+    const board: Board = new Map();
+    const e = place(board, 1, 1, "Earthshaker", "p1");
+    const hit = place(board, 0, 1, "Footman", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const contribution = find(cards, hit.instanceId).breakdown.find((d) => d.source === "external")!;
+    expect(contribution.sourceInstanceId).toBe(e.instanceId);
+  });
 });
 
 describe("resolveBoard — Skysplitter", () => {

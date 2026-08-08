@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, isAvailableAtPlayerCount } from "@/lib/content/centerEffects";
+import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { configForPlayerCount } from "@/lib/engine/game";
 import { CardBucket, CardId, CenterEffectId } from "@/lib/engine/types";
 
@@ -100,6 +101,7 @@ export function CardCatalog({
   myDotColorClass = "bg-blue-500",
   collapsed,
   onCollapsedChange,
+  onPlayerCountChange,
 }: {
   playerCount: number;
   myCardIds?: Set<CardId>;
@@ -110,6 +112,8 @@ export function CardCatalog({
   myDotColorClass?: string;
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
+  /** When set, the "(Np)" header becomes an interactive player-count select instead of static text -- only the standalone home-screen catalog (no real game to pin the count to) passes this. */
+  onPlayerCountChange?: (playerCount: number) => void;
 }) {
   const [hoveredCard, setHoveredCard] = useState<{ id: CardId; rect: DOMRect } | null>(null);
   const [hoveredBucket, setHoveredBucket] = useState<{ bucket: CardBucket; rect: DOMRect } | null>(null);
@@ -133,8 +137,24 @@ export function CardCatalog({
   return (
     <aside className="w-full shrink-0 overflow-x-hidden lg:sticky lg:top-8 lg:w-48 lg:self-start lg:border-r-2 lg:border-zinc-400 lg:pr-4 dark:lg:border-zinc-600">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">
-          Card catalog <span className="font-normal text-zinc-500">({playerCount}p)</span>
+        <h2 className="flex min-w-0 items-center gap-1 text-sm font-semibold">
+          Card catalog{" "}
+          {onPlayerCountChange ? (
+            <select
+              value={playerCount}
+              onChange={(e) => onPlayerCountChange(Number(e.target.value))}
+              aria-label="Catalog player count"
+              className="rounded border border-zinc-300 bg-transparent px-1 py-0.5 text-xs font-normal text-zinc-500 dark:border-zinc-700"
+            >
+              {Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i).map((n) => (
+                <option key={n} value={n}>
+                  {n}p
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="font-normal text-zinc-500">({playerCount}p)</span>
+          )}
         </h2>
         <button
           onClick={() => onCollapsedChange(true)}
@@ -156,8 +176,11 @@ export function CardCatalog({
         {BUCKET_ORDER.map((bucket) => {
           // "Unknown" is a synthetic placeholder for AI evaluation, not a real playable
           // card -- see the CardId union in types.ts -- so it never belongs in a
-          // player-facing card reference.
-          const ids = ALL_CARD_IDS.filter((id) => id !== "Unknown" && CARD_DEFS[id].bucket === bucket).sort((a, b) => {
+          // player-facing card reference. A card `disabled` at every player count
+          // (as opposed to merely 0 copies at *this* player count, which still shows
+          // as "x0 in deck" below) isn't currently in the game at all, so it's hidden
+          // outright rather than just grayed out.
+          const ids = ALL_CARD_IDS.filter((id) => id !== "Unknown" && !CARD_DEFS[id].disabled && CARD_DEFS[id].bucket === bucket).sort((a, b) => {
             const countDiff = copiesForPlayerCount(CARD_DEFS[b], playerCount) - copiesForPlayerCount(CARD_DEFS[a], playerCount);
             return countDiff !== 0 ? countDiff : CARD_DEFS[a].name.localeCompare(CARD_DEFS[b].name);
           });
@@ -240,8 +263,12 @@ export function CardCatalog({
           {hoveredLocationsHeader && <FixedTooltip rect={hoveredLocationsHeader}>{LOCATIONS_DESCRIPTION}</FixedTooltip>}
           {!locationsCollapsed && (
             <div className="mt-1.5 flex flex-col gap-2">
-              {LOCATION_COMPLEXITY_ORDER.slice()
-                .sort((a, b) => Number(!!CENTER_EFFECTS[a].disabled) - Number(!!CENTER_EFFECTS[b].disabled))
+              {LOCATION_COMPLEXITY_ORDER
+                // A location `disabled` outright isn't currently in the game at all
+                // (as opposed to merely restricted to some player counts, which still
+                // shows grayed out with its "Np+ only" restriction below), so it's
+                // hidden rather than sorted to the bottom.
+                .filter((id) => !CENTER_EFFECTS[id].disabled)
                 .map((id) => {
                   const def = CENTER_EFFECTS[id];
                   const available = isAvailableAtPlayerCount(id, playerCount);

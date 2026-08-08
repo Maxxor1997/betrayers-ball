@@ -21,7 +21,7 @@ export function configForPlayerCount(playerCount: number, centerEffect: CenterEf
     // removes all "unknown" for that card faster than in larger games.
     flipUnlockRound: playerCount === 2 ? 3 : 2,
     centerEffect,
-    minRoundFloor: 3,
+    minRoundFloor: 2,
     playerCount,
   };
 }

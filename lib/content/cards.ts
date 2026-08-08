@@ -109,6 +109,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Giant: {
     id: "Giant",
     name: "Giant",
+    disabled: true,
     base: 6,
     bucket: "Slam",
     text: "Always face-up",
@@ -216,6 +217,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Chronicler: {
     id: "Chronicler",
     name: "Chronicler",
+    disabled: true,
     base: 1,
     bucket: "Engine",
     text: "+1 per round elapsed",
