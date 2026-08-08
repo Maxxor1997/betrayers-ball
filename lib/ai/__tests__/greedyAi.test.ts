@@ -148,7 +148,8 @@ describe("chooseGreedyAiAction — placement actually looks ahead", () => {
     const board: Board = new Map();
     board.set(posKey({ x: 0, y: 0 }), card("Footman", "p1"));
     board.set(posKey({ x: 1, y: 0 }), card("Footman", "p1"));
-    // Both (2,0) [completes the line, +1 x3] and (0,1) [neutral, adjacent to (0,0)] are legal.
+    board.set(posKey({ x: 3, y: 0 }), card("Footman", "p1"));
+    // Both (2,0) [completes the 4-line, +1 x4] and (0,1) [neutral, adjacent to (0,0)] are legal.
     const handCard = card("Footman", "p1");
     const state = makeState({
       board,
@@ -276,6 +277,195 @@ describe("chooseGreedyAiAction — flip actually looks ahead", () => {
   });
 });
 
+describe("chooseGreedyAiAction — Truthseeker/Beacon-aware flip targeting", () => {
+  it("avoids flipping an opponent card a known (own) Truthseeker is already quietly damaging", () => {
+    const board: Board = new Map();
+    board.set(posKey({ x: 2, y: 2 }), card("Footman", "p1")); // anchor -- equidistant from both targets
+    board.set(posKey({ x: 1, y: 1 }), card("Truthseeker", "p1")); // known (own); adjacent only to target A
+    const targetA = card("Footman", "p2", false);
+    const targetB = card("Footman", "p2", false);
+    board.set(posKey({ x: 2, y: 1 }), targetA); // adjacent to the Truthseeker -- already being damaged
+    board.set(posKey({ x: 2, y: 3 }), targetB); // no special neighbor
+    const state = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", () => 0.01);
+    expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: targetB.instanceId });
+  });
+
+  it("prefers flipping an opponent card adjacent to the AI's own Beacon", () => {
+    const board: Board = new Map();
+    board.set(posKey({ x: 2, y: 2 }), card("Footman", "p1")); // anchor -- equidistant from both targets
+    board.set(posKey({ x: 1, y: 1 }), card("Beacon", "p1")); // known (own); adjacent only to target A
+    const targetA = card("Footman", "p2", false);
+    const targetB = card("Footman", "p2", false);
+    board.set(posKey({ x: 2, y: 1 }), targetA); // adjacent to the AI's own Beacon -- flipping it helps the AI
+    board.set(posKey({ x: 2, y: 3 }), targetB); // no special neighbor
+    const state = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", () => 0.01);
+    expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: targetA.instanceId });
+  });
+
+  it("avoids flipping an opponent card adjacent to an opponent's (revealed) Beacon", () => {
+    const board: Board = new Map();
+    board.set(posKey({ x: 2, y: 2 }), card("Footman", "p1")); // anchor -- equidistant from both targets
+    board.set(posKey({ x: 1, y: 1 }), card("Beacon", "p2", true)); // revealed, so known; adjacent only to target A
+    const targetA = card("Footman", "p2", false);
+    const targetB = card("Footman", "p2", false);
+    board.set(posKey({ x: 2, y: 1 }), targetA); // adjacent to a rival's Beacon -- flipping it helps them, not the AI
+    board.set(posKey({ x: 2, y: 3 }), targetB); // no special neighbor
+    const state = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", () => 0.01);
+    expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: targetB.instanceId });
+  });
+
+  it("explores less often when holding a Truthseeker -- preserves face-down opponent targets for later", () => {
+    const board: Board = new Map();
+    const opponentCard = card("Footman", "p2", false);
+    board.set(posKey({ x: 2, y: 2 }), opponentCard);
+    const truthseeker = card("Truthseeker", "p1");
+    const withTruthseeker = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [truthseeker], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+    const withoutTruthseeker = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    // 0.65 clears the base 0.75 exploration rate (flips) but not the Truthseeker-in-
+    // hand-discounted 0.60 (doesn't).
+    const baseline = chooseGreedyAiAction(withoutTruthseeker, "p1", () => 0.65);
+    const discounted = chooseGreedyAiAction(withTruthseeker, "p1", () => 0.65);
+    expect(baseline.type).toBe("flip");
+    expect(discounted.type).not.toBe("flip");
+  });
+
+  it("explores more often when holding a Beacon -- more face-up cards is generally good setup for it", () => {
+    const board: Board = new Map();
+    const opponentCard = card("Footman", "p2", false);
+    board.set(posKey({ x: 2, y: 2 }), opponentCard);
+    const beacon = card("Beacon", "p1");
+    const withBeacon = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [beacon], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+    const withoutBeacon = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    // 0.80 clears the Beacon-in-hand-boosted 0.90 exploration rate (flips) but not
+    // the base 0.75 (doesn't).
+    const baseline = chooseGreedyAiAction(withoutBeacon, "p1", () => 0.8);
+    const boosted = chooseGreedyAiAction(withBeacon, "p1", () => 0.8);
+    expect(baseline.type).not.toBe("flip");
+    expect(boosted.type).toBe("flip");
+  });
+
+  it("explores less often when holding an Infiltrator -- protects a card that needs to stay hidden", () => {
+    const board: Board = new Map();
+    const opponentCard = card("Footman", "p2", false);
+    board.set(posKey({ x: 2, y: 2 }), opponentCard);
+    const infiltrator = card("Infiltrator", "p1");
+    const withInfiltrator = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [infiltrator], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+    const withoutInfiltrator = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    // 0.65 clears the base 0.75 exploration rate (flips) but not the Infiltrator-in-
+    // hand-discounted 0.60 (doesn't).
+    const baseline = chooseGreedyAiAction(withoutInfiltrator, "p1", () => 0.65);
+    const discounted = chooseGreedyAiAction(withInfiltrator, "p1", () => 0.65);
+    expect(baseline.type).toBe("flip");
+    expect(discounted.type).not.toBe("flip");
+  });
+
+  it("explores less often with a face-down Infiltrator already on the board too, not just in hand", () => {
+    const board: Board = new Map();
+    board.set(posKey({ x: 2, y: 2 }), card("Footman", "p2", false));
+    board.set(posKey({ x: 5, y: 5 }), card("Infiltrator", "p1", false));
+    const state = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", () => 0.65);
+    expect(action.type).not.toBe("flip");
+  });
+
+  it("does not discount exploration for an already-face-up Infiltrator -- nothing left to protect", () => {
+    const board: Board = new Map();
+    board.set(posKey({ x: 2, y: 2 }), card("Footman", "p2", false));
+    board.set(posKey({ x: 5, y: 5 }), card("Infiltrator", "p1", true));
+    const state = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", () => 0.65);
+    expect(action.type).toBe("flip");
+  });
+});
+
 /**
  * A one-ply greedy evaluation only ever sees the board "as if scoring the instant
  * after this placement" -- it has no way to know how the game unfolds on later turns.
@@ -303,6 +493,26 @@ describe("chooseGreedyAiAction — placement heuristics correct for what a one-p
     const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
     expect(action.type).toBe("place");
     if (action.type === "place") expect(action.instanceId).toBe(chronicler.instanceId);
+  });
+
+  it("values Dying God at the expected end-of-game round instead of the current (early) round -- Chronicler's mirror", () => {
+    // Naive (round-1) values: Dying God = base(10)-1=9, Giant = flat base 6 (no
+    // heuristic of its own) -- Dying God wins on its inflated early snapshot. The
+    // same expected-final-round correction that tops Chronicler up docks Dying God
+    // down instead: 10 - expectedFinalRound(4.5) = 5.5, which now loses to Giant.
+    const dyingGod = card("DyingGod", "p1");
+    const giant = card("Giant", "p1");
+    const state = makeState({
+      round: 1,
+      players: [
+        { id: "p1", hand: [dyingGod, giant], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
+    expect(action.type).toBe("place");
+    if (action.type === "place") expect(action.instanceId).toBe(giant.instanceId);
   });
 
   it("discounts Exile's early placements for the extra neighbors it'll likely gain before scoring", () => {

@@ -345,6 +345,13 @@ function Game() {
     setNewGameSetup(null);
   }
 
+  /** One-click rematch, same player count and center effect as the game that just ended -- no setup modal. */
+  function playAgain() {
+    setState(newGameState(playerCount, state.config.centerEffect));
+    setSelectedInstanceId(null);
+    setPendingFlip(null);
+  }
+
   function confirmFlip() {
     if (!pendingFlip) return;
     dispatch({ type: "flip", playerId: HUMAN, instanceId: pendingFlip.instanceId });
@@ -494,7 +501,20 @@ function Game() {
       )}
 
       {state.phase === "ended" && endResult && (
-        <EndScreen state={state} result={endResult} viewerId={HUMAN} nameFor={(id) => ownerDisplayName(state, id)} />
+        <EndScreen
+          state={state}
+          result={endResult}
+          viewerId={HUMAN}
+          nameFor={(id) => ownerDisplayName(state, id)}
+          footer={
+            <button
+              onClick={playAgain}
+              className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-sm whitespace-nowrap text-white dark:bg-zinc-100 dark:text-black"
+            >
+              Play again
+            </button>
+          }
+        />
       )}
 
       {humanVotePending && (

@@ -1,4 +1,4 @@
-import { inBounds, parsePosKey, posKey } from "@/lib/engine/board";
+import { getAdjacentCards, inBounds, parsePosKey, posKey } from "@/lib/engine/board";
 import { redrawHands, Rng } from "@/lib/engine/deck";
 import type { ResolvedCard } from "@/lib/engine/resolution";
 import { Board, BoardBounds, CardInstance, CenterEffectId, GameConfig, GameState, Position } from "@/lib/engine/types";
@@ -142,6 +142,18 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     },
   },
 
+  frontier: {
+    label: "The Frontier",
+    description: "+1 to any card adjacent to at least one opponent's card.",
+    valueModifiers: (board, bounds, addDelta) => {
+      for (const [key, c] of board.entries()) {
+        const pos = parsePosKey(key);
+        const hasEnemyNeighbor = getAdjacentCards(board, bounds, pos).some((n) => n.ownerId !== c.ownerId);
+        if (hasEnemyNeighbor) addDelta(c.instanceId, 1, "The Frontier");
+      }
+    },
+  },
+
   championOfTheWeak: {
     label: "Champion of the Weak",
     description: `The center counts as a card worth ${PSEUDO_CARD_BASE_VALUE} (modified by adjacent buffs/dents). After scoring, it's transferred to the owner of the single lowest-valued card on the board — a tie for lowest means no transfer.`,
@@ -175,6 +187,32 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
         }
       }
       return { kingslayerHit };
+    },
+  },
+
+  summit: {
+    label: "The Summit",
+    description: "At the end of the game, each player's single highest-valued card is worth double (a tie is broken by whichever was placed first).",
+    postResolution: ({ cards, totalsByOwner }) => {
+      const byOwner = new Map<string, ResolvedCard[]>();
+      for (const c of cards) {
+        const list = byOwner.get(c.ownerId);
+        if (list) list.push(c);
+        else byOwner.set(c.ownerId, [c]);
+      }
+      for (const ownerCards of byOwner.values()) {
+        const maxValue = Math.max(...ownerCards.map((c) => c.finalValue));
+        // `cards` (and so `ownerCards`) follows board.entries() iteration order, which
+        // is placement order (a Map preserves insertion order) -- so .find() here
+        // deterministically picks whichever tied-for-highest card was placed first,
+        // no RNG needed.
+        const highest = ownerCards.find((c) => c.finalValue === maxValue)!;
+        const bonus = highest.finalValue;
+        highest.breakdown.push({ label: "The Summit (highest card, doubled)", amount: bonus, source: "external" });
+        highest.finalValue += bonus;
+        totalsByOwner[highest.ownerId] = (totalsByOwner[highest.ownerId] ?? 0) + bonus;
+      }
+      return {};
     },
   },
 

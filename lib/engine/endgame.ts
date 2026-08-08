@@ -93,13 +93,35 @@ function marginToVoteYesProbability(margin: number): number {
 }
 
 /**
- * Vote yes/no purely off the player's own (fair) margin estimate, via
- * marginToVoteYesProbability -- deliberately ignores the round. Whether to end is a
- * fresh decision every time voting comes up, not a countdown; the round cap already
+ * Extra margin credit for cards whose value is a known, exact function of the round --
+ * Dying God (-1/round) and Chronicler (+1/round) are the only two where "what would
+ * one more round do to my score" can be answered precisely instead of guessed at.
+ * A Dying God owner is strictly worse off if the game keeps going, so gets a nudge
+ * toward voting yes (lock in the current, better value now); a Chronicler owner is
+ * strictly better off, so gets a nudge toward voting no (let the round advance).
+ * Own cards only -- a still-hidden opponent card might secretly be either, but
+ * there's no fair way to guess that without leaking hidden information, matching
+ * every other heuristic in this codebase.
+ */
+function roundSensitiveVoteAdjustment(state: GameState, playerId: string): number {
+  let adjustment = 0;
+  for (const c of state.board.values()) {
+    if (c.ownerId !== playerId) continue;
+    if (c.cardId === "DyingGod") adjustment += 1;
+    else if (c.cardId === "Chronicler") adjustment -= 1;
+  }
+  return adjustment;
+}
+
+/**
+ * Vote yes/no off the player's own (fair) margin estimate, via
+ * marginToVoteYesProbability, plus roundSensitiveVoteAdjustment for Dying God/
+ * Chronicler. Otherwise deliberately ignores the round: whether to end is a fresh
+ * decision every time voting comes up, not a countdown; the round cap already
  * force-ends the game on its own once reached, so there's no separate need to ramp
  * pressure by round here too.
  */
 export function computeAiVote(state: GameState, playerId: string, rng: () => number): boolean {
-  const margin = estimateMargin(state, playerId);
+  const margin = estimateMargin(state, playerId) + roundSensitiveVoteAdjustment(state, playerId);
   return rng() < marginToVoteYesProbability(margin);
 }

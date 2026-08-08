@@ -76,19 +76,20 @@ describe("ownValueFor", () => {
     const f0 = place(board, 0, 0, "Footman", "p1");
     place(board, 1, 0, "Warlord", "p1");
     place(board, 2, 0, "Giant", "p1");
+    place(board, 3, 0, "Exile", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolved = cards.find((c) => c.instanceId === f0.instanceId)!;
-    // 3+ owned in row -- Footman's own +1 self-effect.
+    // 4+ owned in row -- Footman's own +1 self-effect.
     expect(resolved.finalValue).toBe(CARD_DEFS.Footman.base + 1);
     expect(ownValueFor(resolved)).toBe(CARD_DEFS.Footman.base + 1);
   });
 
-  it("re-applies floorAtZero fresh against the own-only total, not the breakdown's real-total floor entry", () => {
+  it("re-applies the universal floor-at-0 fresh against the own-only total, not the breakdown's real-total floor entry", () => {
     const board: Board = new Map();
     // A lone Warlord has no self-penalty (needs another Warlord to fire) -- own value
     // stays at base. Six Bannermen-worth of external damage would floor the *real*
     // total, but that's not this card's own rule doing the flooring.
-    const banner = place(board, 1, 0, "Exile", "p2"); // Exile has floorAtZero and a self-penalty from neighbors
+    const banner = place(board, 1, 0, "Exile", "p2"); // Exile has a self-penalty from neighbors
     place(board, 0, 0, "Bannerman", "p1"); // +1 external, doesn't offset Exile's own neighbor penalty
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolved = cards.find((c) => c.instanceId === banner.instanceId)!;

@@ -1,4 +1,4 @@
-import { adjacentPositions, isOwnerlessPosition, parsePosKey, posKey } from "../engine/board";
+import { adjacentPositions, getAdjacentCards, isOwnerlessPosition, parsePosKey, posKey } from "../engine/board";
 import { computeAiVote, estimateMargin } from "../engine/endgame";
 import { redactedBoardFor } from "../engine/playerView";
 import { resolveBoard } from "../engine/resolution";
@@ -67,6 +67,60 @@ function opponentTargetPriority(board: GameState["board"], playerId: string, tar
 }
 
 /**
+ * Extra priority for a blind opponent flip target from any Truthseeker/Beacon
+ * neighbor whose owner is actually known -- either the flipper's own card (always
+ * known, even face-down) or a revealed face-up card, the same honest info
+ * estimateMargin itself is limited to. Flipping the target face-up has a real,
+ * certain consequence for each such neighbor even though the target's own identity
+ * stays unknown until it's flipped:
+ * - An adjacent Truthseeker is currently dealing the target -2 for being face-down
+ *   (see lib/content/cards.ts) -- flipping removes that, which only ever helps the
+ *   target's owner (an opponent), so it's discouraged regardless of who owns the
+ *   Truthseeker.
+ * - An adjacent Beacon gains +1 once the target is face-up -- worth flipping toward
+ *   if that Beacon is the flipper's own, worth avoiding if it belongs to anyone else.
+ */
+function truthseekerBeaconFlipAdjustment(board: Board, bounds: BoardBounds, playerId: string, target: CardInstance): number {
+  const entry = [...board.entries()].find(([, c]) => c.instanceId === target.instanceId)!;
+  const pos = parsePosKey(entry[0]);
+  let adjustment = 0;
+  for (const n of getAdjacentCards(board, bounds, pos)) {
+    const identityKnown = n.ownerId === playerId || n.faceUp;
+    if (!identityKnown) continue;
+    if (n.cardId === "Truthseeker") adjustment -= 2;
+    else if (n.cardId === "Beacon") adjustment += n.ownerId === playerId ? 1 : -1;
+  }
+  return adjustment;
+}
+
+/**
+ * Nudges the flat opponent-flip exploration rate based on the flipper's own hand --
+ * a face-down card still in hand isn't on the board yet, so this can't target a
+ * specific placement, just lean the overall willingness to explore. Holding a
+ * Truthseeker means face-down opponent cards are worth more left alone (future
+ * targets for its -2/face-down-neighbor once placed), so exploring less preserves
+ * them; holding a Beacon means face-up cards are worth more existing in general
+ * (future neighbors for its +1/face-up-neighbor once placed), so exploring more
+ * grows that pool.
+ */
+const HAND_TRUTHSEEKER_EXPLORATION_DISCOUNT = 0.15;
+const HAND_BEACON_EXPLORATION_BONUS = 0.15;
+
+/**
+ * Further discount on the exploration rate when the AI has a face-down Infiltrator at
+ * stake -- either already on the board, or still in hand (a future placement, same
+ * as the Truthseeker/Beacon hand nudges above). Infiltrator's entire value depends on
+ * staying face-down until scoring (its own valueModifier bails out immediately once
+ * faceUp -- see lib/content/cards.ts), and every flip this AI initiates is a small
+ * push toward a more flip-happy table overall, raising the odds someone eventually
+ * flips this AI's own Infiltrator back. Not a direct mechanical consequence like
+ * Truthseeker/Beacon's adjacency effects (there's no real causal link from "I flipped
+ * their card" to "someone flips mine"), just a self-preservation lean: don't go
+ * looking for trouble when protecting a hidden card matters.
+ */
+const INFILTRATOR_EXPLORATION_DISCOUNT = 0.15;
+
+/**
  * Cards whose own printed effect doesn't care about their own face state at all --
  * Berserker's and Warlord's `valueModifier`s count matching cardIds straight off
  * `board.values()` with no `faceUp` check, so flipping either face-up changes nothing
@@ -89,8 +143,11 @@ const BLUFF_FLIP_PROBABILITY = 0.25;
  * them by true post-flip value is fair. An opponent's face-down cards can't be ranked
  * this way without peeking (their true post-flip value literally requires knowing
  * their hidden identity first) -- so a flip target there, if any, is chosen instead of
- * a value-driven one, blind, weighted toward targets adjacent to the AI's own cards, at
- * a flat exploration rate.
+ * a value-driven one, blind, weighted toward targets adjacent to the AI's own cards
+ * (and any known Truthseeker/Beacon neighbor, see truthseekerBeaconFlipAdjustment),
+ * at an exploration rate nudged by the AI's own hand and board (see
+ * HAND_TRUTHSEEKER_EXPLORATION_DISCOUNT/HAND_BEACON_EXPLORATION_BONUS/
+ * INFILTRATOR_EXPLORATION_DISCOUNT).
  */
 function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null {
   const targets = getLegalFlipTargets(state);
@@ -122,13 +179,27 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
     return bluffTargets[Math.floor(rng() * bluffTargets.length)].instanceId;
   }
 
-  if (opponentTargets.length > 0 && rng() < OPPONENT_FLIP_EXPLORATION_PROBABILITY) {
-    const best = pickBest(
-      opponentTargets,
-      (target) => opponentTargetPriority(state.board, playerId, target),
-      rng
-    );
-    return best.instanceId;
+  if (opponentTargets.length > 0) {
+    const hand = state.players.find((p) => p.id === playerId)!.hand;
+    const hasVulnerableInfiltrator =
+      hand.some((c) => c.cardId === "Infiltrator") ||
+      [...state.board.values()].some((c) => c.ownerId === playerId && c.cardId === "Infiltrator" && !c.faceUp);
+    let explorationProbability = OPPONENT_FLIP_EXPLORATION_PROBABILITY;
+    if (hand.some((c) => c.cardId === "Truthseeker")) explorationProbability -= HAND_TRUTHSEEKER_EXPLORATION_DISCOUNT;
+    if (hand.some((c) => c.cardId === "Beacon")) explorationProbability += HAND_BEACON_EXPLORATION_BONUS;
+    if (hasVulnerableInfiltrator) explorationProbability -= INFILTRATOR_EXPLORATION_DISCOUNT;
+    explorationProbability = Math.min(1, Math.max(0, explorationProbability));
+
+    if (rng() < explorationProbability) {
+      const best = pickBest(
+        opponentTargets,
+        (target) =>
+          opponentTargetPriority(state.board, playerId, target) +
+          truthseekerBeaconFlipAdjustment(state.board, state.config.boardBounds, playerId, target),
+        rng
+      );
+      return best.instanceId;
+    }
   }
 
   return null;
@@ -330,6 +401,16 @@ function placementHeuristicAdjustment(
         // it's systematically undervalued the earlier it's placed. Top it up to what
         // it's really expected to be worth once the game actually ends.
         return expectedFinalRound(postState.config) - postState.round;
+      }
+
+      case "DyingGod": {
+        // -1 per round elapsed *when the game ends* -- Chronicler's mirror, and the
+        // same one-ply blind spot in the opposite direction: the fair margin's
+        // postState.round snapshot is systematically *overvalued* the earlier it's
+        // placed (round 1 looks like base-1, when it's really headed toward
+        // base-expectedFinalRound). Dock it down to what it's really expected to be
+        // worth once the game actually ends.
+        return -(expectedFinalRound(postState.config) - postState.round);
       }
 
       default:

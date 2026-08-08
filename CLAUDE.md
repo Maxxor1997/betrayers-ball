@@ -19,6 +19,9 @@ Stack: Next.js (App Router), TypeScript, Tailwind, Socket.IO.
   Dragon's heads) count as permanently face-up for any effect that keys off a
   neighbor's face state — they hold no hidden info, so there's nothing to be face-down
   about
+- Every card's resolved value floors at 0, universally (see applyFloors in
+  resolution.ts) — no per-card opt-in, no card can ever score negative no matter how
+  many negative effects stack onto it
 - Server holds authoritative state; clients render slices by role
 
 Numbers (bases, counts, board size) are tuning knobs, not fixed. When something

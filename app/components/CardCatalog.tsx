@@ -54,9 +54,11 @@ const LOCATION_COMPLEXITY_ORDER: CenterEffectId[] = [
   "freeCities",
   "reckoning",
   "shadowlands",
+  "frontier",
   "mirrorPool",
   "championOfTheWeak",
   "kingslayer",
+  "summit",
 ];
 
 const BUCKET_DESCRIPTIONS: Record<CardBucket, string> = {

@@ -9,7 +9,7 @@ export interface ScoreContribution {
   amount: number;
   /**
    * "self" for the card's own printed rule -- Base, its own valueModifier hook's
-   * self-effects (addDelta'd onto its own instanceId), and its own floorAtZero --
+   * self-effects (addDelta'd onto its own instanceId), and the universal floor at 0 --
    * "external" for anything caused by a neighbor's outgoing effect or a center
    * effect. Lets a stats tool (see the playtest simulator) separate a card's "own"
    * score from value it only got because of board context around it.
@@ -115,11 +115,10 @@ function computeValueModifiers(
   return contributions;
 }
 
-/** Step 3 — Floors. Cards with `floorAtZero` floor at 0. Returns the instanceIds actually floored. */
+/** Step 3 — Floors. Every card floors at 0, universally -- no card's value can ever go negative, regardless of how many negative effects stack onto it. Returns the instanceIds actually floored. */
 function applyFloors(board: Board, values: Map<string, number>): Set<string> {
   const floored = new Set<string>();
   for (const c of board.values()) {
-    if (!CARD_DEFS[c.cardId].floorAtZero) continue;
     const v = values.get(c.instanceId) ?? 0;
     if (v < 0) {
       values.set(c.instanceId, 0);

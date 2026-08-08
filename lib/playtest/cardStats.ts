@@ -18,7 +18,7 @@ export interface CardStats {
    * played by this normalizes for that -- see statsSummary's playRate.
    */
   copiesInDeck: number;
-  /** Sum of each appearance's "own" value -- base + only this card's own conditional self-effects and its own floorAtZero, deliberately excluding anything a neighbor or center effect did to it. See ownValueFor. */
+  /** Sum of each appearance's "own" value -- base + only this card's own conditional self-effects, floored at 0, deliberately excluding anything a neighbor or center effect did to it. See ownValueFor. */
   ownScoreSum: number;
   /** Sum of each appearance's actual finalValue as scored in-game -- includes everything, same number the game itself totals a player's score from. */
   finalScoreSum: number;
@@ -98,20 +98,20 @@ export function computeRanks(scores: Record<string, number>): Map<string, number
 }
 
 /**
- * A card's value counting only its own printed rule -- base, its own valueModifier
- * self-effects, and its own floorAtZero -- ignoring every delta a neighbor's outgoing
- * effect or a center effect pushed onto it (those are tagged "external", see
- * ScoreContribution.source). The floor is re-applied fresh against this smaller total
- * rather than reusing the breakdown's own FLOORED_AT_ZERO_LABEL entry, since that
- * entry's amount reflects flooring of the *real* (self + external) total, which can
- * floor a card that never would have gone negative on its own rule alone (or vice
- * versa).
+ * A card's value counting only its own printed rule -- base and its own valueModifier
+ * self-effects -- ignoring every delta a neighbor's outgoing effect or a center
+ * effect pushed onto it (those are tagged "external", see ScoreContribution.source).
+ * The engine's universal floor at 0 (see applyFloors in resolution.ts) is re-applied
+ * fresh against this smaller total rather than reusing the breakdown's own
+ * FLOORED_AT_ZERO_LABEL entry, since that entry's amount reflects flooring of the
+ * *real* (self + external) total, which can floor a card that never would have gone
+ * negative on its own rule alone (or vice versa).
  */
 export function ownValueFor(card: ResolvedCard): number {
   const ownRawTotal = card.breakdown
     .filter((d) => d.source === "self" && d.label !== FLOORED_AT_ZERO_LABEL)
     .reduce((sum, d) => sum + d.amount, 0);
-  return CARD_DEFS[card.cardId].floorAtZero ? Math.max(0, ownRawTotal) : ownRawTotal;
+  return Math.max(0, ownRawTotal);
 }
 
 function tallyIntoBucket(

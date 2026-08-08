@@ -201,4 +201,29 @@ describe("computeAiVote", () => {
     const late = computeAiVote(makeState({ board, round: 5 }), "p1", () => 0.3);
     expect(early).toBe(late);
   });
+
+  it("nudges toward voting yes when the player holds a Dying God -- continuing only makes it worse", () => {
+    const board: Board = new Map();
+    // Dying God's value at round 3 is 10-3=7; an isolated Pretender (no dangerous
+    // neighbor to trigger its own penalty) sits at its flat base 7 too -- raw margin
+    // ties at 0, which alone would be an exact 50/50 (rng 0.5 -> no, per the tied
+    // test above). Dying God's own +1 vote nudge pushes yes-probability to ~0.55,
+    // just enough to flip that same rng to yes.
+    board.set(posKey({ x: 0, y: 0 }), card("DyingGod", "p1"));
+    board.set(posKey({ x: 5, y: 5 }), card("Pretender", "p2"));
+    const state = makeState({ board, round: 3 });
+    expect(computeAiVote(state, "p1", () => 0.5)).toBe(true);
+  });
+
+  it("nudges toward voting no when the player holds a Chronicler -- continuing only makes it better", () => {
+    const board: Board = new Map();
+    // Chronicler's value at round 3 is 1+3=4; an isolated Bannerman (its own effect
+    // only targets neighbors, never itself) sits at its flat base 4 too -- raw margin
+    // ties at 0 again, but Chronicler's -1 vote nudge pulls yes-probability to ~0.45,
+    // just enough to flip the same boundary rng to no.
+    board.set(posKey({ x: 0, y: 0 }), card("Chronicler", "p1"));
+    board.set(posKey({ x: 5, y: 5 }), card("Bannerman", "p2"));
+    const state = makeState({ board, round: 3 });
+    expect(computeAiVote(state, "p1", () => 0.5)).toBe(false);
+  });
 });

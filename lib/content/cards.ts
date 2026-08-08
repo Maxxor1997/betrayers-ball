@@ -1,4 +1,4 @@
-import { adjacentPositions, countAdjacentOccupied, getAdjacentCards, parsePosKey, posKey } from "@/lib/engine/board";
+import { countAdjacentOccupied, getAdjacentCards, parsePosKey, posKey } from "@/lib/engine/board";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { Board, BoardBounds, CardBucket, CardId, CardInstance, Position } from "@/lib/engine/types";
 
@@ -51,8 +51,6 @@ export interface CardDef {
 
   /** Forces this card face-up whenever placed -- can't be played or stay face-down. */
   forceFaceUp?: boolean;
-  /** Value floors at 0 after all modifiers are applied. */
-  floorAtZero?: boolean;
   /** While face-down, only an opponent can flip it -- its own owner can't cash in a self-triggered flip. */
   opponentOnlyFlip?: boolean;
 
@@ -90,8 +88,8 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Footman",
     base: 5,
     bucket: "Engine",
-    text: "+1 if 3+ of your cards share its row/column",
-    fullText: "+1 to itself if its row or column (including itself) has 3 or more cards you own -- any card type, not just other Footmen.",
+    text: "+1 if 4+ of your cards share its row/column",
+    fullText: "+1 to itself if its row or column (including itself) has 4 or more cards you own -- any card type, not just other Footmen.",
     // 6p-8p counts scaled up (along with every other active card's) so those player
     // counts don't draw nearly the whole deck into hands -- see the 6p-8p comment on
     // Giant below for the full rationale.
@@ -105,7 +103,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
         if (otherPos.y === pos.y) ownedInRow++;
         if (otherPos.x === pos.x) ownedInColumn++;
       }
-      if (ownedInRow >= 3 || ownedInColumn >= 3) addDelta(self.instanceId, 1, "Footman (3+ owned in row/column)");
+      if (ownedInRow >= 4 || ownedInColumn >= 4) addDelta(self.instanceId, 1, "Footman (4+ owned in row/column)");
     },
   },
   Giant: {
@@ -129,9 +127,8 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Slam",
     text: "−3 per unique enemy Warlord owner",
     fullText:
-      "−3 for each distinct opposing player with a Warlord anywhere on the board -- multiple Warlords from the same rival still only count once, and your own other Warlords don't count against you at all -- floored at 0.",
+      "−3 for each distinct opposing player with a Warlord anywhere on the board -- multiple Warlords from the same rival still only count once, and your own other Warlords don't count against you at all.",
     count: [6, 6, 5, 5, 0, 0, 0],
-    floorAtZero: true,
     valueModifier: ({ board, self, addDelta }) => {
       const uniqueEnemyWarlordOwners = new Set(
         [...board.values()].filter((c) => c.cardId === "Warlord" && c.ownerId !== self.ownerId).map((c) => c.ownerId)
@@ -151,9 +148,8 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     base: 10,
     bucket: "Slam",
     text: "−2 per neighbor",
-    fullText: "−2 per neighbor (any owner), floored at 0.",
+    fullText: "−2 per neighbor (any owner).",
     count: [4, 4, 4, 4, 5, 6, 7],
-    floorAtZero: true,
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const neighbors = countAdjacentOccupied(board, bounds, pos);
       if (neighbors > 0) addDelta(self.instanceId, -2 * neighbors, `Exile (${neighbors} neighbor${neighbors > 1 ? "s" : ""})`);
@@ -227,6 +223,18 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: [4, 4, 4, 4, 5, 6, 7],
     valueModifier: ({ round, self, addDelta }) => {
       if (round > 0) addDelta(self.instanceId, round, `Chronicler (round ${round} elapsed)`);
+    },
+  },
+  DyingGod: {
+    id: "DyingGod",
+    name: "Dying God",
+    base: 10,
+    bucket: "Slam",
+    text: "−1 per round elapsed",
+    fullText: "−1 for every round elapsed when the game ends.",
+    count: [4, 4, 4, 4, 5, 6, 7],
+    valueModifier: ({ round, self, addDelta }) => {
+      if (round > 0) addDelta(self.instanceId, -round, `Dying God (round ${round} elapsed)`);
     },
   },
   Earthshaker: {
@@ -338,21 +346,14 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Truthseeker: {
     id: "Truthseeker",
     name: "Truthseeker",
-    disabled: true,
     base: 5,
     bucket: "Control",
-    text: "Placed face-up; flips all adjacent",
-    fullText:
-      "Always placed face-up, and immediately flips every adjacent card face-up too (any owner, including your own). Not affected by flip-lock rules or Suppressor negation.",
-    count: flatCount(4),
-    forceFaceUp: true,
-    onPlace: ({ board, bounds, pos }) => {
-      for (const neighborPos of adjacentPositions(pos, bounds)) {
-        const key = posKey(neighborPos);
-        const neighbor = board.get(key);
-        if (neighbor && !neighbor.faceUp) {
-          board.set(key, { ...neighbor, faceUp: true });
-        }
+    text: "−2 to each face-down neighbor",
+    fullText: "−2 to each adjacent face-down card (any owner).",
+    count: [4, 4, 4, 4, 5, 6, 7],
+    valueModifier: ({ board, bounds, pos, addDelta }) => {
+      for (const n of getAdjacentCards(board, bounds, pos)) {
+        if (!n.faceUp) addDelta(n.instanceId, -2, "Truthseeker (face-down neighbor)");
       }
     },
   },
@@ -373,6 +374,19 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       if (uniqueEnemyOwners > 0) {
         addDelta(self.instanceId, 1 * uniqueEnemyOwners, `Mercenary (${uniqueEnemyOwners} unique adj. enem${uniqueEnemyOwners > 1 ? "ies" : "y"})`);
       }
+    },
+  },
+  Beacon: {
+    id: "Beacon",
+    name: "Beacon",
+    base: 4,
+    bucket: "Engine",
+    text: "+1 per adjacent face-up card",
+    fullText: "+1 for each adjacent face-up card (any owner).",
+    count: [4, 4, 4, 4, 5, 6, 7],
+    valueModifier: ({ board, bounds, pos, self, addDelta }) => {
+      const faceUpNeighbors = getAdjacentCards(board, bounds, pos).filter((n) => n.faceUp).length;
+      if (faceUpNeighbors > 0) addDelta(self.instanceId, 1 * faceUpNeighbors, `Beacon (${faceUpNeighbors} adj. face-up)`);
     },
   },
   Unknown: {
