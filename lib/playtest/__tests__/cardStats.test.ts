@@ -77,10 +77,9 @@ describe("ownValueFor", () => {
     const f0 = place(board, 0, 0, "Footman", "p1");
     place(board, 1, 0, "Warlord", "p1");
     place(board, 2, 0, "Giant", "p1");
-    place(board, 3, 0, "Exile", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolved = cards.find((c) => c.instanceId === f0.instanceId)!;
-    // 4+ owned in row -- Footman's own +1 self-effect.
+    // 3+ owned in row -- Footman's own +1 self-effect.
     expect(resolved.finalValue).toBe(CARD_DEFS.Footman.base + 1);
     expect(ownValueFor(resolved)).toBe(CARD_DEFS.Footman.base + 1);
   });

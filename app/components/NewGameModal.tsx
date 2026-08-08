@@ -1,7 +1,7 @@
 "use client";
 
 import { CENTER_EFFECTS, isAvailableAtPlayerCount, selectableCenterEffects } from "@/lib/content/centerEffects";
-import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
+import { SELECTABLE_LOBBY_SIZES } from "@/lib/config/players";
 import { CenterEffectId } from "@/lib/engine/types";
 
 /** Player count and center effect chosen from this popup. */
@@ -35,6 +35,15 @@ export function NewGameModal({
   nameField,
   /** Solo play's remaining seats are always AI; a hosted multiplayer room's remaining seats might be other joining players, only backfilled with AI at Start -- so the wording next to the player-count picker differs. */
   playerCountLabel = (n) => `${n} (you + ${n - 1} AI)`,
+  /**
+   * Solo play has no waiting room -- the rest of the seats are AI from the very first
+   * frame, not "filled in later" -- so its caption reads differently from a
+   * multiplayer lobby, where other seats might still be real players joining before
+   * Start backfills whatever's left with AI. Host/display pass the multiplayer
+   * wording explicitly; solo play and /play's mid-game "New game" (no separate
+   * waiting room either) just take this default.
+   */
+  seatFillNote = "The rest of the seats are AI opponents.",
   /** False for a multiplayer rematch -- player count is fixed to the room's existing seats there, only the location is reconfigurable. */
   showPlayerCount = true,
 }: {
@@ -46,6 +55,7 @@ export function NewGameModal({
   confirmLabel?: string;
   nameField?: { value: string; onChange: (name: string) => void };
   playerCountLabel?: (n: number) => string;
+  seatFillNote?: string;
   showPlayerCount?: boolean;
 }) {
   const controlClass = "w-full min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700";
@@ -74,7 +84,7 @@ export function NewGameModal({
           )}
           {showPlayerCount && (
             <>
-              <label htmlFor="ngm-players">Players</label>
+              <label htmlFor="ngm-players">Lobby size</label>
               <select
                 id="ngm-players"
                 value={setup.playerCount}
@@ -90,12 +100,14 @@ export function NewGameModal({
                 }}
                 className={controlClass}
               >
-                {Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i).map((n) => (
+                {SELECTABLE_LOBBY_SIZES.map((n) => (
                   <option key={n} value={n}>
                     {playerCountLabel(n)}
                   </option>
                 ))}
               </select>
+              <span />
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">{seatFillNote}</p>
             </>
           )}
           <label htmlFor="ngm-center">Location</label>

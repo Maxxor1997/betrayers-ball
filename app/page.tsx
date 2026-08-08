@@ -206,7 +206,7 @@ export default function HomePage() {
   function openSoloSetup() {
     setMode("solo");
     setHostError(null);
-    setNewGameSetup({ playerCount: 2, centerEffect: "random" });
+    setNewGameSetup({ playerCount: 4, centerEffect: "random" });
   }
 
   function openHostSetup() {
@@ -309,6 +309,7 @@ export default function HomePage() {
             confirmLabel={hosting ? "Starting…" : mode === "host" ? "Create room" : mode === "display" ? "Open display" : "Start"}
             nameField={mode === "host" ? { value: hostName, onChange: setHostName } : undefined}
             playerCountLabel={mode === "host" ? (n) => `${n}` : mode === "display" ? (n) => `${n} players` : undefined}
+            seatFillNote={mode === "solo" ? undefined : "Any empty seats are filled with AI once the game starts."}
           />
         )}
 

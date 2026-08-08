@@ -220,7 +220,7 @@ function Game() {
   // fallback (a direct, param-less visit to /play) -- arriving from the home screen's
   // own setup popup already carries a real choice via the query params above, so there's
   // nothing left to prompt for.
-  const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(initialSetup ? null : { playerCount: 2, centerEffect: "random" });
+  const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(initialSetup ? null : { playerCount: 4, centerEffect: "random" });
   const [showInstructions, setShowInstructions] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [highlightedCardId, setHighlightedCardId] = useState<CardId | null>(null);

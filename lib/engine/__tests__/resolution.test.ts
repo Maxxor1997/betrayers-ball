@@ -20,27 +20,25 @@ function find(cards: ResolvedCard[], instanceId: string): ResolvedCard {
 }
 
 describe("resolveBoard — Footman row/column bonus", () => {
-  it("gives +1 when its row has 4+ cards you own, even if they aren't Footmen", () => {
+  it("gives +1 when its row has 3+ cards you own, even if they aren't Footmen", () => {
     const board: Board = new Map();
     const f0 = place(board, 0, 0, "Footman", "p1");
     place(board, 1, 0, "Warlord", "p1");
     place(board, 2, 0, "Giant", "p1");
-    place(board, 3, 0, "Exile", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
 
-  it("gives +1 when its column has 4+ cards you own", () => {
+  it("gives +1 when its column has 3+ cards you own", () => {
     const board: Board = new Map();
     const f0 = place(board, 0, 0, "Footman", "p1");
     place(board, 0, 1, "Warlord", "p1");
     place(board, 0, 2, "Giant", "p1");
-    place(board, 0, 3, "Exile", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
 
-  it("gives no bonus for fewer than 4 owned cards in its row or column", () => {
+  it("gives no bonus for fewer than 3 owned cards in its row or column", () => {
     const board: Board = new Map();
     const f0 = place(board, 0, 0, "Footman", "p1");
     place(board, 1, 0, "Footman", "p1");
@@ -48,21 +46,11 @@ describe("resolveBoard — Footman row/column bonus", () => {
     expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
   });
 
-  it("gives no bonus at exactly 3 owned cards -- the old threshold, no longer enough", () => {
-    const board: Board = new Map();
-    const f0 = place(board, 0, 0, "Footman", "p1");
-    place(board, 1, 0, "Warlord", "p1");
-    place(board, 2, 0, "Giant", "p1");
-    const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
-  });
-
-  it("doesn't count an opponent's cards toward the 4", () => {
+  it("doesn't count an opponent's cards toward the 3", () => {
     const board: Board = new Map();
     const f0 = place(board, 0, 0, "Footman", "p1");
     place(board, 1, 0, "Footman", "p2");
     place(board, 2, 0, "Footman", "p2");
-    place(board, 3, 0, "Footman", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
   });
@@ -70,9 +58,8 @@ describe("resolveBoard — Footman row/column bonus", () => {
   it("cards don't need to be adjacent or contiguous -- just in the same row/column", () => {
     const board: Board = new Map();
     const f0 = place(board, 0, 0, "Footman", "p1");
-    place(board, 3, 0, "Warlord", "p1");
-    place(board, 4, 0, "Giant", "p1");
-    place(board, 7, 0, "Exile", "p1");
+    place(board, 4, 0, "Warlord", "p1");
+    place(board, 7, 0, "Giant", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
@@ -132,7 +119,6 @@ describe("resolveBoard — scoring breakdown", () => {
     const f0 = place(board, 0, 0, "Footman", "p1");
     place(board, 1, 0, "Footman", "p1");
     place(board, 2, 0, "Footman", "p1");
-    place(board, 3, 0, "Footman", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolved = find(cards, f0.instanceId);
     expect(resolved.breakdown[0]).toEqual({ label: "Base", amount: CARD_DEFS.Footman.base, source: "self" });
@@ -505,42 +491,42 @@ describe("resolveBoard — Infiltrator", () => {
     expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
   });
 
-  it("face-down: swaps base with the highest-base adjacent card", () => {
+  it("face-down: swaps base with the highest-base face-up adjacent card", () => {
     const board: Board = new Map();
     // Warlord carries no self-modifying effect here (no other Warlords on the board),
     // so its finalValue is just its base -- a clean comparison.
     const inf = place(board, 1, 1, "Infiltrator", "p1", false);
-    const warlord = place(board, 0, 1, "Warlord", "p2");
+    const warlord = place(board, 0, 1, "Warlord", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
     expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
   });
 
-  it("swap applies even if the neighbor is face-down -- resolution sees true identity", () => {
+  it("no-op when the highest-base neighbor is face-down -- can only snipe an identity it can see", () => {
     const board: Board = new Map();
     const inf = place(board, 1, 1, "Infiltrator", "p1", false);
     const warlord = place(board, 0, 1, "Warlord", "p2", false);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
-    expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+    expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+    expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
   });
 
-  it("still swaps even when the only neighbor has a lower base -- a real downside, not just upside", () => {
+  it("still swaps even when the only face-up neighbor has a lower base -- a real downside, not just upside", () => {
     const board: Board = new Map();
     const inf = place(board, 1, 1, "Infiltrator", "p1", false);
-    const commander = place(board, 0, 1, "Commander", "p2");
+    const commander = place(board, 0, 1, "Commander", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Commander.base);
     expect(find(cards, commander.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
   });
 
-  it("picks only the single highest-base neighbor among several", () => {
+  it("picks only the single highest-base face-up neighbor among several", () => {
     const board: Board = new Map();
     // Warlord and Giant carry no self-modifying effect here (no other Warlords on the
     // board), so their finalValue is just their base -- a clean comparison.
     const inf = place(board, 1, 1, "Infiltrator", "p1", false);
-    const warlord = place(board, 0, 1, "Warlord", "p2"); // base 8, the highest
-    const giant = place(board, 2, 1, "Giant", "p2"); // base 6
+    const warlord = place(board, 0, 1, "Warlord", "p2", true); // base 8, the highest
+    const giant = place(board, 2, 1, "Giant", "p2", true); // base 6
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
     expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
@@ -555,10 +541,10 @@ describe("resolveBoard — Infiltrator", () => {
     expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
   });
 
-  it("no-op when the highest-base neighbor's base equals its own", () => {
+  it("no-op when the highest-base face-up neighbor's base equals its own", () => {
     const board: Board = new Map();
     const a = place(board, 1, 1, "Infiltrator", "p1", false);
-    const b = place(board, 0, 1, "Infiltrator", "p2", false);
+    const b = place(board, 0, 1, "Infiltrator", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
     expect(find(cards, b.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
@@ -594,13 +580,11 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     place(board, 1, 2, "Giant", "p2");
     place(board, 2, 1, "Giant", "p2");
     place(board, 2, 3, "Giant", "p2");
-    place(board, 0, 2, "Giant", "p2"); // 4th p2-owned card in the row, clears the new threshold
     const footman = place(board, 4, 2, "Footman", "p2"); // adjacent to Bannerman only
     const { cards } = resolveBoard(board, BOUNDS, 3);
     // No +2 from Bannerman (negated) -- but Footman's own row bonus still fires,
     // since negation cancels a card's own/outgoing effects, not its ownership as read
-    // by others: row y=2 has 4 p2-owned cards (the extra Giant, Giant, Bannerman,
-    // Footman itself).
+    // by others: row y=2 has 3 p2-owned cards (Giant, Bannerman, Footman itself).
     expect(find(cards, footman.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
 
@@ -617,7 +601,6 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     const f0 = place(board, 0, 0, "Footman", "p1");
     const f1 = place(board, 1, 0, "Footman", "p1"); // will be negated
     const f2 = place(board, 2, 0, "Footman", "p1");
-    place(board, 3, 0, "Footman", "p1"); // 4th p1-owned card in the row, clears the new threshold
     place(board, 1, 1, "Suppressor", "p2");
     place(board, 1, 2, "Giant", "p2");
     place(board, 0, 1, "Giant", "p2");
@@ -625,7 +608,7 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, f1.instanceId).negated).toBe(true);
     expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base); // negated, no own +1
-    expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1); // still sees 4 p1-owned in row y=0
+    expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1); // still sees 3 p1-owned in row y=0
     expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
 
@@ -651,13 +634,12 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     place(board, 1, 2, "Giant", "p2");
     place(board, 2, 1, "Giant", "p2");
     place(board, 2, 3, "Giant", "p2");
-    place(board, 0, 2, "Footman", "p2"); // 4th p2-owned card in the row, clears the new threshold
     const f1 = place(board, 4, 2, "Footman", "p2");
     const f2 = place(board, 3, 1, "Footman", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, pb.instanceId).negated).toBe(true);
     // No steal from the negated Plague Bearer -- but f1's own row bonus still fires:
-    // row y=2 has 4 p2-owned cards (the extra Footman, Giant, Plague Bearer, f1 itself).
+    // row y=2 has 3 p2-owned cards (Giant, Plague Bearer, f1 itself).
     expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
     expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
   });
@@ -669,10 +651,9 @@ describe("resolveBoard — totals", () => {
     place(board, 0, 0, "Footman", "p1");
     place(board, 1, 0, "Footman", "p1");
     place(board, 2, 0, "Footman", "p1");
-    place(board, 3, 0, "Footman", "p1");
     place(board, 0, 1, "Giant", "p2");
     const { totalsByOwner } = resolveBoard(board, BOUNDS, 3);
-    expect(totalsByOwner.p1).toBe(4 * (CARD_DEFS.Footman.base + 1)); // 4 footmen, each with the line bonus
+    expect(totalsByOwner.p1).toBe(3 * (CARD_DEFS.Footman.base + 1)); // 3 footmen, each with the line bonus
     expect(totalsByOwner.p2).toBe(CARD_DEFS.Giant.base);
   });
 });

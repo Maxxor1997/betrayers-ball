@@ -1,6 +1,20 @@
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 8;
 
+/**
+ * The only lobby sizes offered when starting a game (NewGameModal) -- balance effort
+ * is concentrated on these two configurations instead of spread across the whole
+ * 2-8 range. Every player count in between MIN_PLAYERS/MAX_PLAYERS is still fully
+ * supported by the engine (board sizing, deck counts, everything in cards.ts/
+ * centerEffects.ts keeps its full per-player-count array in case this gets reopened
+ * later) and by the playtest simulator's own player-count picker, which is
+ * deliberately unrestricted -- this only narrows the two *lobby-creation* pickers.
+ * A lobby started at either size backfills any unseated slots with AI once play
+ * begins (see GameSession.start in lib/server/session.ts), same as solo play always
+ * has.
+ */
+export const SELECTABLE_LOBBY_SIZES = [4, 8];
+
 export const AI_NAMES = [
   "Sir Loin of Beef",
   "Baron von Bluffalo",

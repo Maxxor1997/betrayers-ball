@@ -70,6 +70,28 @@ function cardValueMetric(row: CardStatsRow): number | null {
   return row.avgOwnScore;
 }
 
+/**
+ * How much this card actually bends real game outcomes, weighted by how often it
+ * shows up -- avgPlacementDelta is the average placement swing *conditional on being
+ * played*; multiplying by playRate turns that into the unconditional expected swing
+ * across a random game (a card that's never played contributes exactly 0, same as one
+ * that's played constantly but does nothing). Negated so positive reads as "strong and
+ * common" (worth a balance look) and negative as "actively bad and common" (a trap
+ * card, a different but still real problem) -- a card that's merely rare stays near 0
+ * either way, regardless of how strong it is when it *does* get played, since it's too
+ * infrequent to be swinging the overall picture.
+ */
+function impactMetric(row: CardStatsRow): number | null {
+  return row.avgPlacementDelta === null || row.playRate === null ? null : -row.avgPlacementDelta * row.playRate;
+}
+
+/** Plain mean of cardValueMetric across every card with a value at this player count (rows never played there are excluded, not counted as 0) -- for the "Card value" chart, one aggregate number per player count instead of picking a single card. */
+function averageCardValueAt(rowsForPlayerCount: Map<CardId, CardStatsRow> | undefined): number | null {
+  if (!rowsForPlayerCount) return null;
+  const values = [...rowsForPlayerCount.values()].map(cardValueMetric).filter((v): v is number => v !== null);
+  return values.length === 0 ? null : values.reduce((sum, v) => sum + v, 0) / values.length;
+}
+
 /** Same bucket-then-name ordering used everywhere in this file (the table's default sort, and the heatmap's fixed row order). */
 function byBucketThenName(a: CardStatsRow, b: CardStatsRow): number {
   const diff = BUCKET_ORDER.indexOf(CARD_DEFS[a.cardId].bucket) - BUCKET_ORDER.indexOf(CARD_DEFS[b.cardId].bucket);
@@ -81,12 +103,12 @@ function buildStatsMarkdown(rows: CardStatsRow[], overallRoundLength: number | n
   const lines = [
     `Overall average round length: ${fmt(overallRoundLength, 2)}`,
     "",
-    "| Card | Bucket | Played | Own Δ base | Final score | Placement Δ avg | Avg round length | Disruption |",
-    "|---|---|---|---|---|---|---|---|",
+    "| Card | Bucket | Played | Own Δ base | Final score | Placement Δ avg | Avg round length | Disruption | Impact |",
+    "|---|---|---|---|---|---|---|---|---|",
   ];
   for (const row of rows) {
     lines.push(
-      `| ${CARD_DEFS[row.cardId].name} | ${CARD_DEFS[row.cardId].bucket} | ${fmtPercent(row.playRate)} (${row.played}/${row.copiesInDeck}) | ${fmtSigned(ownScoreDelta(row))} | ${fmt(row.avgFinalScore)} | ${fmtSigned(row.avgPlacementDelta, 2)} | ${fmt(row.avgRoundLength, 2)} | ${fmtSigned(row.avgDisruption)} |`
+      `| ${CARD_DEFS[row.cardId].name} | ${CARD_DEFS[row.cardId].bucket} | ${fmtPercent(row.playRate)} (${row.played}/${row.copiesInDeck}) | ${fmtSigned(ownScoreDelta(row))} | ${fmt(row.avgFinalScore)} | ${fmtSigned(row.avgPlacementDelta, 2)} | ${fmt(row.avgRoundLength, 2)} | ${fmtSigned(row.avgDisruption)} | ${fmtSigned(impactMetric(row), 3)} |`
     );
   }
   return lines.join("\n") + "\n";
@@ -98,7 +120,15 @@ function simPlayerLabel(id: string): string {
   return Number.isNaN(n) ? id : `P${n + 1}`;
 }
 
-type SortKey = "name" | "bucket" | "played" | "own" | "final" | "placement" | "roundLength" | "disruption";
+type SortKey = "name" | "bucket" | "played" | "own" | "final" | "placement" | "roundLength" | "disruption" | "impact";
+
+/**
+ * The heatmap's row order is deliberately independent of the flat table's sortKey
+ * (see heatmapRows's own doc comment) -- "bucket" is the default bucket-then-name
+ * order (no dedicated header of its own, just the starting state), "name" is plain
+ * alphabetical, toggled from the heatmap table's own "Card" column header.
+ */
+type HeatmapSortKey = "bucket" | "name";
 
 function compareNullable(a: number | null, b: number | null, dir: 1 | -1): number {
   if (a === null && b === null) return 0;
@@ -107,16 +137,17 @@ function compareNullable(a: number | null, b: number | null, dir: 1 | -1): numbe
   return dir * (a - b);
 }
 
-type HeatMetric = "placement" | "playRate" | "own" | "final" | "roundLength" | "disruption" | "value";
+type HeatMetric = "placement" | "impact" | "playRate" | "value" | "own" | "final" | "disruption" | "roundLength";
 
 const HEAT_METRIC_LABELS: Record<HeatMetric, string> = {
   placement: "Placement Δ avg",
+  impact: "Impact (strength × play rate)",
   playRate: "Played",
+  value: "Value (base + effect)",
   own: "Own Δ base",
   final: "Final score",
-  roundLength: "Avg round length",
   disruption: "Disruption",
-  value: "Value (base + effect)",
+  roundLength: "Avg round length",
 };
 
 /** Only "placement" has a real notion of better/worse (lower rank number wins) -- every other metric is purely informational, so its heatmap coloring is just a plain magnitude scale, not a judgment. */
@@ -141,6 +172,8 @@ function heatMetricValue(row: CardStatsRow | undefined, metric: HeatMetric): num
       return row.avgDisruption;
     case "value":
       return cardValueMetric(row);
+    case "impact":
+      return impactMetric(row);
   }
 }
 
@@ -161,6 +194,8 @@ function heatMetricFormat(row: CardStatsRow | undefined, metric: HeatMetric): st
       return fmtSigned(row.avgDisruption);
     case "value":
       return fmt(cardValueMetric(row));
+    case "impact":
+      return fmtSigned(impactMetric(row), 3);
   }
 }
 
@@ -264,11 +299,14 @@ function Playtest() {
   const [progress, setProgress] = useState(0);
   const [pendingRunConfirm, setPendingRunConfirm] = useState(false);
   const [confirmingReset, setConfirmingReset] = useState(false);
-  const [watchLive, setWatchLive] = useState(true);
+  const [watchLive, setWatchLive] = useState(false);
   const [liveState, setLiveState] = useState<GameState | null>(null);
   const [selfPlayedCount, setSelfPlayedCount] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>("bucket");
   const [sortDir, setSortDir] = useState<1 | -1>(1);
+  const [heatmapSortKey, setHeatmapSortKey] = useState<HeatmapSortKey>("bucket");
+  const [heatmapSortDir, setHeatmapSortDir] = useState<1 | -1>(1);
+  const [chartMode, setChartMode] = useState<"roundLength" | "cardValue">("roundLength");
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [copyTableFeedback, setCopyTableFeedback] = useState(false);
   const [view, setView] = useState<"table" | "heatmap">("table");
@@ -282,6 +320,14 @@ function Playtest() {
     else {
       setSortKey(key);
       setSortDir(1);
+    }
+  }
+
+  function toggleHeatmapSort(key: HeatmapSortKey) {
+    if (key === heatmapSortKey) setHeatmapSortDir((d) => (d === 1 ? -1 : 1));
+    else {
+      setHeatmapSortKey(key);
+      setHeatmapSortDir(1);
     }
   }
 
@@ -394,6 +440,8 @@ function Playtest() {
         return compareNullable(a.avgRoundLength, b.avgRoundLength, sortDir);
       case "disruption":
         return compareNullable(a.avgDisruption, b.avgDisruption, sortDir);
+      case "impact":
+        return compareNullable(impactMetric(a), impactMetric(b), sortDir);
     }
   });
   const totalPlayed = rows.reduce((sum, r) => sum + r.played, 0);
@@ -401,13 +449,18 @@ function Playtest() {
   const totalGamesConfigured = gameCount * (runAllPlayerCounts ? ALL_PLAYER_COUNTS.length : 1);
 
   // Heatmap data -- every available player count's own StatsBucket, summarized and
-  // indexed by cardId, plus a fixed bucket-then-name row order independent of the flat
-  // table's own sort (the heatmap's whole point is comparing across player counts, so
-  // its rows stay put regardless of which column you last sorted the table by).
+  // indexed by cardId, plus a row order independent of the flat table's own sort (the
+  // heatmap's whole point is comparing across player counts, so its rows shouldn't
+  // shuffle just because you sorted the flat table by a different column) -- default
+  // bucket-then-name, or plain alphabetical via the heatmap table's own "Card" header
+  // (see HeatmapSortKey/toggleHeatmapSort), independently of either the flat table's
+  // sort or which heat metric is currently selected.
   const availablePlayerCounts = Object.keys(stats.byPlayerCount)
     .map(Number)
     .sort((a, b) => a - b);
-  const heatmapRows = [...rows].sort(byBucketThenName);
+  const heatmapRows = [...rows].sort((a, b) =>
+    heatmapSortKey === "name" ? heatmapSortDir * CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name) : heatmapSortDir * byBucketThenName(a, b)
+  );
   const heatmapLookup = new Map<number, Map<CardId, CardStatsRow>>(
     availablePlayerCounts.map((pc) => [pc, new Map(statsSummary(stats.byPlayerCount[pc] as StatsBucket).map((r) => [r.cardId, r]))])
   );
@@ -765,6 +818,15 @@ function Playtest() {
                   align="right"
                   title="Average net damage dealt to a single average opponent, per appearance -- damage to opponents' cards minus damage to this card's own side, divided by opponent count. Always 0 for a card with no outgoing effect on other cards."
                 />
+                <SortableHeader
+                  label="Impact"
+                  sortKey="impact"
+                  activeKey={sortKey}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                  align="right"
+                  title="-Placement Δ avg × play rate -- the unconditional expected placement swing this card contributes across a random game. High and positive means strong AND common (worth a balance look); near 0 means either weak or rare (a rare-but-strong card is 'situational', not broken); negative means common but actively bad (a trap card)."
+                />
               </tr>
             </thead>
             <tbody>
@@ -780,6 +842,7 @@ function Playtest() {
                   <td className="px-3 py-1.5 text-right">{fmtSigned(row.avgPlacementDelta, 2)}</td>
                   <td className="px-3 py-1.5 text-right">{fmt(row.avgRoundLength, 2)}</td>
                   <td className="px-3 py-1.5 text-right">{fmtSigned(row.avgDisruption)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmtSigned(impactMetric(row), 3)}</td>
                 </tr>
               ))}
             </tbody>
@@ -787,7 +850,33 @@ function Playtest() {
         </div>
       ) : (
         <div className="flex w-full max-w-4xl flex-col gap-3">
-          <RoundLengthByPlayerCountChart stats={stats} />
+          <div className="flex self-start overflow-hidden rounded-full border border-zinc-300 text-xs dark:border-zinc-700">
+            <button
+              onClick={() => setChartMode("roundLength")}
+              className={`px-3 py-1 whitespace-nowrap ${chartMode === "roundLength" ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-black" : "hover:bg-zinc-100 dark:hover:bg-zinc-900"}`}
+            >
+              Round length
+            </button>
+            <button
+              onClick={() => setChartMode("cardValue")}
+              className={`px-3 py-1 whitespace-nowrap ${chartMode === "cardValue" ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-black" : "hover:bg-zinc-100 dark:hover:bg-zinc-900"}`}
+            >
+              Card value
+            </button>
+          </div>
+          {chartMode === "roundLength" ? (
+            <BarChartByPlayerCount
+              title="Average round length by player count"
+              counts={availablePlayerCounts}
+              values={availablePlayerCounts.map((pc) => overallAvgRoundLength(stats.byPlayerCount[pc]))}
+            />
+          ) : (
+            <BarChartByPlayerCount
+              title="Average card value by player count"
+              counts={availablePlayerCounts}
+              values={availablePlayerCounts.map((pc) => averageCardValueAt(heatmapLookup.get(pc)))}
+            />
+          )}
           <label htmlFor="pt-heat-metric" className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
             Color by
             <select
@@ -810,7 +899,14 @@ function Playtest() {
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-zinc-300 bg-zinc-50 text-xs text-zinc-500 uppercase dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
-                    <th className="px-3 py-2">Card</th>
+                    <SortableHeader
+                      label="Card"
+                      sortKey="name"
+                      activeKey={heatmapSortKey}
+                      dir={heatmapSortDir}
+                      onClick={toggleHeatmapSort}
+                      title="Sort alphabetically -- click again to reverse. Doesn't affect the flat table's own sort."
+                    />
                     {availablePlayerCounts.map((pc) => (
                       <th key={pc} className="px-3 py-2 text-right">
                         {pc}p
@@ -861,30 +957,32 @@ function Playtest() {
   );
 }
 
-/** Simple hand-rolled bar chart (no charting library) -- average round length at each player count that's actually been tallied, so you can see at a glance whether games run longer or shorter as the table fills up. */
-function RoundLengthByPlayerCountChart({ stats }: { stats: PlaytestStats }) {
-  const counts = Object.keys(stats.byPlayerCount)
-    .map(Number)
-    .sort((a, b) => a - b);
+/**
+ * Simple hand-rolled bar chart (no charting library), one row per player count that's
+ * actually been tallied -- generic over whatever `values` the caller hands it (round
+ * length, or a specific card's value metric, see PlayerCountChart below) so both
+ * modes render identically instead of looking like two different widgets. A null
+ * value (never-tallied at that count) renders as an empty bar and "—", not a gap.
+ */
+function BarChartByPlayerCount({ title, counts, values }: { title: string; counts: number[]; values: (number | null)[] }) {
   if (counts.length === 0) return null;
-
-  const values = counts.map((pc) => overallAvgRoundLength(stats.byPlayerCount[pc])!);
-  const max = Math.max(...values);
+  const numericValues = values.filter((v): v is number => v !== null);
+  const max = numericValues.length > 0 ? Math.max(...numericValues, 0) : 0;
 
   return (
     <div className="flex w-full flex-col gap-2 rounded-lg border border-zinc-300 p-4 dark:border-zinc-700">
-      <p className="text-sm font-medium">Average round length by player count</p>
+      <p className="text-sm font-medium">{title}</p>
       <div className="flex flex-col gap-1.5">
         {counts.map((pc, i) => {
           const value = values[i];
-          const widthPct = max > 0 ? (value / max) * 100 : 0;
+          const widthPct = value === null || max <= 0 ? 0 : (Math.max(value, 0) / max) * 100;
           return (
             <div key={pc} className="flex items-center gap-2 text-xs">
               <span className="w-8 shrink-0 text-zinc-500 dark:text-zinc-400">{pc}p</span>
               <div className="h-4 flex-1 overflow-hidden rounded bg-zinc-100 dark:bg-zinc-800">
                 <div className="h-full rounded bg-blue-500/70" style={{ width: `${widthPct}%` }} />
               </div>
-              <span className="w-10 shrink-0 text-right font-medium">{value.toFixed(2)}</span>
+              <span className="w-10 shrink-0 text-right font-medium">{value === null ? "—" : value.toFixed(2)}</span>
             </div>
           );
         })}
@@ -893,7 +991,7 @@ function RoundLengthByPlayerCountChart({ stats }: { stats: PlaytestStats }) {
   );
 }
 
-function SortableHeader({
+function SortableHeader<K extends string>({
   label,
   sortKey,
   activeKey,
@@ -903,10 +1001,10 @@ function SortableHeader({
   title,
 }: {
   label: string;
-  sortKey: SortKey;
-  activeKey: SortKey;
+  sortKey: K;
+  activeKey: K;
   dir: 1 | -1;
-  onClick: (key: SortKey) => void;
+  onClick: (key: K) => void;
   align?: "left" | "right";
   title?: string;
 }) {

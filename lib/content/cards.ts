@@ -88,8 +88,8 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Footman",
     base: 5,
     bucket: "Engine",
-    text: "+1 if 4+ of your cards share its row/column",
-    fullText: "+1 to itself if its row or column (including itself) has 4 or more cards you own -- any card type, not just other Footmen.",
+    text: "+1 if 3+ of your cards share its row/column",
+    fullText: "+1 to itself if its row or column (including itself) has 3 or more cards you own -- any card type, not just other Footmen.",
     // 6p-8p counts scaled up (along with every other active card's) so those player
     // counts don't draw nearly the whole deck into hands -- see the 6p-8p comment on
     // Giant below for the full rationale.
@@ -103,7 +103,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
         if (otherPos.y === pos.y) ownedInRow++;
         if (otherPos.x === pos.x) ownedInColumn++;
       }
-      if (ownedInRow >= 4 || ownedInColumn >= 4) addDelta(self.instanceId, 1, "Footman (4+ owned in row/column)");
+      if (ownedInRow >= 3 || ownedInColumn >= 3) addDelta(self.instanceId, 1, "Footman (3+ owned in row/column)");
     },
   },
   Giant: {
@@ -261,7 +261,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Control",
     text: "−3 above and below",
     fullText: "−3 to the card directly above and directly below.",
-    count: [4, 4, 4, 0, 0, 0, 0],
+    count: [4, 4, 4, 4, 0, 0, 0],
     valueModifier: ({ board, pos, addDelta }) => {
       const above = board.get(posKey({ x: pos.x, y: pos.y - 1 }));
       const below = board.get(posKey({ x: pos.x, y: pos.y + 1 }));
@@ -324,15 +324,15 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Infiltrator: {
     id: "Infiltrator",
     name: "Infiltrator",
-    base: 4,
+    base: 3,
     bucket: "Control",
-    text: "Face-down: swaps base w/ highest adj.",
+    text: "Face-down: swaps base w/ highest face-up adj.",
     fullText:
-      "While face-down, it swaps base values with the highest-base adjacent card (any owner) -- it becomes that card's base, and that card becomes its old base.",
+      "While face-down, it swaps base values with the highest-base face-up adjacent card (any owner) -- it becomes that card's base, and that card becomes its old base.",
     count: [2, 2, 2, 2, 3, 3, 4],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       if (self.faceUp) return;
-      const neighbors = getAdjacentCards(board, bounds, pos);
+      const neighbors = getAdjacentCards(board, bounds, pos).filter((n) => n.faceUp);
       if (neighbors.length === 0) return;
       let target = neighbors[0];
       for (const n of neighbors) {
@@ -366,7 +366,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Engine",
     text: "+1 per unique adj. enemy",
     fullText: "+1 for each distinct opposing player with a card adjacent to it -- two neighbors owned by the same enemy still only count once.",
-    count: [0, 0, 0, 4, 5, 6, 7],
+    count: [0, 0, 4, 4, 5, 6, 7],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const uniqueEnemyOwners = new Set(
         getAdjacentCards(board, bounds, pos)

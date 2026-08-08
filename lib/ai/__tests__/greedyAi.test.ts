@@ -148,8 +148,7 @@ describe("chooseGreedyAiAction — placement actually looks ahead", () => {
     const board: Board = new Map();
     board.set(posKey({ x: 0, y: 0 }), card("Footman", "p1"));
     board.set(posKey({ x: 1, y: 0 }), card("Footman", "p1"));
-    board.set(posKey({ x: 3, y: 0 }), card("Footman", "p1"));
-    // Both (2,0) [completes the 4-line, +1 x4] and (0,1) [neutral, adjacent to (0,0)] are legal.
+    // Both (2,0) [completes the line, +1 x3] and (0,1) [neutral, adjacent to (0,0)] are legal.
     const handCard = card("Footman", "p1");
     const state = makeState({
       board,
