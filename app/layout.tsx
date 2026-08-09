@@ -33,7 +33,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Board Game",
+  title: "Court of the Kingslayer",
   description: "Turn-based hidden-info grid card game.",
 };
 

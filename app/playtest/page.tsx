@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { BoardGrid } from "@/app/components/Board";
+import { LOCATION_COMPLEXITY_ORDER } from "@/app/components/CardCatalog";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, randomCenterEffectPool, selectableCenterEffects } from "@/lib/content/centerEffects";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
@@ -26,8 +27,17 @@ import { PlaySelf } from "./PlaySelf";
 /** Same grouping CardCatalog uses -- keeps the two card listings visually consistent. */
 const BUCKET_ORDER: CardBucket[] = ["Slam", "Engine", "Control"];
 
-/** Games are simulated in batches of this size between UI-thread yields, so a large run stays responsive and cancelable instead of freezing the tab for its whole duration. */
-const BATCH_SIZE = 25;
+/**
+ * Target milliseconds of uninterrupted simulation between UI-thread yields, so a large
+ * run stays responsive and cancelable instead of freezing the tab for its whole
+ * duration. Time-based rather than a fixed game count: an 8p game is far more
+ * expensive to simulate than a 2p one (bigger board, more cards/turns), so a flat
+ * "every N games" batch size would yield often enough to stay smooth at low player
+ * counts but still visibly stutter at high ones -- measuring elapsed time instead
+ * keeps the yield cadence (and so the UI's responsiveness) roughly constant regardless
+ * of player count.
+ */
+const YIELD_INTERVAL_MS = 50;
 
 /** How many engine actions pass between live-board repaints while "watch games simulate" is on -- frequent enough to feel live, not so frequent it dominates a large run's time. */
 const LIVE_SAMPLE_EVERY_ACTIONS = 3;
@@ -126,9 +136,13 @@ type SortKey = "name" | "bucket" | "played" | "own" | "final" | "placement" | "r
  * The heatmap's row order is deliberately independent of the flat table's sortKey
  * (see heatmapRows's own doc comment) -- "bucket" is the default bucket-then-name
  * order (no dedicated header of its own, just the starting state), "name" is plain
- * alphabetical, toggled from the heatmap table's own "Card" column header.
+ * alphabetical (toggled from the heatmap table's own "Card" column header), and any
+ * other value is a data column's key (a stringified player count, or a
+ * CenterEffectId -- neither ever collides with "bucket"/"name"), toggled by clicking
+ * that column's own header to sort by its value for the currently-selected heat
+ * metric instead.
  */
-type HeatmapSortKey = "bucket" | "name";
+type HeatmapSortKey = "bucket" | "name" | (string & {});
 
 function compareNullable(a: number | null, b: number | null, dir: 1 | -1): number {
   if (a === null && b === null) return 0;
@@ -311,9 +325,15 @@ function Playtest() {
   const [copyTableFeedback, setCopyTableFeedback] = useState(false);
   const [view, setView] = useState<"table" | "heatmap">("table");
   const [heatMetric, setHeatMetric] = useState<HeatMetric>("placement");
+  const [heatmapDimension, setHeatmapDimension] = useState<"playerCount" | "location">("playerCount");
   // Checked once per batch, not once per game -- cancel doesn't need to be instant,
-  // just prompt (finishing the in-flight batch of BATCH_SIZE is fine).
+  // just prompt (finishing the in-flight batch, at most ~YIELD_INTERVAL_MS of work, is fine).
   const cancelRef = useRef(false);
+  // Ref (not state) re-entrancy guard for runSimulation -- a second click that lands
+  // before React has had a chance to paint the disabled "Run simulation" button (see
+  // runSimulation's own comment) would otherwise still see stale `running` state from
+  // the same render and start a second, overlapping run.
+  const runInProgressRef = useRef(false);
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) setSortDir((d) => (d === 1 ? -1 : 1));
@@ -339,15 +359,27 @@ function Playtest() {
       finalState.config.centerEffect,
       finalState.players.map((p) => p.id)
     );
-    tallyGame(working, result.cards, finalState.result!.scores, finalState.config.playerCount, finalState.round);
+    tallyGame(working, result.cards, finalState.result!.scores, finalState.config.playerCount, finalState.round, finalState.config.centerEffect);
   }
 
   /** `startFresh` clears any already-tallied data before this run instead of adding to it -- see the pre-run confirmation popup below, which is the only place that ever passes true. */
   async function runSimulation(startFresh: boolean) {
+    if (runInProgressRef.current) return;
+    runInProgressRef.current = true;
     setRunning(true);
     setProgress(0);
     setLiveState(null);
     cancelRef.current = false;
+    // Yield once, immediately, before touching the (potentially expensive) simulation
+    // loop below -- without this, everything up to the loop's first yield runs as one
+    // uninterrupted synchronous stretch of JS, so the browser never gets a chance to
+    // actually paint the "running" state (disabled inputs, progress bar) until after
+    // that first stretch finishes. At 8p that first stretch used to be long enough
+    // that the button/confirmation popup appeared to just not have responded at all,
+    // inviting extra clicks -- runInProgressRef above stops those from starting a
+    // second overlapping run, and this yield makes sure the UI actually shows it's
+    // working right away instead of looking frozen.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     // A working copy, mutated in place by tallyGame across the whole run for speed --
     // committed to React state (and localStorage) once per batch, not once per game,
     // so a few-thousand-game run doesn't trigger a few thousand re-renders.
@@ -356,6 +388,7 @@ function Playtest() {
     const playerCounts = runAllPlayerCounts ? ALL_PLAYER_COUNTS : [playerCount];
     const totalGames = gameCount * playerCounts.length;
     let completed = 0;
+    let lastYieldAt = performance.now();
 
     runLoop: for (const pc of playerCounts) {
       const randomPool = centerEffect === "random" ? randomCenterEffectPool(pc) : null;
@@ -394,7 +427,7 @@ function Playtest() {
         tallyOneGame(working, finalState);
         completed++;
 
-        if (completed % BATCH_SIZE === 0 || completed === totalGames) {
+        if (completed === totalGames || performance.now() - lastYieldAt >= YIELD_INTERVAL_MS) {
           setProgress(completed);
           setStats({ ...working });
           saveStats(working);
@@ -403,11 +436,13 @@ function Playtest() {
           // -- redundant with the per-action yield above when watchLive is on, but
           // still needed for the fast (non-watching) path.
           if (!watchLive) await new Promise((resolve) => setTimeout(resolve, 0));
+          lastYieldAt = performance.now();
         }
       }
     }
 
     setRunning(false);
+    runInProgressRef.current = false;
   }
 
   function handleRunClick() {
@@ -449,38 +484,61 @@ function Playtest() {
   const totalGamesConfigured = gameCount * (runAllPlayerCounts ? ALL_PLAYER_COUNTS.length : 1);
 
   // Heatmap data -- every available player count's own StatsBucket, summarized and
-  // indexed by cardId, plus a row order independent of the flat table's own sort (the
-  // heatmap's whole point is comparing across player counts, so its rows shouldn't
-  // shuffle just because you sorted the flat table by a different column) -- default
-  // bucket-then-name, or plain alphabetical via the heatmap table's own "Card" header
-  // (see HeatmapSortKey/toggleHeatmapSort), independently of either the flat table's
-  // sort or which heat metric is currently selected.
+  // indexed by cardId. The row order is independent of the flat table's own sort (the
+  // heatmap's whole point is comparing across columns, so its rows shouldn't shuffle
+  // just because you sorted the flat table by a different column) -- default
+  // bucket-then-name, plain alphabetical, or sorted by one specific column's value for
+  // the current heat metric, all via the heatmap table's own column headers (see
+  // HeatmapSortKey/toggleHeatmapSort), independently of the flat table's sort.
   const availablePlayerCounts = Object.keys(stats.byPlayerCount)
     .map(Number)
     .sort((a, b) => a - b);
-  const heatmapRows = [...rows].sort((a, b) =>
-    heatmapSortKey === "name" ? heatmapSortDir * CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name) : heatmapSortDir * byBucketThenName(a, b)
-  );
   const heatmapLookup = new Map<number, Map<CardId, CardStatsRow>>(
     availablePlayerCounts.map((pc) => [pc, new Map(statsSummary(stats.byPlayerCount[pc] as StatsBucket).map((r) => [r.cardId, r]))])
   );
+
+  // The interactive heatmap table's own columns -- either the same per-player-count
+  // slices as above, or a per-location ("center effect") slice, toggled by
+  // heatmapDimension. Both are just StatsBucket, so this reuses statsSummary the same
+  // way; the column key is a string either way (a stringified player count, or a
+  // CenterEffectId) so one set of rank/size maps below covers both dimensions. Location
+  // columns are ordered the same way the catalog's Locations sidebar is (see
+  // LOCATION_COMPLEXITY_ORDER), not insertion/tally order.
+  const availableCenterEffects = LOCATION_COMPLEXITY_ORDER.filter((id) => (stats.byCenterEffect[id]?.overall.gamesTallied ?? 0) > 0);
+  const heatmapColumns: { key: string; label: string; title: string }[] =
+    heatmapDimension === "playerCount"
+      ? availablePlayerCounts.map((pc) => ({ key: String(pc), label: `${pc}p`, title: `${pc} players` }))
+      : availableCenterEffects.map((id) => ({ key: id, label: CENTER_EFFECTS[id].label, title: CENTER_EFFECTS[id].label }));
+  const heatmapColumnLookup = new Map<string, Map<CardId, CardStatsRow>>(
+    heatmapDimension === "playerCount"
+      ? [...heatmapLookup.entries()].map(([pc, lookup]) => [String(pc), lookup])
+      : availableCenterEffects.map((id) => [id, new Map(statsSummary(stats.byCenterEffect[id]).map((r) => [r.cardId, r]))])
+  );
+  const heatmapColumnKeys = new Set(heatmapColumns.map((c) => c.key));
+  const heatmapRows = [...rows].sort((a, b) => {
+    if (heatmapSortKey !== "bucket" && heatmapSortKey !== "name" && heatmapColumnKeys.has(heatmapSortKey)) {
+      const colLookup = heatmapColumnLookup.get(heatmapSortKey);
+      return compareNullable(heatMetricValue(colLookup?.get(a.cardId), heatMetric), heatMetricValue(colLookup?.get(b.cardId), heatMetric), heatmapSortDir);
+    }
+    return heatmapSortKey === "name" ? heatmapSortDir * CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name) : heatmapSortDir * byBucketThenName(a, b);
+  });
   const heatPolarity = heatMetricPolarity(heatMetric);
-  // Rank (1 = lowest value) of every card within its own player-count column, for the
-  // selected metric -- see heatColorByRank's doc comment for why coloring is relative
-  // to the column, not one shared scale across every player count.
-  const heatRanksByColumn = new Map<number, Map<CardId, number>>();
-  const heatColumnSizes = new Map<number, number>();
-  for (const pc of availablePlayerCounts) {
-    const colLookup = heatmapLookup.get(pc)!;
+  // Rank (1 = lowest value) of every card within its own column, for the selected
+  // metric -- see heatColorByRank's doc comment for why coloring is relative to the
+  // column, not one shared scale across every column.
+  const heatRanksByColumn = new Map<string, Map<CardId, number>>();
+  const heatColumnSizes = new Map<string, number>();
+  for (const column of heatmapColumns) {
+    const colLookup = heatmapColumnLookup.get(column.key)!;
     const ranked = heatmapRows
       .map((row) => ({ cardId: row.cardId, value: heatMetricValue(colLookup.get(row.cardId), heatMetric) }))
       .filter((e): e is { cardId: CardId; value: number } => e.value !== null)
       .sort((a, b) => a.value - b.value);
     heatRanksByColumn.set(
-      pc,
+      column.key,
       new Map(ranked.map((e, i) => [e.cardId, i + 1]))
     );
-    heatColumnSizes.set(pc, ranked.length);
+    heatColumnSizes.set(column.key, ranked.length);
   }
 
   /** The top button -- everything on the page, regardless of which view is active. */
@@ -500,9 +558,9 @@ function Playtest() {
     });
   }
 
-  function onSelfGameEnded(cards: ResolvedCard[], scores: Record<string, number>, roundsPlayed: number) {
+  function onSelfGameEnded(cards: ResolvedCard[], scores: Record<string, number>, roundsPlayed: number, resolvedCenterEffect: CenterEffectId) {
     const working = loadStats();
-    tallyGame(working, cards, scores, playerCount, roundsPlayed);
+    tallyGame(working, cards, scores, playerCount, roundsPlayed, resolvedCenterEffect);
     saveStats(working);
     setStats(working);
     setSelfPlayedCount((n) => n + 1);
@@ -513,7 +571,7 @@ function Playtest() {
       <header className="flex w-full max-w-4xl flex-col gap-2">
         <div className="flex w-full items-center justify-between gap-2">
           <h1 className="text-lg font-semibold sm:text-xl">
-            Board Game <span className="font-normal text-zinc-500">— playtest stats</span>
+            Court of the Kingslayer <span className="font-normal text-zinc-500">— playtest stats</span>
           </h1>
           <ThemeToggle />
         </div>
@@ -877,23 +935,41 @@ function Playtest() {
               values={availablePlayerCounts.map((pc) => averageCardValueAt(heatmapLookup.get(pc)))}
             />
           )}
-          <label htmlFor="pt-heat-metric" className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
-            Color by
-            <select
-              id="pt-heat-metric"
-              value={heatMetric}
-              onChange={(e) => setHeatMetric(e.target.value as HeatMetric)}
-              className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700"
-            >
-              {(Object.keys(HEAT_METRIC_LABELS) as HeatMetric[]).map((m) => (
-                <option key={m} value={m}>
-                  {HEAT_METRIC_LABELS[m]}
-                </option>
-              ))}
-            </select>
-          </label>
-          {availablePlayerCounts.length === 0 ? (
-            <p className="text-sm text-zinc-500">Run a simulation to see the heatmap.</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <label htmlFor="pt-heat-metric" className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+              Color by
+              <select
+                id="pt-heat-metric"
+                value={heatMetric}
+                onChange={(e) => setHeatMetric(e.target.value as HeatMetric)}
+                className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700"
+              >
+                {(Object.keys(HEAT_METRIC_LABELS) as HeatMetric[]).map((m) => (
+                  <option key={m} value={m}>
+                    {HEAT_METRIC_LABELS[m]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex self-start overflow-hidden rounded-full border border-zinc-300 text-xs dark:border-zinc-700">
+              <button
+                onClick={() => setHeatmapDimension("playerCount")}
+                className={`px-3 py-1 whitespace-nowrap ${heatmapDimension === "playerCount" ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-black" : "hover:bg-zinc-100 dark:hover:bg-zinc-900"}`}
+              >
+                By player count
+              </button>
+              <button
+                onClick={() => setHeatmapDimension("location")}
+                className={`px-3 py-1 whitespace-nowrap ${heatmapDimension === "location" ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-black" : "hover:bg-zinc-100 dark:hover:bg-zinc-900"}`}
+              >
+                By location
+              </button>
+            </div>
+          </div>
+          {heatmapColumns.length === 0 ? (
+            <p className="text-sm text-zinc-500">
+              {heatmapDimension === "playerCount" ? "Run a simulation to see the heatmap." : "Run a simulation (any location, including \"Random\") to see the heatmap."}
+            </p>
           ) : (
             <div className="w-full overflow-x-auto rounded-lg border border-zinc-300 dark:border-zinc-700">
               <table className="w-full text-left text-sm">
@@ -907,10 +983,17 @@ function Playtest() {
                       onClick={toggleHeatmapSort}
                       title="Sort alphabetically -- click again to reverse. Doesn't affect the flat table's own sort."
                     />
-                    {availablePlayerCounts.map((pc) => (
-                      <th key={pc} className="px-3 py-2 text-right">
-                        {pc}p
-                      </th>
+                    {heatmapColumns.map((column) => (
+                      <SortableHeader
+                        key={column.key}
+                        label={column.label}
+                        sortKey={column.key}
+                        activeKey={heatmapSortKey}
+                        dir={heatmapSortDir}
+                        onClick={toggleHeatmapSort}
+                        align="right"
+                        title={`${column.title} -- click to sort by this column's value for the current heat metric, click again to reverse.`}
+                      />
                     ))}
                   </tr>
                 </thead>
@@ -918,16 +1001,20 @@ function Playtest() {
                   {heatmapRows.map((row) => (
                     <tr key={row.cardId} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
                       <td className="px-3 py-1.5 font-medium whitespace-nowrap">{CARD_DEFS[row.cardId].name}</td>
-                      {availablePlayerCounts.map((pc) => {
-                        const cellRow = heatmapLookup.get(pc)?.get(row.cardId);
-                        const rank = heatRanksByColumn.get(pc)?.get(row.cardId);
-                        const columnSize = heatColumnSizes.get(pc) ?? 0;
+                      {heatmapColumns.map((column) => {
+                        const cellRow = heatmapColumnLookup.get(column.key)?.get(row.cardId);
+                        const rank = heatRanksByColumn.get(column.key)?.get(row.cardId);
+                        const columnSize = heatColumnSizes.get(column.key) ?? 0;
                         return (
                           <td
-                            key={pc}
+                            key={column.key}
                             className="px-3 py-1.5 text-right"
                             style={rank === undefined ? undefined : { backgroundColor: heatColorByRank(rank, columnSize, heatPolarity) }}
-                            title={cellRow && rank !== undefined ? `${pc}p: rank ${rank}/${columnSize}, ${cellRow.played} placements` : `${pc}p: never played`}
+                            title={
+                              cellRow && rank !== undefined
+                                ? `${column.label}: rank ${rank}/${columnSize}, ${cellRow.played} placements`
+                                : `${column.label}: never played`
+                            }
                           >
                             {heatMetricFormat(cellRow, heatMetric)}
                           </td>

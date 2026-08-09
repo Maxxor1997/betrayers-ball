@@ -125,7 +125,7 @@ export function pseudoCardLiveValue(id: CenterEffectId, board: Board, bounds: Bo
 
 export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
   none: {
-    label: "None",
+    label: "World-Tree",
     description: "No special rule this game.",
     selectable: false,
   },
@@ -244,6 +244,9 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
 
   kingslayer: {
     label: "Kingslayer's Court",
+    // The board tile itself just says "Kingslayer" -- "Kingslayer's Court" is the
+    // location's full name (catalog, New Game picker), too long to sit on the tile.
+    ownerlessLabel: "Kingslayer",
     description: `Kingslayer counts as a card worth ${PSEUDO_CARD_BASE_VALUE} (modified by adjacent buffs/dents, same as the center). After scoring, its value is subtracted from the highest-value face-up card(s) on the board -- ties still all get hit.`,
     postResolution: ({ board, bounds, negated, cards, totalsByOwner }) => {
       const faceUpCards = cards.filter((c) => c.faceUp);

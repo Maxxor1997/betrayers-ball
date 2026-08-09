@@ -76,6 +76,14 @@ export interface PlaytestStats extends StatsBucket {
    * card scored exactly 0" by checking for the key's presence.
    */
   byPlayerCount: Record<number, StatsBucket>;
+  /**
+   * The same tally, split out per center effect ("location") -- same shape and same
+   * "missing key means never tallied" convention as byPlayerCount, just sliced along
+   * the other axis. Populated from whatever mix of locations the tallied games
+   * actually used (a fixed location every run, or "random" cycling through the pool),
+   * not from a dedicated "run every location" toggle.
+   */
+  byCenterEffect: Record<CenterEffectId, StatsBucket>;
 }
 
 export function createEmptyBucket(): StatsBucket {
@@ -98,7 +106,7 @@ export function createEmptyBucket(): StatsBucket {
 }
 
 export function createEmptyStats(): PlaytestStats {
-  return { ...createEmptyBucket(), byPlayerCount: {} };
+  return { ...createEmptyBucket(), byPlayerCount: {}, byCenterEffect: {} as Record<CenterEffectId, StatsBucket> };
 }
 
 /**
@@ -201,25 +209,31 @@ function tallyIntoBucket(
 
 /**
  * Folds one completed game's resolved board into the running stats table, in place --
- * both the all-games total and the matching per-player-count slice (see
- * PlaytestStats.byPlayerCount). `playerCount` (the game's, not necessarily the UI's
+ * the all-games total, the matching per-player-count slice (see
+ * PlaytestStats.byPlayerCount), and the matching per-center-effect slice (see
+ * PlaytestStats.byCenterEffect). `playerCount` (the game's, not necessarily the UI's
  * *current* config -- stats accumulate across runs that may have used different
  * settings) determines how many copies of every card existed in that game's deck, for
  * the copiesInDeck tally every card gets regardless of whether it was actually
  * drawn/placed this game. `roundsPlayed` is the round the game ended on
  * (GameState.round at "ended" -- the engine never increments it past the last round
- * actually played, see game.ts's advanceTurn).
+ * actually played, see game.ts's advanceTurn). `centerEffect` defaults to "none" so
+ * every existing caller/test that doesn't care about the location breakdown doesn't
+ * need updating.
  */
 export function tallyGame(
   stats: PlaytestStats,
   resolvedCards: ResolvedCard[],
   scores: Record<string, number>,
   playerCount: number,
-  roundsPlayed: number
+  roundsPlayed: number,
+  centerEffect: CenterEffectId = "none"
 ): void {
   tallyIntoBucket(stats, resolvedCards, scores, playerCount, roundsPlayed);
   if (!stats.byPlayerCount[playerCount]) stats.byPlayerCount[playerCount] = createEmptyBucket();
   tallyIntoBucket(stats.byPlayerCount[playerCount], resolvedCards, scores, playerCount, roundsPlayed);
+  if (!stats.byCenterEffect[centerEffect]) stats.byCenterEffect[centerEffect] = createEmptyBucket();
+  tallyIntoBucket(stats.byCenterEffect[centerEffect], resolvedCards, scores, playerCount, roundsPlayed);
 }
 
 export interface CardStatsRow {

@@ -86,7 +86,7 @@ function buildBoardStateMarkdown(state: GameState, endResult: ResolutionResult |
   const revealAll = state.phase === "ended";
   const lines: string[] = [];
 
-  lines.push("# Board Game State", "");
+  lines.push("# Court of the Kingslayer State", "");
   lines.push(`- **Round:** ${state.round} / ${state.config.roundCap}`);
   lines.push(`- **Phase:** ${state.phase}`);
   lines.push(`- **Players:** ${state.config.playerCount}`);
@@ -407,9 +407,7 @@ function Game() {
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">
       <header className="flex w-full max-w-4xl flex-col gap-2">
         <div className="flex w-full items-center justify-between gap-2">
-          <h1 className="text-lg font-semibold sm:text-xl">
-            Board Game<span className="hidden sm:inline"> — {CENTER_EFFECTS[state.config.centerEffect].label}</span>
-          </h1>
+          <h1 className="text-lg font-semibold sm:text-xl">{CENTER_EFFECTS[state.config.centerEffect].label}</h1>
           <ThemeToggle />
         </div>
         <div className="flex w-full flex-wrap items-center gap-1.5">

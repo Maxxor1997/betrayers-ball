@@ -106,8 +106,10 @@ export function InstructionsModal({ onClose }: { onClose: () => void }) {
               <MiniBoard />
               <p className="max-w-xs text-zinc-600 dark:text-zinc-400">
                 Faint green cells are empty and legal to place on right now — they're not cards, just open targets. A
-                placement must be orthogonally adjacent to an existing card or the center tile — nothing goes on the
-                center itself, but it always counts as a neighbor.
+                placement must be orthogonally adjacent to an existing card or the center tile — same row or column,
+                one cell over, never diagonal — nothing goes on the center itself, but it always counts as a
+                neighbor. Every card effect that reads "neighbor" or "adjacent" means the same thing: row/column
+                only.
               </p>
             </div>
           </section>

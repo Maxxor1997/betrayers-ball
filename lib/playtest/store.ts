@@ -1,4 +1,4 @@
-import { CardId } from "@/lib/engine/types";
+import { CardId, CenterEffectId } from "@/lib/engine/types";
 import { createEmptyBucket, createEmptyStats, placementBaseline, PlaytestStats, StatsBucket } from "./cardStats";
 
 /**
@@ -47,7 +47,7 @@ function mergeBucket(parsed: unknown, playerCount?: number): StatsBucket {
 }
 
 function mergeStats(parsed: unknown): PlaytestStats {
-  const stats: PlaytestStats = { ...createEmptyBucket(), byPlayerCount: {} };
+  const stats: PlaytestStats = { ...createEmptyBucket(), byPlayerCount: {}, byCenterEffect: {} as Record<CenterEffectId, StatsBucket> };
   if (!parsed || typeof parsed !== "object") return stats;
 
   const hasTopShape = "cards" in parsed && "overall" in parsed;
@@ -55,12 +55,21 @@ function mergeStats(parsed: unknown): PlaytestStats {
 
   // Per-player-count slices first -- each one's own known player count is what makes
   // an exact placementDeltaSum reconstruction possible (see mergeBucket).
-  const p = parsed as { byPlayerCount?: unknown };
+  const p = parsed as { byPlayerCount?: unknown; byCenterEffect?: unknown };
   if (p.byPlayerCount && typeof p.byPlayerCount === "object") {
     for (const [key, value] of Object.entries(p.byPlayerCount as Record<string, unknown>)) {
       const playerCount = Number(key);
       if (!Number.isFinite(playerCount)) continue;
       stats.byPlayerCount[playerCount] = mergeBucket(value, playerCount);
+    }
+  }
+
+  // Per-center-effect slices span whatever mix of player counts that location was
+  // played at, so unlike byPlayerCount there's no single baseline to exactly
+  // reconstruct a missing placementDeltaSum from -- just merge field-by-field.
+  if (p.byCenterEffect && typeof p.byCenterEffect === "object") {
+    for (const [key, value] of Object.entries(p.byCenterEffect as Record<string, unknown>)) {
+      stats.byCenterEffect[key as CenterEffectId] = mergeBucket(value);
     }
   }
 

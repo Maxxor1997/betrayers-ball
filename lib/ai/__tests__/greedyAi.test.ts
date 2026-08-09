@@ -516,43 +516,47 @@ describe("chooseGreedyAiAction — placement heuristics correct for what a one-p
   });
 
   it("values Dying God at the expected end-of-game round instead of the current (early) round -- Chronicler's mirror", () => {
-    // Naive (round-1) values: Dying God = base(10)-1=9, Giant = flat base 6 (no
-    // heuristic of its own) -- Dying God wins on its inflated early snapshot. The
-    // same expected-final-round correction that tops Chronicler up docks Dying God
-    // down instead: 10 - expectedFinalRound(4.5) = 5.5, which now loses to Giant.
+    // Naive (round-1) values: Dying God = base(10)-1=9. Pretender's only possible
+    // neighbor on an empty board is the ownerless center, which getAdjacentCards
+    // excludes (it's not a real CardInstance), so its own -4 never fires and it's
+    // effectively a flat base = 7 -- Dying God wins on its inflated early snapshot.
+    // The same expected-final-round correction that tops Chronicler up docks Dying God
+    // down instead: 10 - expectedFinalRound(4.5) = 5.5, which now loses to Pretender.
     const dyingGod = card("DyingGod", "p1");
-    const giant = card("Giant", "p1");
+    const pretender = card("Pretender", "p1");
     const state = makeState({
       round: 1,
       players: [
-        { id: "p1", hand: [dyingGod, giant], isAI: true },
+        { id: "p1", hand: [dyingGod, pretender], isAI: true },
         { id: "p2", hand: [], isAI: true },
       ],
     });
 
     const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
     expect(action.type).toBe("place");
-    if (action.type === "place") expect(action.instanceId).toBe(giant.instanceId);
+    if (action.type === "place") expect(action.instanceId).toBe(pretender.instanceId);
   });
 
   it("discounts Exile's early placements for the extra neighbors it'll likely gain before scoring", () => {
     // On an empty board, every legal (center-adjacent) cell already counts the center
-    // itself as one occupied neighbor, so naive Exile = base - 2; Giant is a flat,
-    // effect-free base value. Naively Exile still wins (base-2 > Giant's base) -- the
+    // itself as one occupied neighbor, so naive Exile = base - 1 = 8; Pretender's only
+    // possible neighbor there is the ownerless center, which getAdjacentCards excludes
+    // (it's not a real CardInstance), so Pretender's own -4 never fires and it's
+    // effectively a flat base = 7. Naively Exile still wins (8 > 7) -- the
     // future-neighbor discount, placed this early with 3 remaining rounds, should flip it.
     const exile = card("Exile", "p1");
-    const giant = card("Giant", "p1");
+    const pretender = card("Pretender", "p1");
     const state = makeState({
       round: 1,
       players: [
-        { id: "p1", hand: [exile, giant], isAI: true },
+        { id: "p1", hand: [exile, pretender], isAI: true },
         { id: "p2", hand: [], isAI: true },
       ],
     });
 
     const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
     expect(action.type).toBe("place");
-    if (action.type === "place") expect(action.instanceId).toBe(giant.instanceId);
+    if (action.type === "place") expect(action.instanceId).toBe(pretender.instanceId);
   });
 
   it("values Commander more highly when the player still has a Footman in hand to set up next to it", () => {

@@ -27,10 +27,10 @@ function pickBest<T>(options: T[], score: (option: T) => number, rng: Rng): T {
 /**
  * Baseline chance of flipping an opponent's card speculatively, when no own-card flip
  * is worth it -- see the note in chooseFlip on why this can't be value-ranked. Still
- * high, not 50/50: only Gloryseeker clearly wants to stay hidden for its owner (+3
+ * high, not 50/50: only Gloryseeker clearly wants to stay hidden for its owner (+4
  * face-up), and it's a small slice of the deck, so a blind flip is still usually a
  * free look. But it's not *zero* risk either -- flipping a hidden card that happens to
- * be an opponent's Gloryseeker hands them a free +3, so this is nudged down a bit
+ * be an opponent's Gloryseeker hands them a free +4, so this is nudged down a bit
  * from a flat "always grab the free look" to reflect that real downside instead of
  * ignoring it entirely.
  */
@@ -382,12 +382,12 @@ function placementHeuristicAdjustment(
   const cardSpecificAdjustment = ((): number => {
     switch (placedCard.cardId) {
       case "Exile": {
-        // -2/neighbor is scored off however many neighbors it has *right now* -- but the
+        // -1/neighbor is scored off however many neighbors it has *right now* -- but the
         // board keeps filling in on later turns, so the earlier this is placed, the more
         // its real final penalty is being underestimated.
         const emptyAdjacent = countEmptyAdjacentCells(postState.board, postState.config.boardBounds, action.position);
         const expectedNewNeighbors = Math.min(emptyAdjacent, roundsRemaining * EXILE_NEIGHBOR_FILL_RATE_PER_ROUND);
-        return -2 * expectedNewNeighbors;
+        return -1 * expectedNewNeighbors;
       }
 
       case "Commander": {
@@ -399,7 +399,7 @@ function placementHeuristicAdjustment(
       }
 
       case "Gloryseeker": {
-        // +3 only if face-up at scoring -- placed face-down (the common case), the fair
+        // +4 only if face-up at scoring -- placed face-down (the common case), the fair
         // margin sees none of that yet. The earlier it's placed (once flips are actually
         // unlocked) and the more opponents there are, the more opponent-turns remain
         // for one of them to plausibly flip it before the game ends.
@@ -407,7 +407,7 @@ function placementHeuristicAdjustment(
         const roundsWithFlipAvailable = Math.max(0, expectedFinalRound(postState.config) - Math.max(preState.round, postState.config.flipUnlockRound));
         const opponentCount = postState.players.length - 1;
         const flipChance = glorySeekerFlipChance(roundsWithFlipAvailable, opponentCount);
-        return 3 * flipChance;
+        return 4 * flipChance;
       }
 
       case "Infiltrator": {

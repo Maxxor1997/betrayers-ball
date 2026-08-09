@@ -1,4 +1,4 @@
-import { countAdjacentOccupied, getAdjacentCards, parsePosKey, posKey } from "@/lib/engine/board";
+import { adjacentPositions, countAdjacentOccupied, getAdjacentCards, isOwnerlessPosition, parsePosKey, posKey } from "@/lib/engine/board";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { Board, BoardBounds, CardBucket, CardId, CardInstance, Position } from "@/lib/engine/types";
 
@@ -108,20 +108,32 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       if (ownedInRow >= 3 || ownedInColumn >= 3) addDelta(self.instanceId, 1, `${CARD_DEFS.Footman.name} (3+ owned in row/column)`);
     },
   },
-  Giant: {
-    id: "Giant",
-    name: "Cyclops",
-    disabled: true,
-    base: 6,
+  DyingGod: {
+    id: "DyingGod",
+    name: "Dying God",
+    base: 10,
     bucket: "Slam",
-    text: "Always face-up",
-    fullText: "Always face-up — can't be played or stay face-down.",
-    // 6p-8p bumped up from the flat 4 (and every other active card scaled the same
-    // way) -- at handSize 8, 6p-8p games were drawing 76-100% of the deck straight
-    // into hands, leaving almost no unseen pool. Scaled proportionally so each card's
-    // relative weight in the deck is unchanged, just the deck itself is bigger.
-    count: [2, 2, 2, 2, 4, 4, 4],
-    forceFaceUp: true,
+    text: "−1 per round elapsed",
+    fullText: "−1 for every round elapsed when the game ends.",
+    count: [4, 4, 4, 4, 5, 6, 8],
+    valueModifier: ({ round, self, addDelta }) => {
+      if (round > 0) addDelta(self.instanceId, -round, `${CARD_DEFS.DyingGod.name} (round ${round} elapsed)`);
+    },
+  },
+  Exile: {
+    id: "Exile",
+    name: "Giant Bear",
+    base: 9,
+    bucket: "Slam",
+    text: "−1 per neighbor, −2 if boxed in",
+    fullText: "−1 per neighbor (any owner). If it has no open adjacent tile left to place on, an additional flat −2.",
+    count: [4, 4, 4, 4, 5, 6, 8],
+    valueModifier: ({ board, bounds, pos, self, addDelta }) => {
+      const neighbors = countAdjacentOccupied(board, bounds, pos);
+      if (neighbors > 0) addDelta(self.instanceId, -1 * neighbors, `${CARD_DEFS.Exile.name} (${neighbors} neighbor${neighbors > 1 ? "s" : ""})`);
+      const hasOpenAdjacent = adjacentPositions(pos, bounds).some((p) => !isOwnerlessPosition(p, bounds) && !board.has(posKey(p)));
+      if (!hasOpenAdjacent) addDelta(self.instanceId, -2, `${CARD_DEFS.Exile.name} (no open adjacent tile)`);
+    },
   },
   Warlord: {
     id: "Warlord",
@@ -149,19 +161,6 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       }
     },
   },
-  Exile: {
-    id: "Exile",
-    name: "Giant Bear",
-    base: 10,
-    bucket: "Slam",
-    text: "−2 per neighbor",
-    fullText: "−2 per neighbor (any owner).",
-    count: [4, 4, 4, 4, 5, 6, 8],
-    valueModifier: ({ board, bounds, pos, self, addDelta }) => {
-      const neighbors = countAdjacentOccupied(board, bounds, pos);
-      if (neighbors > 0) addDelta(self.instanceId, -2 * neighbors, `${CARD_DEFS.Exile.name} (${neighbors} neighbor${neighbors > 1 ? "s" : ""})`);
-    },
-  },
   Pretender: {
     id: "Pretender",
     name: "Usurper",
@@ -178,7 +177,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   },
   Berserker: {
     id: "Berserker",
-    name: "Hydra",
+    name: "Heaving Hydra",
     base: 2,
     bucket: "Engine",
     get text() {
@@ -223,14 +222,14 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Gloryseeker: {
     id: "Gloryseeker",
     name: "Pyre-Bird",
-    base: 4,
+    base: 3,
     bucket: "Engine",
-    text: "+3 if face-up, only opp. can flip it",
-    fullText: "+3 if this card is face-up at scoring. Its own owner can't flip it -- only an opponent can.",
+    text: "+4 if face-up, only opp. can flip it",
+    fullText: "+4 if this card is face-up at scoring. Its own owner can't flip it -- only an opponent can.",
     count: [4, 4, 4, 4, 5, 6, 8],
     opponentOnlyFlip: true,
     valueModifier: ({ self, addDelta }) => {
-      if (self.faceUp) addDelta(self.instanceId, 3, `${CARD_DEFS.Gloryseeker.name} (face-up)`);
+      if (self.faceUp) addDelta(self.instanceId, 4, `${CARD_DEFS.Gloryseeker.name} (face-up)`);
     },
   },
   Chronicler: {
@@ -246,16 +245,22 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       if (round > 0) addDelta(self.instanceId, round, `${CARD_DEFS.Chronicler.name} (round ${round} elapsed)`);
     },
   },
-  DyingGod: {
-    id: "DyingGod",
-    name: "Dying God",
-    base: 10,
+  Giant: {
+    id: "Giant",
+    name: "Cyclops",
+    base: 6,
     bucket: "Slam",
-    text: "−1 per round elapsed",
-    fullText: "−1 for every round elapsed when the game ends.",
-    count: [4, 4, 4, 4, 5, 6, 8],
-    valueModifier: ({ round, self, addDelta }) => {
-      if (round > 0) addDelta(self.instanceId, -round, `${CARD_DEFS.DyingGod.name} (round ${round} elapsed)`);
+    text: "Always face-up. −3 if not on the edge",
+    fullText: "Always face-up — can't be played or stay face-down. −3 if it isn't placed on the edge of the board.",
+    // 6p-8p bumped up from the flat 4 (and every other active card scaled the same
+    // way) -- at handSize 8, 6p-8p games were drawing 76-100% of the deck straight
+    // into hands, leaving almost no unseen pool. Scaled proportionally so each card's
+    // relative weight in the deck is unchanged, just the deck itself is bigger.
+    count: [2, 2, 4, 4, 6, 6, 8],
+    forceFaceUp: true,
+    valueModifier: ({ bounds, pos, self, addDelta }) => {
+      const onEdge = pos.x === 0 || pos.x === bounds.width - 1 || pos.y === 0 || pos.y === bounds.height - 1;
+      if (!onEdge) addDelta(self.instanceId, -3, `${CARD_DEFS.Giant.name} (not on the edge)`);
     },
   },
   Earthshaker: {

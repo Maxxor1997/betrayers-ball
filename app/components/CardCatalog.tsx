@@ -47,8 +47,8 @@ export function FixedTooltip({ rect, children }: { rect: DOMRect; children: Reac
 
 const BUCKET_ORDER: CardBucket[] = ["Slam", "Engine", "Control"];
 
-/** Locations sidebar order, simplest rule to understand first -- not alphabetical or insertion order. */
-const LOCATION_COMPLEXITY_ORDER: CenterEffectId[] = [
+/** Locations sidebar order, simplest rule to understand first -- not alphabetical or insertion order. Exported so other location listings (e.g. the playtest heatmap's "by location" columns) can match it. */
+export const LOCATION_COMPLEXITY_ORDER: CenterEffectId[] = [
   "none",
   "twoTowers",
   "threeHeadedDragon",
@@ -180,10 +180,14 @@ export function CardCatalog({
           // (as opposed to merely 0 copies at *this* player count, which still shows
           // as "x0 in deck" below) isn't currently in the game at all, so it's hidden
           // outright rather than just grayed out.
-          const ids = ALL_CARD_IDS.filter((id) => id !== "Unknown" && !CARD_DEFS[id].disabled && CARD_DEFS[id].bucket === bucket).sort((a, b) => {
-            const countDiff = copiesForPlayerCount(CARD_DEFS[b], playerCount) - copiesForPlayerCount(CARD_DEFS[a], playerCount);
-            return countDiff !== 0 ? countDiff : CARD_DEFS[a].name.localeCompare(CARD_DEFS[b].name);
-          });
+          // Sorted by deck copy count at this player count, descending -- ties (including
+          // every card if none has a valueModifier-driven count spread) fall back to
+          // Array.prototype.sort's guaranteed stability, which preserves ALL_CARD_IDS'
+          // order, i.e. CARD_DEFS' own declaration order in cards.ts. So reordering two
+          // same-count cards in the catalog is just reordering their entries there.
+          const ids = ALL_CARD_IDS.filter((id) => id !== "Unknown" && !CARD_DEFS[id].disabled && CARD_DEFS[id].bucket === bucket).sort(
+            (a, b) => copiesForPlayerCount(CARD_DEFS[b], playerCount) - copiesForPlayerCount(CARD_DEFS[a], playerCount)
+          );
           const bucketCollapsed = collapsedBuckets.has(bucket);
           return (
             <div key={bucket}>

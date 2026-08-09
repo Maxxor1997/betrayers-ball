@@ -93,10 +93,10 @@ describe("ownValueFor", () => {
     place(board, 0, 0, "Bannerman", "p1"); // +1 external, doesn't offset Exile's own neighbor penalty
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolved = cards.find((c) => c.instanceId === banner.instanceId)!;
-    // Exile: base - 2*neighbors(1) = base - 2, plus Bannerman's external +1 -> real final.
-    expect(resolved.finalValue).toBe(CARD_DEFS.Exile.base - 2 + 1);
-    // Own value ignores the external +1 entirely: base - 2, floored at 0 only if negative.
-    expect(ownValueFor(resolved)).toBe(Math.max(0, CARD_DEFS.Exile.base - 2));
+    // Exile: base - 1*neighbors(1) = base - 1, plus Bannerman's external +1 -> real final.
+    expect(resolved.finalValue).toBe(CARD_DEFS.Exile.base - 1 + 1);
+    // Own value ignores the external +1 entirely: base - 1, floored at 0 only if negative.
+    expect(ownValueFor(resolved)).toBe(Math.max(0, CARD_DEFS.Exile.base - 1));
   });
 });
 

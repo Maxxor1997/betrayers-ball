@@ -159,8 +159,8 @@ describe("resolveBoard — scoring breakdown", () => {
     place(board, 0, 0, "Footman", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3, "kingslayer");
     const resolved = find(cards, big.instanceId);
-    // base - 2 (1 neighbor) - the Kingslayer pseudo-card's value
-    const expected = CARD_DEFS.Exile.base - 2 - PSEUDO_CARD_BASE_VALUE;
+    // base - 1 (1 neighbor, open adjacent tile still left) - the Kingslayer pseudo-card's value
+    const expected = CARD_DEFS.Exile.base - 1 - PSEUDO_CARD_BASE_VALUE;
     expect(resolved.finalValue).toBe(expected);
     const last = resolved.breakdown[resolved.breakdown.length - 1];
     expect(last.label).toBe("Kingslayer (highest face-up value)");
@@ -169,21 +169,31 @@ describe("resolveBoard — scoring breakdown", () => {
 });
 
 describe("resolveBoard — Exile", () => {
-  it("loses -2 per neighbor including the center", () => {
+  it("loses -1 per neighbor including the center", () => {
     const board: Board = new Map();
-    // adjacent to center (4,4) -> at (4,3)
+    // adjacent to center (4,4) -> at (4,3), with 2 other open adjacent tiles left
     const e = place(board, 4, 3, "Exile", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, e.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - 2); // 1 neighbor (center)
+    expect(find(cards, e.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - 1); // 1 neighbor (center)
   });
 
-  it("realistic ceiling is 7, never full 9, because placement forces >=1 neighbor", () => {
+  it("loses an additional flat -2 once it has no open adjacent tile left", () => {
+    const board: Board = new Map();
+    const e = place(board, 0, 0, "Exile", "p1"); // corner -- only 2 possible neighbors
+    place(board, 1, 0, "Footman", "p2");
+    place(board, 0, 1, "Footman", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    // -1 per neighbor (2) plus the flat -2 for having no open adjacent tile left.
+    expect(find(cards, e.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - 2 - 2);
+  });
+
+  it("realistic ceiling is 8, never full 9, because placement forces >=1 neighbor", () => {
     const board: Board = new Map();
     const anchor = place(board, 0, 0, "Footman", "p1");
     const e = place(board, 1, 0, "Exile", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, anchor.instanceId)).toBeDefined();
-    expect(find(cards, e.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - 2);
+    expect(find(cards, e.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - 1);
   });
 });
 
@@ -303,11 +313,11 @@ describe("resolveBoard — Beacon", () => {
 });
 
 describe("resolveBoard — Gloryseeker", () => {
-  it("gains +3 if face-up", () => {
+  it("gains +4 if face-up", () => {
     const board: Board = new Map();
     const c = place(board, 0, 0, "Gloryseeker", "p1", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, c.instanceId).finalValue).toBe(CARD_DEFS.Gloryseeker.base + 3);
+    expect(find(cards, c.instanceId).finalValue).toBe(CARD_DEFS.Gloryseeker.base + 4);
   });
 
   it("no bonus if face-down", () => {
@@ -423,9 +433,11 @@ describe("resolveBoard — Truthseeker", () => {
 describe("resolveBoard — Bannerman", () => {
   it("gives +2 to adjacent Footmen, +1 to other adjacent cards, never itself", () => {
     const board: Board = new Map();
-    const b = place(board, 1, 1, "Bannerman", "p1");
-    const footman = place(board, 0, 1, "Footman", "p2");
-    const other = place(board, 2, 1, "Giant", "p2");
+    // Placed along the board's edge (y=0) so Giant's own -3-if-not-on-the-edge effect
+    // doesn't interfere -- this test is about Bannerman, not Giant.
+    const b = place(board, 1, 0, "Bannerman", "p1");
+    const footman = place(board, 0, 0, "Footman", "p2");
+    const other = place(board, 2, 0, "Giant", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, footman.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 2);
     expect(find(cards, other.instanceId).finalValue).toBe(CARD_DEFS.Giant.base + 1);
@@ -464,8 +476,9 @@ describe("resolveBoard — Plague Bearer", () => {
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
     expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
-    expect(find(cards, g1.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 2);
-    expect(find(cards, g2.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 2);
+    // Neither Giant is on the board's edge here, so each also eats its own -3.
+    expect(find(cards, g1.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 2 - 3);
+    expect(find(cards, g2.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 2 - 3);
     expect(find(cards, pb.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base + 8);
   });
 
@@ -522,16 +535,16 @@ describe("resolveBoard — Infiltrator", () => {
 
   it("picks only the single highest-base face-up neighbor among several", () => {
     const board: Board = new Map();
-    // Warlord and Giant carry no self-modifying effect here (no other Warlords on the
-    // board), so their finalValue is just their base -- a clean comparison.
+    // Warlord carries no self-modifying effect here (no other Warlords on the board),
+    // so its finalValue is just its base -- a clean comparison.
     const inf = place(board, 1, 1, "Infiltrator", "p1", false);
     const warlord = place(board, 0, 1, "Warlord", "p2", true); // base 8, the highest
-    const giant = place(board, 2, 1, "Giant", "p2", true); // base 6
+    const giant = place(board, 2, 1, "Giant", "p2", true); // base 6, not on the edge -> also eats its own -3
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
     expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
-    // The lower-base neighbor is untouched -- only the highest is swapped with.
-    expect(find(cards, giant.instanceId).finalValue).toBe(CARD_DEFS.Giant.base);
+    // The lower-base neighbor is untouched by the swap -- only the highest is swapped with.
+    expect(find(cards, giant.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 3);
   });
 
   it("no-op when there's no neighbor to swap with", () => {
@@ -680,8 +693,10 @@ describe("resolveBoard — center effect: Mirror Pool", () => {
 
   it("gives +1 each when the mirrored cell holds a different card type", () => {
     const board: Board = new Map();
-    const a = place(board, 2, 2, "Footman", "p1");
-    const b = place(board, 2, 6, "Giant", "p2");
+    // Both on the board's edge (y=0 mirrors to y=8) so Giant's own -3-if-not-on-the-edge
+    // effect doesn't interfere -- this test is about Mirror Pool, not Giant.
+    const a = place(board, 2, 0, "Footman", "p1");
+    const b = place(board, 2, 8, "Giant", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3, "mirrorPool");
     expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
     expect(find(cards, b.instanceId).finalValue).toBe(CARD_DEFS.Giant.base + 1);
@@ -797,9 +812,9 @@ describe("resolveBoard — center effect: Kingslayer", () => {
   it("subtracts its value from the single highest-value face-up card and adjusts totals", () => {
     const board: Board = new Map();
     const small = place(board, 0, 0, "Footman", "p1", true);
-    const big = place(board, 1, 0, "Exile", "p2", true); // -2 for its 1 neighbor
+    const big = place(board, 1, 0, "Exile", "p2", true); // -1 for its 1 neighbor
     const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "kingslayer");
-    const bigExpected = CARD_DEFS.Exile.base - 2 - PSEUDO_CARD_BASE_VALUE;
+    const bigExpected = CARD_DEFS.Exile.base - 1 - PSEUDO_CARD_BASE_VALUE;
     expect(find(cards, big.instanceId).finalValue).toBe(bigExpected);
     expect(find(cards, small.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
     expect(totalsByOwner.p2).toBe(bigExpected);
@@ -853,7 +868,9 @@ describe("resolveBoard — center effect: The Summit", () => {
   it("doubles a player's single highest-valued card", () => {
     const board: Board = new Map();
     const low = place(board, 0, 0, "Footman", "p1");
-    const high = place(board, 5, 5, "Giant", "p1");
+    // On the board's edge so Giant's own -3-if-not-on-the-edge effect doesn't
+    // interfere -- this test is about The Summit, not Giant.
+    const high = place(board, 8, 5, "Giant", "p1");
     const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "summit");
     expect(find(cards, low.instanceId).finalValue).toBe(CARD_DEFS.Footman.base); // untouched
     expect(find(cards, high.instanceId).finalValue).toBe(CARD_DEFS.Giant.base * 2);
@@ -863,7 +880,7 @@ describe("resolveBoard — center effect: The Summit", () => {
   it("only doubles each player's own highest card, not a rival's", () => {
     const board: Board = new Map();
     const p1card = place(board, 0, 0, "Footman", "p1");
-    const p2card = place(board, 5, 5, "Giant", "p2"); // higher than p1's card, but a different owner
+    const p2card = place(board, 8, 5, "Giant", "p2"); // higher than p1's card, but a different owner; on the edge, see above
     const { cards } = resolveBoard(board, BOUNDS, 3, "summit");
     expect(find(cards, p1card.instanceId).finalValue).toBe(CARD_DEFS.Footman.base * 2);
     expect(find(cards, p2card.instanceId).finalValue).toBe(CARD_DEFS.Giant.base * 2);
