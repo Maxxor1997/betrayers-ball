@@ -340,6 +340,27 @@ describe("chooseGreedyAiAction — Truthseeker/Beacon-aware flip targeting", () 
     expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: targetB.instanceId });
   });
 
+  it("prefers flipping an opponent card adjacent to the AI's own high-base face-up card -- a live Infiltrator-swap threat", () => {
+    const board: Board = new Map();
+    board.set(posKey({ x: 2, y: 2 }), card("Footman", "p1", true)); // anchor -- equidistant from both targets
+    board.set(posKey({ x: 1, y: 1 }), card("Warlord", "p1", true)); // own, face-up, high base -- worth protecting
+    const targetA = card("Footman", "p2", false);
+    const targetB = card("Footman", "p2", false);
+    board.set(posKey({ x: 2, y: 1 }), targetA); // adjacent to the AI's own Warlord -- could be an Infiltrator staged to steal it
+    board.set(posKey({ x: 2, y: 3 }), targetB); // no special neighbor
+    const state = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", () => 0.01);
+    expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: targetA.instanceId });
+  });
+
   it("explores less often when holding a Truthseeker -- preserves face-down opponent targets for later", () => {
     const board: Board = new Map();
     const opponentCard = card("Footman", "p2", false);

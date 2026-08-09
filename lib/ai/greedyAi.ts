@@ -1,4 +1,5 @@
 import { adjacentPositions, getAdjacentCards, isOwnerlessPosition, parsePosKey, posKey } from "../engine/board";
+import { CARD_DEFS } from "../content/cards";
 import { computeAiVote, estimateMargin } from "../engine/endgame";
 import { redactedBoardFor } from "../engine/playerView";
 import { resolveBoard } from "../engine/resolution";
@@ -73,7 +74,7 @@ function opponentTargetPriority(board: GameState["board"], playerId: string, tar
  * estimateMargin itself is limited to. Flipping the target face-up has a real,
  * certain consequence for each such neighbor even though the target's own identity
  * stays unknown until it's flipped:
- * - An adjacent Truthseeker is currently dealing the target -2 for being face-down
+ * - An adjacent Truthseeker is currently dealing the target -3 for being face-down
  *   (see lib/content/cards.ts) -- flipping removes that, which only ever helps the
  *   target's owner (an opponent), so it's discouraged regardless of who owns the
  *   Truthseeker.
@@ -87,10 +88,33 @@ function truthseekerBeaconFlipAdjustment(board: Board, bounds: BoardBounds, play
   for (const n of getAdjacentCards(board, bounds, pos)) {
     const identityKnown = n.ownerId === playerId || n.faceUp;
     if (!identityKnown) continue;
-    if (n.cardId === "Truthseeker") adjustment -= 2;
+    if (n.cardId === "Truthseeker") adjustment -= 3;
     else if (n.cardId === "Beacon") adjustment += n.ownerId === playerId ? 1 : -1;
   }
   return adjustment;
+}
+
+/**
+ * Extra priority for a blind opponent flip target adjacent to one of the flipper's own
+ * face-up cards, scaled by that neighbor's base value. Infiltrator only swaps with a
+ * face-up neighbor now (see lib/content/cards.ts), so a face-down opponent card
+ * sitting next to a valuable face-up card of ours is a live threat -- it might BE an
+ * Infiltrator waiting to steal that value at scoring, and flipping it face-up is the
+ * counter (a face-up Infiltrator's own valueModifier bails out immediately, forfeiting
+ * the swap). The AI can't know the target's identity before flipping, so this can't be
+ * certain -- just a heuristic nudge toward defending whatever's most worth protecting,
+ * on top of opponentTargetPriority's plain adjacency signal.
+ */
+const INFILTRATOR_DEFENSE_WEIGHT_PER_BASE = 0.15;
+
+function infiltratorDefenseAdjustment(board: Board, bounds: BoardBounds, playerId: string, target: CardInstance): number {
+  const entry = [...board.entries()].find(([, c]) => c.instanceId === target.instanceId)!;
+  const pos = parsePosKey(entry[0]);
+  let atRiskValue = 0;
+  for (const n of getAdjacentCards(board, bounds, pos)) {
+    if (n.ownerId === playerId && n.faceUp) atRiskValue += CARD_DEFS[n.cardId].base;
+  }
+  return atRiskValue * INFILTRATOR_DEFENSE_WEIGHT_PER_BASE;
 }
 
 /**
@@ -144,8 +168,10 @@ const BLUFF_FLIP_PROBABILITY = 0.25;
  * this way without peeking (their true post-flip value literally requires knowing
  * their hidden identity first) -- so a flip target there, if any, is chosen instead of
  * a value-driven one, blind, weighted toward targets adjacent to the AI's own cards
- * (and any known Truthseeker/Beacon neighbor, see truthseekerBeaconFlipAdjustment),
- * at an exploration rate nudged by the AI's own hand and board (see
+ * (any known Truthseeker/Beacon neighbor, see truthseekerBeaconFlipAdjustment; extra
+ * weight for threatening a valuable face-up card of ours, see
+ * infiltratorDefenseAdjustment), at an exploration rate nudged by the AI's own hand
+ * and board (see
  * HAND_TRUTHSEEKER_EXPLORATION_DISCOUNT/HAND_BEACON_EXPLORATION_BONUS/
  * INFILTRATOR_EXPLORATION_DISCOUNT).
  */
@@ -195,7 +221,8 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
         opponentTargets,
         (target) =>
           opponentTargetPriority(state.board, playerId, target) +
-          truthseekerBeaconFlipAdjustment(state.board, state.config.boardBounds, playerId, target),
+          truthseekerBeaconFlipAdjustment(state.board, state.config.boardBounds, playerId, target) +
+          infiltratorDefenseAdjustment(state.board, state.config.boardBounds, playerId, target),
         rng
       );
       return best.instanceId;
@@ -216,7 +243,7 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
 const SPECULATIVE_CARD_IDS = new Set(["Berserker"]);
 
 /** Chance, each time the AI has a speculative card in hand, that it plays that card instead of the margin-best one. */
-const SPECULATIVE_PLAY_PROBABILITY = 0.25;
+const SPECULATIVE_PLAY_PROBABILITY = 0.15;
 
 /**
  * Rough expected round the game actually ends on. game.ts's config keeps roundCap and

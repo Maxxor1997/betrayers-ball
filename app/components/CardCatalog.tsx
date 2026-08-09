@@ -4,7 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, isAvailableAtPlayerCount } from "@/lib/content/centerEffects";
-import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
+import { SELECTABLE_LOBBY_SIZES } from "@/lib/config/players";
 import { configForPlayerCount } from "@/lib/engine/game";
 import { CardBucket, CardId, CenterEffectId } from "@/lib/engine/types";
 
@@ -146,7 +146,7 @@ export function CardCatalog({
               aria-label="Catalog player count"
               className="rounded border border-zinc-300 bg-transparent px-1 py-0.5 text-xs font-normal text-zinc-500 dark:border-zinc-700"
             >
-              {Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i).map((n) => (
+              {SELECTABLE_LOBBY_SIZES.map((n) => (
                 <option key={n} value={n}>
                   {n}p
                 </option>

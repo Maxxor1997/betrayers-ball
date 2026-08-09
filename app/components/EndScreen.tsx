@@ -117,7 +117,7 @@ function PlayerTable({
                 </td>
                 <td className="py-1 pr-2">{c.baseValue}</td>
                 <td className="py-1 pr-2 font-semibold">{c.finalValue}</td>
-                <td className="py-1 pr-2 text-zinc-500">{vote === undefined ? "—" : vote ? "end" : "continue"}</td>
+                <td className="py-1 pr-2 text-zinc-500">{vote === undefined ? "—" : vote ? "end" : "con."}</td>
               </tr>
             );
           })}

@@ -392,14 +392,14 @@ describe("resolveBoard — Skysplitter", () => {
 });
 
 describe("resolveBoard — Truthseeker", () => {
-  it("gives -2 to each face-down neighbor, any owner", () => {
+  it("gives -3 to each face-down neighbor, any owner", () => {
     const board: Board = new Map();
     const t = place(board, 1, 1, "Truthseeker", "p1");
     const hidden1 = place(board, 0, 1, "Footman", "p2", false);
     const hidden2 = place(board, 2, 1, "Footman", "p2", false);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, hidden1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
-    expect(find(cards, hidden2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+    expect(find(cards, hidden1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 3);
+    expect(find(cards, hidden2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 3);
     expect(find(cards, t.instanceId).finalValue).toBe(CARD_DEFS.Truthseeker.base);
   });
 
@@ -416,7 +416,7 @@ describe("resolveBoard — Truthseeker", () => {
     place(board, 1, 1, "Truthseeker", "p1", false);
     const hidden = place(board, 0, 1, "Footman", "p2", false);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, hidden.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+    expect(find(cards, hidden.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 3);
   });
 });
 
@@ -726,13 +726,23 @@ describe("resolveBoard — center effect: The Frontier", () => {
     expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
   });
 
-  it("only needs one enemy neighbor among several, not all of them", () => {
+  it("counts only enemy neighbors, ignoring friendly ones", () => {
     const board: Board = new Map();
     const a = place(board, 2, 2, "Footman", "p1");
     place(board, 1, 2, "Footman", "p1");
     place(board, 3, 2, "Footman", "p2"); // the one enemy neighbor
     const { cards } = resolveBoard(board, BOUNDS, 3, "frontier");
     expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
+  });
+
+  it("stacks +1 per opponent neighbor, not a flat bonus for having any", () => {
+    const board: Board = new Map();
+    const a = place(board, 2, 2, "Footman", "p1");
+    place(board, 1, 2, "Footman", "p2");
+    place(board, 3, 2, "Footman", "p2");
+    place(board, 2, 1, "Footman", "p3");
+    const { cards } = resolveBoard(board, BOUNDS, 3, "frontier");
+    expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 3);
   });
 
   it("adjacency to the ownerless center doesn't count as an opponent's card", () => {

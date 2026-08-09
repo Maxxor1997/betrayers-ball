@@ -144,12 +144,12 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
 
   frontier: {
     label: "The Frontier",
-    description: "+1 to any card adjacent to at least one opponent's card.",
+    description: "+1 to every card for each opponent's card adjacent to it.",
     valueModifiers: (board, bounds, addDelta) => {
       for (const [key, c] of board.entries()) {
         const pos = parsePosKey(key);
-        const hasEnemyNeighbor = getAdjacentCards(board, bounds, pos).some((n) => n.ownerId !== c.ownerId);
-        if (hasEnemyNeighbor) addDelta(c.instanceId, 1, "The Frontier");
+        const enemyNeighbors = getAdjacentCards(board, bounds, pos).filter((n) => n.ownerId !== c.ownerId).length;
+        if (enemyNeighbors > 0) addDelta(c.instanceId, enemyNeighbors, "The Frontier");
       }
     },
   },
