@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveBoard, ResolvedCard } from "../resolution";
 import { Board, BoardBounds, CardId, CardInstance, posKey } from "../types";
 import { CARD_DEFS } from "@/lib/content/cards";
-import { PSEUDO_CARD_BASE_VALUE } from "@/lib/content/centerEffects";
+import { CENTER_EFFECTS, PSEUDO_CARD_BASE_VALUE } from "@/lib/content/centerEffects";
 
 const BOUNDS: BoardBounds = { width: 9, height: 9, center: { x: 4, y: 4 } };
 
@@ -901,6 +901,10 @@ describe("resolveBoard — center effect: The Summit", () => {
     const { cards } = resolveBoard(board, BOUNDS, 3, "summit");
     const resolved = find(cards, only.instanceId);
     const last = resolved.breakdown[resolved.breakdown.length - 1];
-    expect(last).toEqual({ label: "The Summit (highest card, doubled)", amount: CARD_DEFS.Footman.base, source: "external" });
+    expect(last).toEqual({
+      label: `${CENTER_EFFECTS.summit.label} (highest card, doubled)`,
+      amount: CARD_DEFS.Footman.base,
+      source: "external",
+    });
   });
 });

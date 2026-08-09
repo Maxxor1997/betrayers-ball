@@ -222,9 +222,10 @@ export default function HomePage() {
   }
 
   function startSoloGame(setup: NewGameSetup) {
-    const pool = randomCenterEffectPool(setup.playerCount);
-    const centerEffect = setup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : setup.centerEffect;
-    router.push(`/play?players=${setup.playerCount}&center=${centerEffect}`);
+    // "random" passes straight through, unresolved -- /play does its own resolution
+    // (see readGameSetupFromQuery's doc comment there) so it can tell "randomly
+    // picked" apart from "deliberately fixed" for its own "Play again" rerolling.
+    router.push(`/play?players=${setup.playerCount}&center=${setup.centerEffect}`);
   }
 
   async function startHostedRoom(setup: NewGameSetup) {

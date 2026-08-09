@@ -47,6 +47,13 @@ function buildPlayerIds(playerCount: number): string[] {
  * arrives with a real choice already made. Null (missing or invalid, e.g. a direct
  * param-less visit to /play) falls back to opening the prompt here instead.
  *
+ * `center` carries "random" through as-is rather than the home screen pre-resolving
+ * it into a concrete location -- otherwise a game launched from the home screen with
+ * Random picked would have no way to tell that apart from a deliberately fixed
+ * location by the time this page loads, and its first "Play again" would just repeat
+ * whatever location got rolled instead of rerolling. `/play` itself resolves it (see
+ * the initial state below), the same way its own "New game" popup's confirm does.
+ *
  * Takes whatever useSearchParams() returns (not a raw `window.location.search` read)
  * -- that's the router's own live params, guaranteed to reflect the destination URL of
  * a client-side navigation by the time this component's first render runs. A direct
@@ -56,12 +63,17 @@ function buildPlayerIds(playerCount: number): string[] {
  * executes, so it could see the *previous* page's (param-less) URL and wrongly fall
  * back to the prompt -- a real double-setup bug, not just a theoretical one.
  */
-function readGameSetupFromQuery(params: { get(name: string): string | null }): { playerCount: number; centerEffect: CenterEffectId } | null {
+function readGameSetupFromQuery(params: { get(name: string): string | null }): { playerCount: number; centerEffect: CenterEffectId | "random" } | null {
   const playerCount = Number(params.get("players"));
-  const centerEffect = params.get("center") as CenterEffectId | null;
+  const centerEffect = params.get("center");
   if (!Number.isInteger(playerCount) || playerCount < MIN_PLAYERS || playerCount > MAX_PLAYERS) return null;
-  if (!centerEffect || !(centerEffect in CENTER_EFFECTS)) return null;
-  return { playerCount, centerEffect };
+  if (!centerEffect || (centerEffect !== "random" && !(centerEffect in CENTER_EFFECTS))) return null;
+  return { playerCount, centerEffect: centerEffect as CenterEffectId | "random" };
+}
+
+function pickRandomCenterEffect(playerCount: number): CenterEffectId {
+  const pool = randomCenterEffectPool(playerCount);
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 function newGameState(playerCount: number, centerEffect: CenterEffectId): GameState {
@@ -149,7 +161,7 @@ function buildBoardStateMarkdown(state: GameState, endResult: ResolutionResult |
 
     if (endResult.centerAward) {
       lines.push(
-        `Champion of the Weak: the center (value ${endResult.centerAward.value}) went to ${ownerDisplayName(state, endResult.centerAward.ownerId)}.`,
+        `${CENTER_EFFECTS.championOfTheWeak.label}: the center (value ${endResult.centerAward.value}) went to ${ownerDisplayName(state, endResult.centerAward.ownerId)}.`,
         ""
       );
     }
@@ -220,7 +232,12 @@ function Game() {
   const initialSetup = readGameSetupFromQuery(searchParams);
 
   const [playerCount, setPlayerCount] = useState(initialSetup?.playerCount ?? 2);
-  const [state, setState] = useState<GameState>(() => newGameState(initialSetup?.playerCount ?? 2, initialSetup?.centerEffect ?? "none"));
+  const [state, setState] = useState<GameState>(() => {
+    const playerCount = initialSetup?.playerCount ?? 2;
+    const centerEffect =
+      initialSetup?.centerEffect === "random" ? pickRandomCenterEffect(playerCount) : (initialSetup?.centerEffect ?? "none");
+    return newGameState(playerCount, centerEffect);
+  });
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [pendingFlip, setPendingFlip] = useState<PendingFlip | null>(null);
@@ -230,6 +247,15 @@ function Game() {
   // own setup popup already carries a real choice via the query params above, so there's
   // nothing left to prompt for.
   const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(initialSetup ? null : { playerCount: 4, centerEffect: "random" });
+  // Whether the most recent setup that actually started a game picked "random" rather
+  // than a fixed location -- state.config.centerEffect only ever holds the resolved
+  // concrete id (random gets rolled into a real CenterEffectId before newGameState is
+  // called), so playAgain needs this separately to know whether a rematch should
+  // reroll or reuse the same location. Seeded from the query param for a game arrived
+  // at via the home screen's link (see readGameSetupFromQuery), so even the very
+  // first game's "Play again" reroll behaves correctly, not just ones started from
+  // this page's own "New game" popup.
+  const [lastCenterEffectWasRandom, setLastCenterEffectWasRandom] = useState(initialSetup?.centerEffect === "random");
   const [showInstructions, setShowInstructions] = useState(false);
   const [showMyStats, setShowMyStats] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
@@ -370,20 +396,21 @@ function Game() {
 
   function confirmNewGame() {
     if (!newGameSetup) return;
-    const pool = randomCenterEffectPool(newGameSetup.playerCount);
     const centerEffect: CenterEffectId =
-      newGameSetup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : newGameSetup.centerEffect;
+      newGameSetup.centerEffect === "random" ? pickRandomCenterEffect(newGameSetup.playerCount) : newGameSetup.centerEffect;
     setPlayerCount(newGameSetup.playerCount);
     setState(newGameState(newGameSetup.playerCount, centerEffect));
     setSelectedInstanceId(null);
     setPendingFlip(null);
     setNewGameSetup(null);
+    setLastCenterEffectWasRandom(newGameSetup.centerEffect === "random");
     talliedRef.current = false;
   }
 
-  /** One-click rematch, same player count and center effect as the game that just ended -- no setup modal. */
+  /** One-click rematch, same player count as the game that just ended -- no setup modal. Rerolls a fresh random location if that's how the last one was picked, otherwise reuses the same fixed one. */
   function playAgain() {
-    setState(newGameState(playerCount, state.config.centerEffect));
+    const centerEffect = lastCenterEffectWasRandom ? pickRandomCenterEffect(playerCount) : state.config.centerEffect;
+    setState(newGameState(playerCount, centerEffect));
     setSelectedInstanceId(null);
     setPendingFlip(null);
     talliedRef.current = false;

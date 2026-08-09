@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CARD_DEFS } from "@/lib/content/cards";
+import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { PLAYER_BORDER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 import { ResolutionResult, ResolvedCard } from "@/lib/engine/resolution";
 import { GameState } from "@/lib/engine/types";
@@ -190,7 +191,7 @@ export function EndScreen({
       </div>
       {centerAward && (
         <p className="-mb-2 text-xs text-zinc-500">
-          Champion of the Weak: the center (value {centerAward.value}) went to {nameFor(centerAward.ownerId)}.
+          {CENTER_EFFECTS.championOfTheWeak.label}: the center (value {centerAward.value}) went to {nameFor(centerAward.ownerId)}.
         </p>
       )}
       {kingslayerHit.length > 0 && (

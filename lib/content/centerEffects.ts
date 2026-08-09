@@ -167,7 +167,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
         const mirrorPos = { x: pos.x, y: 2 * bounds.center.y - pos.y };
         if (mirrorPos.y === pos.y) continue; // on the center row itself -- no distinct mirror
         const mirrorCard = board.get(posKey(mirrorPos));
-        if (mirrorCard) addDelta(c.instanceId, mirrorCard.cardId === c.cardId ? 2 : 1, "Mirror Pool");
+        if (mirrorCard) addDelta(c.instanceId, mirrorCard.cardId === c.cardId ? 2 : 1, CENTER_EFFECTS.mirrorPool.label);
       }
     },
   },
@@ -181,7 +181,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
       for (const [key, c] of board.entries()) {
         const pos = parsePosKey(key);
         const enemyNeighbors = getAdjacentCards(board, bounds, pos).filter((n) => n.ownerId !== c.ownerId).length;
-        if (enemyNeighbors > 0) addDelta(c.instanceId, enemyNeighbors, "The Frontier");
+        if (enemyNeighbors > 0) addDelta(c.instanceId, enemyNeighbors, CENTER_EFFECTS.frontier.label);
       }
     },
   },
@@ -222,7 +222,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
         // no RNG needed.
         const highest = ownerCards.find((c) => c.finalValue === maxValue)!;
         const bonus = highest.finalValue;
-        highest.breakdown.push({ label: "The Summit (highest card, doubled)", amount: bonus, source: "external" });
+        highest.breakdown.push({ label: `${CENTER_EFFECTS.summit.label} (highest card, doubled)`, amount: bonus, source: "external" });
         highest.finalValue += bonus;
         totalsByOwner[highest.ownerId] = (totalsByOwner[highest.ownerId] ?? 0) + bonus;
       }
@@ -302,7 +302,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
       for (const c of faceUpCards) {
         if (c.finalValue === maxValue) {
           totalsByOwner[c.ownerId] = (totalsByOwner[c.ownerId] ?? 0) - kingslayerValue;
-          c.breakdown.push({ label: "Kingslayer (highest face-up value)", amount: -kingslayerValue, source: "external" });
+          c.breakdown.push({ label: `${CENTER_EFFECTS.kingslayer.ownerlessLabel} (highest face-up value)`, amount: -kingslayerValue, source: "external" });
           c.finalValue -= kingslayerValue;
           kingslayerHit.push(c.instanceId);
         }
