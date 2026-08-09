@@ -122,7 +122,7 @@ describe("resolveBoard — scoring breakdown", () => {
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolved = find(cards, f0.instanceId);
     expect(resolved.breakdown[0]).toEqual({ label: "Base", amount: CARD_DEFS.Footman.base, source: "self" });
-    expect(resolved.breakdown.some((d) => d.label.includes("Footman"))).toBe(true);
+    expect(resolved.breakdown.some((d) => d.label.includes(CARD_DEFS.Footman.name))).toBe(true);
     expect(resolved.breakdown.reduce((sum, d) => sum + d.amount, 0)).toBe(resolved.finalValue);
   });
 

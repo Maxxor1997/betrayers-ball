@@ -85,11 +85,13 @@ export function copiesForPlayerCount(def: CardDef, playerCount: number): number 
 export const CARD_DEFS: Record<CardId, CardDef> = {
   Footman: {
     id: "Footman",
-    name: "Footman",
+    name: "Hoplite",
     base: 5,
     bucket: "Engine",
     text: "+1 if 3+ of your cards share its row/column",
-    fullText: "+1 to itself if its row or column (including itself) has 3 or more cards you own -- any card type, not just other Footmen.",
+    get fullText() {
+      return `+1 to itself if its row or column (including itself) has 3 or more cards you own -- any card type, not just other copies of ${CARD_DEFS.Footman.name}.`;
+    },
     // 6p-8p counts scaled up (along with every other active card's) so those player
     // counts don't draw nearly the whole deck into hands -- see the 6p-8p comment on
     // Giant below for the full rationale.
@@ -103,12 +105,12 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
         if (otherPos.y === pos.y) ownedInRow++;
         if (otherPos.x === pos.x) ownedInColumn++;
       }
-      if (ownedInRow >= 3 || ownedInColumn >= 3) addDelta(self.instanceId, 1, "Footman (3+ owned in row/column)");
+      if (ownedInRow >= 3 || ownedInColumn >= 3) addDelta(self.instanceId, 1, `${CARD_DEFS.Footman.name} (3+ owned in row/column)`);
     },
   },
   Giant: {
     id: "Giant",
-    name: "Giant",
+    name: "Cyclops",
     disabled: true,
     base: 6,
     bucket: "Slam",
@@ -118,7 +120,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     // way) -- at handSize 8, 6p-8p games were drawing 76-100% of the deck straight
     // into hands, leaving almost no unseen pool. Scaled proportionally so each card's
     // relative weight in the deck is unchanged, just the deck itself is bigger.
-    count: [4, 4, 4, 4, 5, 6, 7],
+    count: [2, 2, 2, 2, 4, 4, 4],
     forceFaceUp: true,
   },
   Warlord: {
@@ -126,9 +128,13 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Warlord",
     base: 8,
     bucket: "Slam",
-    text: "−3 per unique enemy Warlord owner",
-    fullText:
-      "−3 for each distinct opposing player with a Warlord anywhere on the board -- multiple Warlords from the same rival still only count once, and your own other Warlords don't count against you at all.",
+    get text() {
+      return `−3 per unique enemy ${CARD_DEFS.Warlord.name} owner`;
+    },
+    get fullText() {
+      const name = CARD_DEFS.Warlord.name;
+      return `−3 for each distinct opposing player with a ${name} anywhere on the board -- multiple ${name}s from the same rival still only count once, and your own other ${name}s don't count against you at all.`;
+    },
     count: [6, 6, 5, 4, 4, 4, 4],
     valueModifier: ({ board, self, addDelta }) => {
       const uniqueEnemyWarlordOwners = new Set(
@@ -138,14 +144,14 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
         addDelta(
           self.instanceId,
           -3 * uniqueEnemyWarlordOwners,
-          `Warlord (${uniqueEnemyWarlordOwners} unique enemy Warlord owner${uniqueEnemyWarlordOwners > 1 ? "s" : ""})`
+          `${CARD_DEFS.Warlord.name} (${uniqueEnemyWarlordOwners} unique enemy ${CARD_DEFS.Warlord.name} owner${uniqueEnemyWarlordOwners > 1 ? "s" : ""})`
         );
       }
     },
   },
   Exile: {
     id: "Exile",
-    name: "Exile",
+    name: "Giant Bear",
     base: 10,
     bucket: "Slam",
     text: "−2 per neighbor",
@@ -153,12 +159,12 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: [4, 4, 4, 4, 5, 6, 8],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const neighbors = countAdjacentOccupied(board, bounds, pos);
-      if (neighbors > 0) addDelta(self.instanceId, -2 * neighbors, `Exile (${neighbors} neighbor${neighbors > 1 ? "s" : ""})`);
+      if (neighbors > 0) addDelta(self.instanceId, -2 * neighbors, `${CARD_DEFS.Exile.name} (${neighbors} neighbor${neighbors > 1 ? "s" : ""})`);
     },
   },
   Pretender: {
     id: "Pretender",
-    name: "Pretender",
+    name: "Usurper",
     base: 7,
     bucket: "Slam",
     text: "−4 if adj. face-up base≥self",
@@ -167,16 +173,20 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const ownBase = CARD_DEFS[self.cardId].base;
       const dangerousNeighbor = getAdjacentCards(board, bounds, pos).some((n) => n.faceUp && CARD_DEFS[n.cardId].base >= ownBase);
-      if (dangerousNeighbor) addDelta(self.instanceId, -4, "Pretender (adj. face-up base≥self)");
+      if (dangerousNeighbor) addDelta(self.instanceId, -4, `${CARD_DEFS.Pretender.name} (adj. face-up base≥self)`);
     },
   },
   Berserker: {
     id: "Berserker",
-    name: "Berserker",
+    name: "Hydra",
     base: 2,
     bucket: "Engine",
-    text: "+2 per opposing Berserker",
-    fullText: "+2 for each Berserker owned by a different player, anywhere on the board.",
+    get text() {
+      return `+2 per opposing ${CARD_DEFS.Berserker.name}`;
+    },
+    get fullText() {
+      return `+2 for each ${CARD_DEFS.Berserker.name} owned by a different player, anywhere on the board.`;
+    },
     count: [0, 0, 0, 8, 7, 6, 6],
     valueModifier: ({ board, self, addDelta }) => {
       let otherOwnerBerserkers = 0;
@@ -184,26 +194,35 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
         if (other.cardId === "Berserker" && other.ownerId !== self.ownerId) otherOwnerBerserkers++;
       }
       if (otherOwnerBerserkers > 0) {
-        addDelta(self.instanceId, 2 * otherOwnerBerserkers, `Berserker (${otherOwnerBerserkers} rival Berserker${otherOwnerBerserkers > 1 ? "s" : ""})`);
+        addDelta(
+          self.instanceId,
+          2 * otherOwnerBerserkers,
+          `${CARD_DEFS.Berserker.name} (${otherOwnerBerserkers} rival ${CARD_DEFS.Berserker.name}${otherOwnerBerserkers > 1 ? "s" : ""})`
+        );
       }
     },
   },
   Commander: {
     id: "Commander",
-    name: "Commander",
+    name: "Hipparch",
     base: 3,
     bucket: "Engine",
-    text: "+2 per adjacent Footman",
-    fullText: "+2 for each adjacent Footman (any owner).",
+    get text() {
+      return `+2 per adjacent ${CARD_DEFS.Footman.name}`;
+    },
+    get fullText() {
+      return `+2 for each adjacent ${CARD_DEFS.Footman.name} (any owner).`;
+    },
     count: [4, 4, 4, 4, 5, 6, 8],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const adjFootmen = getAdjacentCards(board, bounds, pos).filter((n) => n.cardId === "Footman").length;
-      if (adjFootmen > 0) addDelta(self.instanceId, 2 * adjFootmen, `Commander (${adjFootmen} adj. ${adjFootmen > 1 ? "Footmen" : "Footman"})`);
+      if (adjFootmen > 0)
+        addDelta(self.instanceId, 2 * adjFootmen, `${CARD_DEFS.Commander.name} (${adjFootmen} adj. ${CARD_DEFS.Footman.name}${adjFootmen > 1 ? "s" : ""})`);
     },
   },
   Gloryseeker: {
     id: "Gloryseeker",
-    name: "Gloryseeker",
+    name: "Pyre-Bird",
     base: 4,
     bucket: "Engine",
     text: "+3 if face-up, only opp. can flip it",
@@ -211,7 +230,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: [4, 4, 4, 4, 5, 6, 8],
     opponentOnlyFlip: true,
     valueModifier: ({ self, addDelta }) => {
-      if (self.faceUp) addDelta(self.instanceId, 3, "Gloryseeker (face-up)");
+      if (self.faceUp) addDelta(self.instanceId, 3, `${CARD_DEFS.Gloryseeker.name} (face-up)`);
     },
   },
   Chronicler: {
@@ -224,7 +243,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     fullText: "+1 for every round elapsed when the game ends.",
     count: [4, 4, 4, 4, 5, 6, 7],
     valueModifier: ({ round, self, addDelta }) => {
-      if (round > 0) addDelta(self.instanceId, round, `Chronicler (round ${round} elapsed)`);
+      if (round > 0) addDelta(self.instanceId, round, `${CARD_DEFS.Chronicler.name} (round ${round} elapsed)`);
     },
   },
   DyingGod: {
@@ -236,7 +255,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     fullText: "−1 for every round elapsed when the game ends.",
     count: [4, 4, 4, 4, 5, 6, 8],
     valueModifier: ({ round, self, addDelta }) => {
-      if (round > 0) addDelta(self.instanceId, -round, `Dying God (round ${round} elapsed)`);
+      if (round > 0) addDelta(self.instanceId, -round, `${CARD_DEFS.DyingGod.name} (round ${round} elapsed)`);
     },
   },
   Earthshaker: {
@@ -250,13 +269,13 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     valueModifier: ({ board, pos, self, addDelta }) => {
       for (const [otherKey, other] of board.entries()) {
         if (other.instanceId === self.instanceId) continue;
-        if (parsePosKey(otherKey).y === pos.y) addDelta(other.instanceId, -2, "Earthshaker (same row)");
+        if (parsePosKey(otherKey).y === pos.y) addDelta(other.instanceId, -2, `${CARD_DEFS.Earthshaker.name} (same row)`);
       }
     },
   },
   Skysplitter: {
     id: "Skysplitter",
-    name: "Skysplitter",
+    name: "Zeus-Born",
     base: 4,
     bucket: "Control",
     text: "−3 above and below",
@@ -265,32 +284,40 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     valueModifier: ({ board, pos, addDelta }) => {
       const above = board.get(posKey({ x: pos.x, y: pos.y - 1 }));
       const below = board.get(posKey({ x: pos.x, y: pos.y + 1 }));
-      if (above) addDelta(above.instanceId, -3, "Skysplitter (vertical neighbor)");
-      if (below) addDelta(below.instanceId, -3, "Skysplitter (vertical neighbor)");
+      if (above) addDelta(above.instanceId, -3, `${CARD_DEFS.Skysplitter.name} (vertical neighbor)`);
+      if (below) addDelta(below.instanceId, -3, `${CARD_DEFS.Skysplitter.name} (vertical neighbor)`);
     },
   },
   Bannerman: {
     id: "Bannerman",
-    name: "Bannerman",
+    name: "Hornblower",
     base: 4,
-    bucket: "Control",
-    text: "+2 adj. Footmen, +1 others",
-    fullText: "+2 to each adjacent Footman, +1 to each other adjacent card (any owner, not itself).",
+    bucket: "Engine",
+    get text() {
+      return `+2 per adjacent ${CARD_DEFS.Footman.name}, +1 others`;
+    },
+    get fullText() {
+      return `+2 to each adjacent ${CARD_DEFS.Footman.name}, +1 to each other adjacent card (any owner, not itself).`;
+    },
     count: [6, 6, 6, 6, 8, 10, 12],
     valueModifier: ({ board, bounds, pos, addDelta }) => {
       for (const n of getAdjacentCards(board, bounds, pos)) {
-        addDelta(n.instanceId, n.cardId === "Footman" ? 2 : 1, "Bannerman (neighbor)");
+        addDelta(n.instanceId, n.cardId === "Footman" ? 2 : 1, `${CARD_DEFS.Bannerman.name} (neighbor)`);
       }
     },
   },
   PlagueBearer: {
     id: "PlagueBearer",
-    name: "Plague Bearer",
+    name: "Plague Rat",
     base: 3,
     bucket: "Control",
     text: "Steals 2 from matching neighbor pairs",
-    fullText:
-      "If 2 or more of its neighbors are the same card type (any owner) -- say, two Footmen -- Plague Bearer steals 2 points from each of them. This can happen for more than one matching type at once (e.g. two Footmen and two Warlords both qualify), and each group pays out on its own.",
+    get fullText() {
+      const self = CARD_DEFS.PlagueBearer.name;
+      const footman = CARD_DEFS.Footman.name;
+      const warlord = CARD_DEFS.Warlord.name;
+      return `If 2 or more of its neighbors are the same card type (any owner) -- say, two ${footman}s -- ${self} steals 2 points from each of them. This can happen for more than one matching type at once (e.g. two ${footman}s and two ${warlord}s both qualify), and each group pays out on its own.`;
+    },
     count: [2, 2, 2, 2, 3, 3, 4],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const neighborsByType = new Map<CardId, CardInstance[]>();
@@ -303,27 +330,28 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       for (const group of neighborsByType.values()) {
         if (group.length < 2) continue;
         for (const n of group) {
-          addDelta(n.instanceId, -2, "Plague Bearer (stolen)");
+          addDelta(n.instanceId, -2, `${CARD_DEFS.PlagueBearer.name} (stolen)`);
           stolen += 2;
         }
       }
-      if (stolen > 0) addDelta(self.instanceId, stolen, `Plague Bearer (stole ${stolen})`);
+      if (stolen > 0) addDelta(self.instanceId, stolen, `${CARD_DEFS.PlagueBearer.name} (stole ${stolen})`);
     },
   },
   Suppressor: {
     id: "Suppressor",
-    name: "Suppressor",
+    name: "Lictor",
     base: 3,
     bucket: "Control",
     text: "3+ adj.: negates neighbors",
-    fullText:
-      "If 3+ adjacent cards (center counts), each adjacent non-Suppressor card is treated as vanilla — base value only, printed text negated.",
+    get fullText() {
+      return `If 3+ adjacent cards (center counts), each adjacent non-${CARD_DEFS.Suppressor.name} card is treated as vanilla — base value only, printed text negated.`;
+    },
     count: [2, 2, 2, 2, 3, 3, 4],
     negatesNeighborsIf: ({ board, bounds, pos }) => countAdjacentOccupied(board, bounds, pos) >= 3,
   },
   Infiltrator: {
     id: "Infiltrator",
-    name: "Infiltrator",
+    name: "Facestealer",
     base: 3,
     bucket: "Control",
     text: "Face-down: swaps base w/ highest face-up adj.",
@@ -341,13 +369,13 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       const ownBase = CARD_DEFS[self.cardId].base;
       const targetBase = CARD_DEFS[target.cardId].base;
       if (targetBase === ownBase) return;
-      addDelta(self.instanceId, targetBase - ownBase, `Infiltrator (swapped w/ ${CARD_DEFS[target.cardId].name})`);
-      addDelta(target.instanceId, ownBase - targetBase, "Infiltrator (swapped)");
+      addDelta(self.instanceId, targetBase - ownBase, `${CARD_DEFS.Infiltrator.name} (swapped w/ ${CARD_DEFS[target.cardId].name})`);
+      addDelta(target.instanceId, ownBase - targetBase, `${CARD_DEFS.Infiltrator.name} (swapped)`);
     },
   },
   Truthseeker: {
     id: "Truthseeker",
-    name: "Truthseeker",
+    name: "Inquisitor",
     base: 4,
     bucket: "Control",
     text: "−3 to each face-down neighbor",
@@ -355,13 +383,13 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: [4, 4, 4, 4, 5, 6, 6],
     valueModifier: ({ board, bounds, pos, addDelta }) => {
       for (const n of getAdjacentCards(board, bounds, pos)) {
-        if (!n.faceUp) addDelta(n.instanceId, -3, "Truthseeker (face-down neighbor)");
+        if (!n.faceUp) addDelta(n.instanceId, -3, `${CARD_DEFS.Truthseeker.name} (face-down neighbor)`);
       }
     },
   },
   Mercenary: {
     id: "Mercenary",
-    name: "Mercenary",
+    name: "Conciliator",
     base: 4,
     bucket: "Engine",
     text: "+1 per unique adj. enemy",
@@ -374,13 +402,17 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
           .map((n) => n.ownerId)
       ).size;
       if (uniqueEnemyOwners > 0) {
-        addDelta(self.instanceId, 1 * uniqueEnemyOwners, `Mercenary (${uniqueEnemyOwners} unique adj. enem${uniqueEnemyOwners > 1 ? "ies" : "y"})`);
+        addDelta(
+          self.instanceId,
+          1 * uniqueEnemyOwners,
+          `${CARD_DEFS.Mercenary.name} (${uniqueEnemyOwners} unique adj. enem${uniqueEnemyOwners > 1 ? "ies" : "y"})`
+        );
       }
     },
   },
   Beacon: {
     id: "Beacon",
-    name: "Beacon",
+    name: "Salamander",
     base: 4,
     bucket: "Engine",
     text: "+1 per adjacent face-up card",
@@ -388,7 +420,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: [4, 4, 4, 4, 5, 6, 8],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const faceUpNeighbors = getAdjacentCards(board, bounds, pos).filter((n) => n.faceUp).length;
-      if (faceUpNeighbors > 0) addDelta(self.instanceId, 1 * faceUpNeighbors, `Beacon (${faceUpNeighbors} adj. face-up)`);
+      if (faceUpNeighbors > 0) addDelta(self.instanceId, 1 * faceUpNeighbors, `${CARD_DEFS.Beacon.name} (${faceUpNeighbors} adj. face-up)`);
     },
   },
   Unknown: {
