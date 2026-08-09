@@ -65,13 +65,15 @@ export interface CenterEffectDef {
 }
 
 /**
- * Champion of the Weak only: the center is "a scorable card worth 5 (modifiable by
- * adjacent buff/dent effects during resolution)". A fully general version would mean
- * synthesizing a fake CardInstance for the center and teaching every CardId-keyed
- * lookup (deck building, CARD_DEFS) to tolerate a non-drawable pseudo-card -- real
- * rework, not additive. This scopes it to the flat, identity-blind positional
- * modifiers: Bannerman (+1 -- center is never a Footman), Earthshaker (-1 if center
- * shares its row), Skysplitter (-3 if directly above/below).
+ * Kingslayer only (Champion of the Weak/Lazaret pays out a flat PSEUDO_CARD_BASE_VALUE
+ * with no adjacency modifier -- see its postResolution below): the center is "a
+ * scorable card worth PSEUDO_CARD_BASE_VALUE (modifiable by adjacent buff/dent effects
+ * during resolution)". A fully general version would mean synthesizing a fake
+ * CardInstance for the center and teaching every CardId-keyed lookup (deck building,
+ * CARD_DEFS) to tolerate a non-drawable pseudo-card -- real rework, not additive. This
+ * scopes it to the flat, identity-blind positional modifiers: Bannerman (+1 -- center
+ * is never a Footman), Earthshaker (-1 if center shares its row), Skysplitter (-3 if
+ * directly above/below).
  */
 export function computeCenterModifier(board: Board, bounds: BoardBounds, negated: Set<string>): number {
   let delta = 0;
@@ -116,7 +118,8 @@ export const PSEUDO_CARD_BASE_VALUE = 3;
  * Null for every other center effect, which has no pseudo-card to show a value for.
  */
 export function pseudoCardLiveValue(id: CenterEffectId, board: Board, bounds: BoardBounds, negated: Set<string>): number | null {
-  if (id !== "championOfTheWeak" && id !== "kingslayer") return null;
+  if (id === "championOfTheWeak") return PSEUDO_CARD_BASE_VALUE;
+  if (id !== "kingslayer") return null;
   return PSEUDO_CARD_BASE_VALUE + computeCenterModifier(board, bounds, negated);
 }
 
@@ -143,7 +146,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
   },
 
   frontier: {
-    label: "The Frontier",
+    label: "Contested Lands",
     description: "+1 to every card for each opponent's card adjacent to it.",
     valueModifiers: (board, bounds, addDelta) => {
       for (const [key, c] of board.entries()) {
@@ -155,43 +158,21 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
   },
 
   championOfTheWeak: {
-    label: "Champion of the Weak",
-    description: `The center counts as a card worth ${PSEUDO_CARD_BASE_VALUE} (modified by adjacent buffs/dents). After scoring, it's transferred to the owner of the single lowest-valued card on the board — a tie for lowest means no transfer.`,
-    postResolution: ({ board, bounds, negated, cards, totalsByOwner }) => {
+    label: "The Lazaret",
+    description: `A flat ${PSEUDO_CARD_BASE_VALUE} points, transferred at the end of scoring to the owner of the single lowest-valued card on the board — a tie for lowest means no transfer.`,
+    postResolution: ({ cards, totalsByOwner }) => {
       if (cards.length === 0) return {};
-      const centerValue = PSEUDO_CARD_BASE_VALUE + computeCenterModifier(board, bounds, negated);
       const minValue = Math.min(...cards.map((c) => c.finalValue));
       const lowest = cards.filter((c) => c.finalValue === minValue);
       if (lowest.length !== 1) return {};
       const ownerId = lowest[0].ownerId;
-      totalsByOwner[ownerId] = (totalsByOwner[ownerId] ?? 0) + centerValue;
-      return { centerAward: { value: centerValue, ownerId } };
-    },
-  },
-
-  kingslayer: {
-    label: "Kingslayer",
-    description: `Kingslayer counts as a card worth ${PSEUDO_CARD_BASE_VALUE} (modified by adjacent buffs/dents, same as the center). After scoring, its value is subtracted from the highest-value face-up card(s) on the board -- ties still all get hit.`,
-    postResolution: ({ board, bounds, negated, cards, totalsByOwner }) => {
-      const faceUpCards = cards.filter((c) => c.faceUp);
-      if (faceUpCards.length === 0) return {};
-      const kingslayerValue = PSEUDO_CARD_BASE_VALUE + computeCenterModifier(board, bounds, negated);
-      const maxValue = Math.max(...faceUpCards.map((c) => c.finalValue));
-      const kingslayerHit: string[] = [];
-      for (const c of faceUpCards) {
-        if (c.finalValue === maxValue) {
-          totalsByOwner[c.ownerId] = (totalsByOwner[c.ownerId] ?? 0) - kingslayerValue;
-          c.breakdown.push({ label: "Kingslayer (highest face-up value)", amount: -kingslayerValue, source: "external" });
-          c.finalValue -= kingslayerValue;
-          kingslayerHit.push(c.instanceId);
-        }
-      }
-      return { kingslayerHit };
+      totalsByOwner[ownerId] = (totalsByOwner[ownerId] ?? 0) + PSEUDO_CARD_BASE_VALUE;
+      return { centerAward: { value: PSEUDO_CARD_BASE_VALUE, ownerId } };
     },
   },
 
   summit: {
-    label: "The Summit",
+    label: "Dragon Gate",
     description: "At the end of the game, each player's single highest-valued card is worth double (a tie is broken by whichever was placed first).",
     postResolution: ({ cards, totalsByOwner }) => {
       const byOwner = new Map<string, ResolvedCard[]>();
@@ -217,13 +198,13 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
   },
 
   shadowlands: {
-    label: "Shadowlands",
+    label: "The Pit of Erebus",
     description: "Flips unlock one round later than usual",
     flipGate: (round, config) => round >= config.flipUnlockRound + 1,
   },
 
   reckoning: {
-    label: "The Reckoning",
+    label: "Hall of Fortunes",
     description: "At the start of round 4, every player discards their hand and draws the same number of fresh cards.",
     onRoundStart: (state, newRound, rng) => {
       if (newRound !== RECKONING_TRIGGER_ROUND) return { players: state.players, deck: state.deck };
@@ -233,9 +214,9 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
   },
 
   threeHeadedDragon: {
-    label: "Three Headed Dragon",
+    label: "Corpse of the Great Wyrm",
     description: "Two extra ownerless tiles flank the center, two cells out along its row.",
-    ownerlessLabel: "Dragon Head",
+    ownerlessLabel: "Wyrm Head",
     ownerlessPositions: (bounds) => {
       const { x, y } = bounds.center;
       return [{ x, y }, { x: x - 2, y }, { x: x + 2, y }].filter((p) => inBounds(p, bounds));
@@ -243,9 +224,9 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
   },
 
   twoTowers: {
-    label: "Two Towers",
+    label: "Twin Isles",
     description: "The center is free to play on. Instead, the ownerless tiles sit at the far left and far right ends of its row.",
-    ownerlessLabel: "Tower",
+    ownerlessLabel: "Island",
     ownerlessPositions: (bounds) => {
       const { y } = bounds.center;
       return [
@@ -259,6 +240,27 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "The Free Cities",
     description: "No adjacency requirement -- any empty tile on the board is a legal placement",
     placementAnywhere: true,
+  },
+
+  kingslayer: {
+    label: "Kingslayer's Court",
+    description: `Kingslayer counts as a card worth ${PSEUDO_CARD_BASE_VALUE} (modified by adjacent buffs/dents, same as the center). After scoring, its value is subtracted from the highest-value face-up card(s) on the board -- ties still all get hit.`,
+    postResolution: ({ board, bounds, negated, cards, totalsByOwner }) => {
+      const faceUpCards = cards.filter((c) => c.faceUp);
+      if (faceUpCards.length === 0) return {};
+      const kingslayerValue = PSEUDO_CARD_BASE_VALUE + computeCenterModifier(board, bounds, negated);
+      const maxValue = Math.max(...faceUpCards.map((c) => c.finalValue));
+      const kingslayerHit: string[] = [];
+      for (const c of faceUpCards) {
+        if (c.finalValue === maxValue) {
+          totalsByOwner[c.ownerId] = (totalsByOwner[c.ownerId] ?? 0) - kingslayerValue;
+          c.breakdown.push({ label: "Kingslayer (highest face-up value)", amount: -kingslayerValue, source: "external" });
+          c.finalValue -= kingslayerValue;
+          kingslayerHit.push(c.instanceId);
+        }
+      }
+      return { kingslayerHit };
+    },
   },
 };
 

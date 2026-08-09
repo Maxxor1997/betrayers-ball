@@ -58,8 +58,8 @@ const LOCATION_COMPLEXITY_ORDER: CenterEffectId[] = [
   "frontier",
   "mirrorPool",
   "championOfTheWeak",
-  "kingslayer",
   "summit",
+  "kingslayer",
 ];
 
 const BUCKET_DESCRIPTIONS: Record<CardBucket, string> = {

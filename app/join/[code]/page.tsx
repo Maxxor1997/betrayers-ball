@@ -58,7 +58,10 @@ function Room() {
       <header className="flex w-full max-w-4xl flex-col gap-2">
         <div className="flex w-full items-center justify-between gap-2">
           <h1 className="text-lg font-semibold sm:text-xl">
-            Board Game <span className="font-normal text-zinc-500">— room {roomCode}</span>
+            Board Game{" "}
+            <span className="font-normal text-zinc-500">
+              — {session.lobby ? CENTER_EFFECTS[session.lobby.centerEffect].label : `room ${roomCode}`}
+            </span>
           </h1>
           <ThemeToggle />
         </div>

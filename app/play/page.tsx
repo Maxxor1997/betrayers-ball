@@ -408,7 +408,7 @@ function Game() {
       <header className="flex w-full max-w-4xl flex-col gap-2">
         <div className="flex w-full items-center justify-between gap-2">
           <h1 className="text-lg font-semibold sm:text-xl">
-            Board Game<span className="hidden sm:inline"> — engine playtest</span>
+            Board Game<span className="hidden sm:inline"> — {CENTER_EFFECTS[state.config.centerEffect].label}</span>
           </h1>
           <ThemeToggle />
         </div>

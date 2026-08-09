@@ -782,13 +782,14 @@ describe("resolveBoard — center effect: Champion of the Weak", () => {
     expect(totalsByOwner.p1).toBe(CARD_DEFS.Footman.base + PSEUDO_CARD_BASE_VALUE);
   });
 
-  it("center value is modified by adjacent Bannerman/Earthshaker/Skysplitter", () => {
+  it("center value is a flat award, unaffected by adjacent Bannerman/Earthshaker/Skysplitter", () => {
     const board: Board = new Map();
-    // Bannerman directly adjacent to center (4,4) -> +1 (center is never a Footman)
+    // Bannerman directly adjacent to center (4,4) would give Kingslayer's pseudo-card
+    // +1 (center is never a Footman) -- Lazaret's award ignores it entirely.
     place(board, 4, 3, "Bannerman", "p2");
     place(board, 0, 0, "Footman", "p1");
     const { centerAward } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1", "p2"]);
-    expect(centerAward?.value).toBe(PSEUDO_CARD_BASE_VALUE + 1);
+    expect(centerAward?.value).toBe(PSEUDO_CARD_BASE_VALUE);
   });
 });
 
