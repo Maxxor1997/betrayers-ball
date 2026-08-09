@@ -13,6 +13,7 @@ import { EndScreen } from "@/app/components/EndScreen";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { CardCatalog } from "@/app/components/CardCatalog";
 import { InstructionsModal } from "@/app/components/InstructionsModal";
+import { LocationTitle } from "@/app/components/LocationTitle";
 import { NewGameModal, NewGameSetup } from "@/app/components/NewGameModal";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
@@ -56,11 +57,14 @@ function Room() {
   return (
     <div className="flex flex-1 flex-col items-center gap-6 px-4 py-8">
       <header className="flex w-full max-w-4xl flex-col gap-2">
-        <div className="flex w-full items-center justify-between gap-2">
-          <h1 className="text-lg font-semibold sm:text-xl">
-            {session.lobby ? CENTER_EFFECTS[session.lobby.centerEffect].label : `Room ${roomCode}`}
-          </h1>
-          <ThemeToggle />
+        <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-2">
+          <span />
+          <div className="justify-self-center text-center">
+            <LocationTitle def={session.lobby ? CENTER_EFFECTS[session.lobby.centerEffect] : null} fallback={`Room ${roomCode}`} />
+          </div>
+          <div className="justify-self-end">
+            <ThemeToggle />
+          </div>
         </div>
         <div className="flex w-full flex-wrap items-center gap-1.5">
           <Link

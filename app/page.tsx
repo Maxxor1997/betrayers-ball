@@ -276,7 +276,7 @@ export default function HomePage() {
         onCollapsedChange={setCardsCollapsed}
       />
       <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-1 flex-col items-center gap-8">
-        <header className="flex w-full flex-col gap-2">
+        <header className="flex w-full flex-col gap-5">
           <div className="flex w-full items-center justify-between gap-2">
             <h1 className="font-serif text-3xl leading-none font-bold tracking-tight sm:text-4xl">
               <span className="text-zinc-900 dark:text-zinc-50">Court of the </span>

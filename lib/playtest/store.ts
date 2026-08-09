@@ -46,7 +46,8 @@ function mergeBucket(parsed: unknown, playerCount?: number): StatsBucket {
   return bucket;
 }
 
-function mergeStats(parsed: unknown): PlaytestStats {
+/** Exported so humanStats.ts's backup/restore can reuse the same migration-safe merge instead of duplicating it, when validating a pasted blob rather than a normal localStorage read. */
+export function mergeStats(parsed: unknown): PlaytestStats {
   const stats: PlaytestStats = { ...createEmptyBucket(), byPlayerCount: {}, byCenterEffect: {} as Record<CenterEffectId, StatsBucket> };
   if (!parsed || typeof parsed !== "object") return stats;
 
@@ -94,9 +95,9 @@ function mergeStats(parsed: unknown): PlaytestStats {
   return stats;
 }
 
-export function loadStats(): PlaytestStats {
+export function loadStats(key: string = STORAGE_KEY): PlaytestStats {
   if (typeof window === "undefined") return createEmptyStats();
-  const raw = window.localStorage.getItem(STORAGE_KEY);
+  const raw = window.localStorage.getItem(key);
   if (!raw) return createEmptyStats();
   try {
     return mergeStats(JSON.parse(raw));
@@ -106,12 +107,12 @@ export function loadStats(): PlaytestStats {
   }
 }
 
-export function saveStats(stats: PlaytestStats): void {
+export function saveStats(stats: PlaytestStats, key: string = STORAGE_KEY): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stats));
+  window.localStorage.setItem(key, JSON.stringify(stats));
 }
 
-export function resetStats(): void {
+export function resetStats(key: string = STORAGE_KEY): void {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(STORAGE_KEY);
+  window.localStorage.removeItem(key);
 }

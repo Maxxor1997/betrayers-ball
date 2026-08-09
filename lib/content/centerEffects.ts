@@ -12,6 +12,22 @@ import { Board, BoardBounds, CardInstance, CenterEffectId, GameConfig, GameState
  */
 export interface CenterEffectDef {
   label: string;
+  /**
+   * Tailwind text-color classes (light + dark variant) used for the big stylized
+   * location title on the gameplay screen (single-player /play, multiplayer
+   * host/join) -- one hue per location, picked to fit its theme/flavor, the same way
+   * the home screen's own title picks out "Kingslayer" in crimson.
+   */
+  themeColorClass: string;
+  /**
+   * The substring of `label` to render in `themeColorClass` on the gameplay-screen
+   * title -- everything else in `label` stays the default foreground color, echoing
+   * the home screen's own two-tone "Court of the *Kingslayer*" treatment. Must be an
+   * exact substring of `label` (see splitTitle below); doesn't have to be a suffix --
+   * e.g. Kingslayer's Court highlights "Kingslayer's" (the start), not "Court", to
+   * stay consistent with which half the home screen already colors for that name.
+   */
+  titleHighlight: string;
   /** Static text, or a fn for effects whose wording depends on config. */
   description: string | ((config: GameConfig) => string);
   /** Shows up in the New Game picker. Default true — set false to hide (e.g. "none"). */
@@ -123,15 +139,26 @@ export function pseudoCardLiveValue(id: CenterEffectId, board: Board, bounds: Bo
   return PSEUDO_CARD_BASE_VALUE + computeCenterModifier(board, bounds, negated);
 }
 
+/** Splits a location's label around its titleHighlight for a two-tone title (default-color prefix/suffix, themeColorClass-colored highlight) -- see CenterEffectDef.titleHighlight. Falls back to the whole label as the highlight if it's somehow not found (shouldn't happen for any real entry below). */
+export function splitTitle(def: CenterEffectDef): { prefix: string; highlight: string; suffix: string } {
+  const i = def.label.indexOf(def.titleHighlight);
+  if (i === -1) return { prefix: "", highlight: def.label, suffix: "" };
+  return { prefix: def.label.slice(0, i), highlight: def.titleHighlight, suffix: def.label.slice(i + def.titleHighlight.length) };
+}
+
 export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
   none: {
     label: "World-Tree",
+    themeColorClass: "text-emerald-700 dark:text-emerald-500",
+    titleHighlight: "World-Tree",
     description: "No special rule this game.",
     selectable: false,
   },
 
   mirrorPool: {
     label: "Mirror Pool",
+    themeColorClass: "text-cyan-700 dark:text-cyan-400",
+    titleHighlight: "Mirror",
     description:
       "Each card has one mirror position (same column, opposite side of the center row). If occupied, both cards get +1, or +2 each if they're the same card type.",
     valueModifiers: (board, bounds, addDelta) => {
@@ -147,6 +174,8 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
 
   frontier: {
     label: "Contested Lands",
+    themeColorClass: "text-orange-700 dark:text-orange-500",
+    titleHighlight: "Contested",
     description: "+1 to every card for each opponent's card adjacent to it.",
     valueModifiers: (board, bounds, addDelta) => {
       for (const [key, c] of board.entries()) {
@@ -159,6 +188,8 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
 
   championOfTheWeak: {
     label: "The Lazaret",
+    themeColorClass: "text-lime-700 dark:text-lime-500",
+    titleHighlight: "Lazaret",
     description: `A flat ${PSEUDO_CARD_BASE_VALUE} points, transferred at the end of scoring to the owner of the single lowest-valued card on the board — a tie for lowest means no transfer.`,
     postResolution: ({ cards, totalsByOwner }) => {
       if (cards.length === 0) return {};
@@ -173,6 +204,8 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
 
   summit: {
     label: "Dragon Gate",
+    themeColorClass: "text-purple-700 dark:text-purple-500",
+    titleHighlight: "Dragon",
     description: "At the end of the game, each player's single highest-valued card is worth double (a tie is broken by whichever was placed first).",
     postResolution: ({ cards, totalsByOwner }) => {
       const byOwner = new Map<string, ResolvedCard[]>();
@@ -199,12 +232,16 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
 
   shadowlands: {
     label: "The Pit of Erebus",
+    themeColorClass: "text-indigo-700 dark:text-indigo-500",
+    titleHighlight: "Erebus",
     description: "Flips unlock one round later than usual",
     flipGate: (round, config) => round >= config.flipUnlockRound + 1,
   },
 
   reckoning: {
     label: "Hall of Fortunes",
+    themeColorClass: "text-rose-700 dark:text-rose-500",
+    titleHighlight: "Fortunes",
     description: "At the start of round 4, every player discards their hand and draws the same number of fresh cards.",
     onRoundStart: (state, newRound, rng) => {
       if (newRound !== RECKONING_TRIGGER_ROUND) return { players: state.players, deck: state.deck };
@@ -215,6 +252,8 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
 
   threeHeadedDragon: {
     label: "Corpse of the Great Wyrm",
+    themeColorClass: "text-fuchsia-700 dark:text-fuchsia-500",
+    titleHighlight: "Wyrm",
     description: "Two extra ownerless tiles flank the center, two cells out along its row.",
     ownerlessLabel: "Wyrm Head",
     ownerlessPositions: (bounds) => {
@@ -225,6 +264,8 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
 
   twoTowers: {
     label: "Twin Isles",
+    themeColorClass: "text-teal-700 dark:text-teal-500",
+    titleHighlight: "Isles",
     description: "The center is free to play on. Instead, the ownerless tiles sit at the far left and far right ends of its row.",
     ownerlessLabel: "Island",
     ownerlessPositions: (bounds) => {
@@ -238,12 +279,16 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
 
   freeCities: {
     label: "The Free Cities",
+    themeColorClass: "text-amber-600 dark:text-amber-400",
+    titleHighlight: "Free",
     description: "No adjacency requirement -- any empty tile on the board is a legal placement",
     placementAnywhere: true,
   },
 
   kingslayer: {
     label: "Kingslayer's Court",
+    themeColorClass: "text-red-700 dark:text-red-500",
+    titleHighlight: "Kingslayer's",
     // The board tile itself just says "Kingslayer" -- "Kingslayer's Court" is the
     // location's full name (catalog, New Game picker), too long to sit on the tile.
     ownerlessLabel: "Kingslayer",

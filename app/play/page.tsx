@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
@@ -15,6 +15,8 @@ import { NewGameSetup, PendingFlip } from "./types";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { CardCatalog } from "@/app/components/CardCatalog";
 import { InstructionsModal } from "@/app/components/InstructionsModal";
+import { LocationTitle } from "@/app/components/LocationTitle";
+import { MyStatsModal } from "@/app/components/MyStatsModal";
 import { NewGameModal } from "@/app/components/NewGameModal";
 import { BoardGrid } from "@/app/components/Board";
 import { Hand } from "@/app/components/Hand";
@@ -23,6 +25,13 @@ import { GameStatusPanel } from "@/app/components/GameStatusPanel";
 import { EndScreen } from "@/app/components/EndScreen";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
+import {
+  loadHumanCardStats,
+  loadHumanPlacementStats,
+  saveHumanCardStats,
+  saveHumanPlacementStats,
+  tallyHumanGame,
+} from "@/lib/playtest/humanStats";
 
 const HUMAN = "human";
 
@@ -222,9 +231,14 @@ function Game() {
   // nothing left to prompt for.
   const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(initialSetup ? null : { playerCount: 4, centerEffect: "random" });
   const [showInstructions, setShowInstructions] = useState(false);
+  const [showMyStats, setShowMyStats] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [highlightedCardId, setHighlightedCardId] = useState<CardId | null>(null);
   const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobileViewport());
+  // Tally exactly once per game, the moment it reaches "ended" -- reset whenever a new
+  // game starts (confirmNewGame/playAgain below), same pattern the playtest page's own
+  // self-play tally uses (see PlaySelf.tsx's talliedRef).
+  const talliedRef = useRef(false);
 
   const dispatch = (action: GameAction) => {
     setState((prev) => {
@@ -265,6 +279,27 @@ function Game() {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, isAiTurn]);
+
+  // Folds this finished game into the human's own personal stats (see
+  // lib/playtest/humanStats.ts) -- separate from the playtest page's bulk AI-sim
+  // data, and scoped to just the human's own cards/placement, not every seat's.
+  useEffect(() => {
+    if (state.phase !== "ended" || talliedRef.current) return;
+    talliedRef.current = true;
+    const result = resolveBoard(
+      state.board,
+      state.config.boardBounds,
+      state.round,
+      state.config.centerEffect,
+      state.players.map((p) => p.id)
+    );
+    const cardStats = loadHumanCardStats();
+    const placementStats = loadHumanPlacementStats();
+    tallyHumanGame(cardStats, placementStats, result.cards, state.result!.scores, state.config.playerCount, state.round, state.config.centerEffect, HUMAN);
+    saveHumanCardStats(cardStats);
+    saveHumanPlacementStats(placementStats);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   function placeCard(instanceId: string, pos: Position) {
     if (!legalCellKeys.has(posKey(pos))) return;
@@ -343,6 +378,7 @@ function Game() {
     setSelectedInstanceId(null);
     setPendingFlip(null);
     setNewGameSetup(null);
+    talliedRef.current = false;
   }
 
   /** One-click rematch, same player count and center effect as the game that just ended -- no setup modal. */
@@ -350,6 +386,7 @@ function Game() {
     setState(newGameState(playerCount, state.config.centerEffect));
     setSelectedInstanceId(null);
     setPendingFlip(null);
+    talliedRef.current = false;
   }
 
   function confirmFlip() {
@@ -406,9 +443,14 @@ function Game() {
       />
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">
       <header className="flex w-full max-w-4xl flex-col gap-2">
-        <div className="flex w-full items-center justify-between gap-2">
-          <h1 className="text-lg font-semibold sm:text-xl">{CENTER_EFFECTS[state.config.centerEffect].label}</h1>
-          <ThemeToggle />
+        <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-2">
+          <span />
+          <div className="justify-self-center text-center">
+            <LocationTitle def={CENTER_EFFECTS[state.config.centerEffect]} />
+          </div>
+          <div className="justify-self-end">
+            <ThemeToggle />
+          </div>
         </div>
         <div className="flex w-full flex-wrap items-center gap-1.5">
           <span className="text-sm whitespace-nowrap text-zinc-500">{playerCount} players</span>
@@ -431,6 +473,12 @@ function Game() {
             How to play
           </button>
           <button
+            onClick={() => setShowMyStats(true)}
+            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            My stats
+          </button>
+          <button
             onClick={openNewGameSetup}
             className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
           >
@@ -440,6 +488,7 @@ function Game() {
       </header>
 
       {showInstructions && <InstructionsModal onClose={() => setShowInstructions(false)} />}
+      {showMyStats && <MyStatsModal onClose={() => setShowMyStats(false)} />}
 
       {/* Always mounted with a reserved min-height, even when empty -- this line's
           text changes on almost every turn transition (human selects a card, AI's
