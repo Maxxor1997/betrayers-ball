@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { CardArt } from "@/app/components/CardArt";
 import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, isAvailableAtPlayerCount } from "@/lib/content/centerEffects";
 import { SELECTABLE_LOBBY_SIZES } from "@/lib/config/players";
@@ -234,6 +235,7 @@ export function CardCatalog({
                           className={`relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${boxToneClass}`}
                         >
                           <span className="text-[8px] font-semibold leading-tight break-words">{def.name}</span>
+                          <CardArt cardId={id} className="h-5 w-5 shrink-0" />
                           <span className="text-base font-bold leading-none">{def.base}</span>
                         </div>
                         <div className="min-w-0 flex-1">

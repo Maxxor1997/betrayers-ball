@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { CardArt } from "@/app/components/CardArt";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, pseudoCardLiveValue } from "@/lib/content/centerEffects";
 import { inBounds, isOwnerlessPosition } from "@/lib/engine/board";
@@ -174,6 +175,7 @@ export function BoardGrid({
                       >
                         {def.name}
                       </span>
+                      <CardArt cardId={card.cardId} className={`h-2/5 w-2/5 shrink-0 ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`} />
                       <span
                         className={`text-[length:clamp(11px,34cqw,18px)] leading-none font-bold ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
                       >

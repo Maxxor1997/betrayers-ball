@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { CardArt } from "@/app/components/CardArt";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CardId, CardInstance } from "@/lib/engine/types";
 
@@ -57,6 +58,7 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
               } ${selected ? "border-amber-500 bg-amber-50 dark:bg-amber-950" : ownerAccentClass}`}
             >
               <span className="w-full text-[length:clamp(8px,20cqw,10px)] leading-tight break-words font-semibold">{def.name}</span>
+              <CardArt cardId={card.cardId} className="h-8 w-8 shrink-0" />
               <span className="text-[length:clamp(14px,32cqw,20px)] leading-none font-bold">{def.base}</span>
               <span className="w-full text-[length:clamp(7px,16cqw,9px)] leading-tight break-words text-zinc-500 dark:text-zinc-400">
                 {def.text}
