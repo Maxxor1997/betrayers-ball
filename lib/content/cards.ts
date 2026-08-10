@@ -85,7 +85,7 @@ export function copiesForPlayerCount(def: CardDef, playerCount: number): number 
 export const CARD_DEFS: Record<CardId, CardDef> = {
   Footman: {
     id: "Footman",
-    name: "Hoplite",
+    name: "Shieldbearer",
     base: 5,
     bucket: "Engine",
     text: "+1 if 3+ of your cards share its row/column",
