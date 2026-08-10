@@ -75,7 +75,7 @@ export function InstructionsModal({ onClose }: { onClose: () => void }) {
             <h3 className="mb-1 font-semibold">Goal</h3>
             <p className="text-zinc-600 dark:text-zinc-400">
               Place cards on the board to build the highest total score. Cards start face-down and are worth their
-              base value plus whatever their effect adds or subtracts — position, ownership, and who's face-up all
+              base value plus effects from themselves or other cards — position, ownership, face-up status can all
               matter. Scores are only revealed at the very end.
             </p>
           </section>
@@ -87,7 +87,7 @@ export function InstructionsModal({ onClose }: { onClose: () => void }) {
                 <StepBadge n={1} />
                 <span>
                   <strong className="text-zinc-800 dark:text-zinc-200">Optionally flip</strong> one face-down card
-                  face-up (once flipping unlocks) — at most one per turn, and it's permanent.
+                  face-up (once flipping unlocks).
                 </span>
               </li>
               <li className="flex items-start gap-2">
@@ -105,13 +105,22 @@ export function InstructionsModal({ onClose }: { onClose: () => void }) {
             <div className="flex flex-wrap items-center gap-4">
               <MiniBoard />
               <p className="max-w-xs text-zinc-600 dark:text-zinc-400">
-                Faint green cells are empty and legal to place on right now — they're not cards, just open targets. A
-                placement must be orthogonally adjacent to an existing card or the center tile — same row or column,
-                one cell over, never diagonal — nothing goes on the center itself, but it always counts as a
-                neighbor. Every card effect that reads "neighbor" or "adjacent" means the same thing: row/column
-                only.
+                Faint green cells are empty and legal to place on right now. A placement must be adjacent to an
+                existing card or the center tile. Nothing goes on the center itself, but it always counts as a
+                neighbor.
               </p>
             </div>
+          </section>
+
+          <section>
+            <h3 className="mb-1 font-semibold">Adjacency</h3>
+            <p className="text-zinc-600 dark:text-zinc-400">
+              "Adjacent" and "neighbor" always mean the same thing, everywhere in this game — both for where you're
+              allowed to place, and for every card effect that reads either word: <strong className="text-zinc-800 dark:text-zinc-200">orthogonal only</strong> (same
+              row or column, one cell over) — <strong className="text-zinc-800 dark:text-zinc-200">never diagonal</strong>. A card's short
+              summary abbreviates this to <strong className="text-zinc-800 dark:text-zinc-200">"adj."</strong> to save space — hover any card for
+              the full, unabbreviated wording.
+            </p>
           </section>
 
           <section>
@@ -129,16 +138,14 @@ export function InstructionsModal({ onClose }: { onClose: () => void }) {
           <section>
             <h3 className="mb-1 font-semibold">Scoring</h3>
             <p className="text-zinc-600 dark:text-zinc-400">
-              Nothing is scored during play. When the game ends, every card's final value is computed at once from
-              its base value plus its effect — adjacency, ownership, and flip-state all feed in, but never another
-              card's already-modified value. Highest total wins; ties share the win.
+              Nothing is scored during play. When the game ends, every card's final value is computed according
+              to the state on the board. Highest total wins; ties share the win.
             </p>
           </section>
 
           <section>
             <h3 className="mb-1 font-semibold">Ending the game</h3>
             <ul className="list-disc space-y-1 pl-4 text-zinc-600 dark:text-zinc-400">
-              <li>The board fills up, or</li>
               <li>The round cap is reached, or</li>
               <li>
                 Starting from the min-round floor, every round opens a private vote to end — it only ends if a

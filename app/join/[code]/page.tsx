@@ -12,6 +12,7 @@ import { Hand } from "@/app/components/Hand";
 import { GameStatusPanel } from "@/app/components/GameStatusPanel";
 import { EndScreen } from "@/app/components/EndScreen";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
+import { HomeIcon } from "@/app/components/HomeIcon";
 import { CardCatalog } from "@/app/components/CardCatalog";
 import { InstructionsModal } from "@/app/components/InstructionsModal";
 import { LocationTitle } from "@/app/components/LocationTitle";
@@ -54,51 +55,56 @@ function Room() {
   const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobile);
 
   const isHost = !!session.lobby && session.myPlayerId === session.lobby.hostPlayerId;
+  const showGame = !session.roomClosed && session.connected && !session.needsName && session.lobby?.started && session.gameState && session.myPlayerId;
 
-  return (
-    <div className="flex flex-1 flex-col items-center gap-6 px-4 py-8">
-      <header className="flex w-full max-w-4xl flex-col gap-2">
-        <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <span />
-          <div className="justify-self-center text-center">
-            <LocationTitle def={session.lobby ? CENTER_EFFECTS[session.lobby.centerEffect] : null} fallback={`Room ${roomCode}`} />
-          </div>
-          <div className="justify-self-end">
-            <ThemeToggle />
-          </div>
+  const header = (
+    <header className="flex w-full max-w-4xl flex-col gap-2">
+      <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-2">
+        <Link
+          href="/"
+          className="justify-self-start flex items-center gap-1 rounded-lg border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          <HomeIcon />
+          Home
+        </Link>
+        <div className="justify-self-center text-center">
+          <LocationTitle def={session.lobby ? CENTER_EFFECTS[session.lobby.centerEffect] : null} fallback={`Room ${roomCode}`} />
         </div>
-        <div className="flex w-full flex-wrap items-center gap-1.5">
-          <Link
-            href="/"
-            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
-          >
-            ◀ Home
-          </Link>
-          {!session.roomClosed && session.connected && !session.needsName && session.lobby?.started && session.gameState && (
+        <div className="justify-self-end">
+          <ThemeToggle />
+        </div>
+      </div>
+      <div className="flex w-full flex-wrap items-center justify-between gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {showGame && (
             <button
               onClick={() => setCardsCollapsed(!cardsCollapsed)}
-              className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+              className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
             >
               {cardsCollapsed ? "▶" : "◀"} Cards
             </button>
           )}
           <button
             onClick={() => setShowInstructions(true)}
-            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
           >
             How to play
           </button>
-          {!session.roomClosed && isHost && (
-            <button
-              onClick={() => setConfirmingEnd(true)}
-              className="rounded-full border border-red-300 px-2.5 py-1 text-xs whitespace-nowrap text-red-600 hover:bg-red-50 sm:px-4 sm:py-1.5 sm:text-sm dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
-            >
-              End room
-            </button>
-          )}
         </div>
-      </header>
+        {!session.roomClosed && isHost && (
+          <button
+            onClick={() => setConfirmingEnd(true)}
+            className="rounded-full border border-red-300 px-2.5 py-0 text-xs whitespace-nowrap text-red-600 hover:bg-red-50 sm:px-4 sm:py-0.5 sm:text-sm dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+          >
+            End room
+          </button>
+        )}
+      </div>
+    </header>
+  );
 
+  const popups = (
+    <>
       {showInstructions && <InstructionsModal onClose={() => setShowInstructions(false)} />}
 
       {confirmingEnd && (
@@ -126,6 +132,37 @@ function Room() {
           </div>
         </div>
       )}
+    </>
+  );
+
+  // The game view (once started) owns its own CardCatalog/GameStatusPanel row -- same
+  // lg:flex-row-sidebar structure /play uses -- with `header` rendered as the first
+  // child of its middle column, so the sidebar/status panel span the full height
+  // alongside the header too, not just alongside the board underneath it. Every other
+  // screen (lobby, name entry, connecting, room closed) has no sidebar content, so it
+  // keeps the plain centered column layout.
+  if (showGame && session.gameState && session.myPlayerId && session.lobby) {
+    return (
+      <div className="flex flex-1 flex-col items-center px-4 py-8">
+        {popups}
+        <GameView
+          header={header}
+          state={session.gameState}
+          lobby={session.lobby}
+          myPlayerId={session.myPlayerId}
+          dispatch={session.dispatch}
+          rematch={session.rematch}
+          cardsCollapsed={cardsCollapsed}
+          onCardsCollapsedChange={setCardsCollapsed}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 flex-col items-center gap-6 px-4 py-8">
+      {header}
+      {popups}
 
       {session.roomClosed && (
         <div className="flex w-full max-w-xs flex-col items-center gap-3 rounded-lg border border-zinc-300 p-5 text-center dark:border-zinc-700">
@@ -146,18 +183,6 @@ function Room() {
 
       {!session.roomClosed && session.connected && !session.needsName && !session.lobby?.started && (
         <Lobby roomCode={roomCode} session={session} />
-      )}
-
-      {!session.roomClosed && session.connected && !session.needsName && session.lobby?.started && session.gameState && session.myPlayerId && (
-        <GameView
-          state={session.gameState}
-          lobby={session.lobby}
-          myPlayerId={session.myPlayerId}
-          dispatch={session.dispatch}
-          rematch={session.rematch}
-          cardsCollapsed={cardsCollapsed}
-          onCardsCollapsedChange={setCardsCollapsed}
-        />
       )}
     </div>
   );
@@ -288,7 +313,14 @@ function GameView({
   rematch,
   cardsCollapsed,
   onCardsCollapsedChange,
+  header,
 }: {
+  /** Rendered as the first child of the middle column, alongside the board/hand -- not
+   * a sibling above this whole component -- so it shares CardCatalog/GameStatusPanel's
+   * row and sits flush against their top edge, same structure /play uses (see its own
+   * CardCatalog doc comment). Room() computes it once so it can also show above the
+   * lobby/name-entry/connecting screens, which never mount this component at all. */
+  header: React.ReactNode;
   state: GameState;
   lobby: LobbyState;
   myPlayerId: string;
@@ -433,6 +465,7 @@ function GameView({
       />
 
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">
+        {header}
         <p className="min-h-[1.25rem] text-sm">
           {state.phase === "playing"
             ? isMyTurn

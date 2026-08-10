@@ -36,11 +36,13 @@ export function ThemeToggle() {
     setTheme(next);
   }
 
+  // rounded-lg (not the rounded-full pill every action button uses) -- a different
+  // frame shape sets this apart at a glance as a utility/nav control, not an action.
   return (
     <button
       onClick={toggle}
       aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-      className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+      className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
     >
       {theme === "dark" ? "🌙 Dark" : "☀️ Light"}
     </button>

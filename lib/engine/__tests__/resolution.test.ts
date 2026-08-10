@@ -55,11 +55,29 @@ describe("resolveBoard — Footman row/column bonus", () => {
     expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
   });
 
-  it("cards don't need to be adjacent or contiguous -- just in the same row/column", () => {
+  it("a gap in the row breaks the line -- no bonus even with 3 owned cards total", () => {
     const board: Board = new Map();
     const f0 = place(board, 0, 0, "Footman", "p1");
-    place(board, 4, 0, "Warlord", "p1");
-    place(board, 7, 0, "Giant", "p1");
+    place(board, 4, 0, "Warlord", "p1"); // not contiguous with f0
+    place(board, 7, 0, "Giant", "p1"); // not contiguous with either
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+  });
+
+  it("an opponent's card in the middle of the row breaks the line", () => {
+    const board: Board = new Map();
+    const f0 = place(board, 0, 0, "Footman", "p1");
+    place(board, 1, 0, "Warlord", "p2"); // breaks the line
+    place(board, 2, 0, "Giant", "p1");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+  });
+
+  it("counts the line through itself in both directions, not just one side", () => {
+    const board: Board = new Map();
+    place(board, 0, 0, "Warlord", "p1");
+    const f0 = place(board, 1, 0, "Footman", "p1"); // in the middle
+    place(board, 2, 0, "Giant", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, f0.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
@@ -594,10 +612,11 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     place(board, 2, 1, "Giant", "p2");
     place(board, 2, 3, "Giant", "p2");
     const footman = place(board, 4, 2, "Footman", "p2"); // adjacent to Bannerman only
+    place(board, 5, 2, "Giant", "p2"); // contiguous on the other side, completing Footman's own line
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    // No +2 from Bannerman (negated) -- but Footman's own row bonus still fires,
+    // No +2 from Bannerman (negated) -- but Footman's own line bonus still fires,
     // since negation cancels a card's own/outgoing effects, not its ownership as read
-    // by others: row y=2 has 3 p2-owned cards (Giant, Bannerman, Footman itself).
+    // by others: row y=2 has an unbroken p2-owned line of Bannerman-Footman-Giant.
     expect(find(cards, footman.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
 
@@ -649,10 +668,11 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     place(board, 2, 3, "Giant", "p2");
     const f1 = place(board, 4, 2, "Footman", "p2");
     const f2 = place(board, 3, 1, "Footman", "p2");
+    place(board, 5, 2, "Giant", "p2"); // contiguous on the other side, completing f1's own line
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, pb.instanceId).negated).toBe(true);
-    // No steal from the negated Plague Bearer -- but f1's own row bonus still fires:
-    // row y=2 has 3 p2-owned cards (Giant, Plague Bearer, f1 itself).
+    // No steal from the negated Plague Bearer -- but f1's own line bonus still fires:
+    // row y=2 has an unbroken p2-owned line of Plague Bearer-f1-Giant.
     expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
     expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
   });

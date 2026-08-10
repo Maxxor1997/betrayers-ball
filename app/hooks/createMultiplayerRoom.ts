@@ -3,6 +3,7 @@ import { ClientToServerEvents, ServerToClientEvents } from "@/lib/server/protoco
 import { CenterEffectId } from "@/lib/engine/types";
 import { saveCredentials } from "./multiplayerCredentials";
 import { MULTIPLAYER_UNAVAILABLE_MESSAGE } from "./multiplayerUnavailable";
+import { CONNECT_TIMEOUT_MS } from "./socketConnectTimeout";
 
 /**
  * One-shot "create a room" call for the home screen -- opens its own throwaway
@@ -18,7 +19,7 @@ export function createMultiplayerRoom(
   asDisplay = false
 ): Promise<{ roomCode: string } | { error: string }> {
   return new Promise((resolve) => {
-    const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io();
+    const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io({ timeout: CONNECT_TIMEOUT_MS });
     let settled = false;
     const finish = (result: { roomCode: string } | { error: string }) => {
       if (settled) return;

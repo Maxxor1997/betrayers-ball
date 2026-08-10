@@ -6,6 +6,7 @@ import { ClientToServerEvents, fromWireState, LobbyState, ServerToClientEvents }
 import { CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
 import { clearCredentials, loadCredentials, saveCredentials, StoredCredentials } from "./multiplayerCredentials";
 import { MULTIPLAYER_UNAVAILABLE_MESSAGE } from "./multiplayerUnavailable";
+import { CONNECT_TIMEOUT_MS } from "./socketConnectTimeout";
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -57,7 +58,7 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const socket: ClientSocket = io();
+    const socket: ClientSocket = io({ timeout: CONNECT_TIMEOUT_MS });
     socketRef.current = socket;
 
     socket.on("connect", () => {

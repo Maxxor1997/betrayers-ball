@@ -13,6 +13,7 @@ import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, playerAccentClass, playerDotColorClass } from "@/lib/config/players";
 import { NewGameSetup, PendingFlip } from "./types";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
+import { HomeIcon } from "@/app/components/HomeIcon";
 import { CardCatalog } from "@/app/components/CardCatalog";
 import { InstructionsModal } from "@/app/components/InstructionsModal";
 import { LocationTitle } from "@/app/components/LocationTitle";
@@ -471,7 +472,16 @@ function Game() {
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">
       <header className="flex w-full max-w-4xl flex-col gap-2">
         <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <span />
+          {/* rounded-lg (not the rounded-full pill every action button below uses) --
+              a different frame shape, same as ThemeToggle, sets these two apart at a
+              glance as utility/nav controls rather than in-game actions. */}
+          <Link
+            href="/"
+            className="justify-self-start flex items-center gap-1 rounded-lg border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            <HomeIcon />
+            Home
+          </Link>
           <div className="justify-self-center text-center">
             <LocationTitle def={CENTER_EFFECTS[state.config.centerEffect]} />
           </div>
@@ -479,38 +489,35 @@ function Game() {
             <ThemeToggle />
           </div>
         </div>
-        <div className="flex w-full flex-wrap items-center gap-1.5">
-          <span className="text-sm whitespace-nowrap text-zinc-500">{playerCount} players</span>
-          <Link
-            href="/"
-            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
-          >
-            ◀ Home
-          </Link>
-          <button
-            onClick={() => setCardsCollapsed(!cardsCollapsed)}
-            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
-          >
-            {cardsCollapsed ? "▶" : "◀"} Cards
-          </button>
-          <button
-            onClick={() => setShowInstructions(true)}
-            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
-          >
-            How to play
-          </button>
-          <button
-            onClick={() => setShowMyStats(true)}
-            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
-          >
-            My stats
-          </button>
-          <button
-            onClick={openNewGameSetup}
-            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
-          >
-            New game
-          </button>
+        <div className="flex w-full flex-wrap items-center justify-between gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => setCardsCollapsed(!cardsCollapsed)}
+              className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              {cardsCollapsed ? "▶" : "◀"} Cards
+            </button>
+            <button
+              onClick={() => setShowInstructions(true)}
+              className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              How to Play
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => setShowMyStats(true)}
+              className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              My Stats
+            </button>
+            <button
+              onClick={openNewGameSetup}
+              className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              New Game
+            </button>
+          </div>
         </div>
       </header>
 

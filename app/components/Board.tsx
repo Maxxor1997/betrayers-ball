@@ -171,7 +171,7 @@ export function BoardGrid({
                   {displayFaceUp ? (
                     <>
                       <span
-                        className={`w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
+                        className={`hidden w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight sm:block ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
                       >
                         {def.name}
                       </span>
