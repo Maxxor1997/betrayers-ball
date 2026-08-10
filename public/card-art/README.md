@@ -26,3 +26,10 @@ Guidelines for a file that'll actually look good at tiny sizes:
   as ~20px on an actual card face.
 - **No fixed `width`/`height` on the `<svg>` root** -- just the `viewBox`, so it can be
   freely resized by CSS.
+
+## Attribution
+
+Some files are adapted from third-party sources whose license requires attribution if
+this project is ever published. Credit needed:
+
+- `Pretender.svg` (trident): <a href="https://www.vecteezy.com/free-vector/trident">Trident Vectors by Vecteezy</a>
