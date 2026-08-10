@@ -1,5 +1,6 @@
 import { io, Socket } from "socket.io-client";
 import { ClientToServerEvents, RoomSummary, ServerToClientEvents } from "@/lib/server/protocol";
+import { MULTIPLAYER_UNAVAILABLE_MESSAGE } from "./multiplayerUnavailable";
 
 /**
  * One-shot "what rooms can I join right now" fetch for the home screen -- same
@@ -24,6 +25,6 @@ export function listMultiplayerRooms(): Promise<{ rooms: RoomSummary[] } | { err
         else finish({ error: ack.error });
       });
     });
-    socket.on("connect_error", (err) => finish({ error: err.message || "Couldn't reach the game server." }));
+    socket.on("connect_error", () => finish({ error: MULTIPLAYER_UNAVAILABLE_MESSAGE }));
   });
 }

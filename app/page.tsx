@@ -7,6 +7,7 @@ import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { InstructionsModal } from "@/app/components/InstructionsModal";
 import { CardCatalog } from "@/app/components/CardCatalog";
 import { NewGameModal, NewGameSetup } from "@/app/components/NewGameModal";
+import { MultiplayerUnavailableBanner, MultiplayerUnavailableModal } from "@/app/components/MultiplayerUnavailableNotice";
 import { createMultiplayerRoom } from "@/app/hooks/createMultiplayerRoom";
 import { listMultiplayerRooms } from "@/app/hooks/listMultiplayerRooms";
 import { loadCredentials } from "@/app/hooks/multiplayerCredentials";
@@ -143,7 +144,7 @@ function ActiveSessions() {
         </button>
       </div>
 
-      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {error && <MultiplayerUnavailableBanner />}
       {rooms && rooms.length === 0 && !error && (
         <p className="text-sm text-zinc-500 dark:text-zinc-400">No games on this network right now.</p>
       )}
@@ -236,6 +237,7 @@ export default function HomePage() {
     const result = await createMultiplayerRoom(hostName.trim() || "Host", setup.playerCount, centerEffect);
     setHosting(false);
     if ("error" in result) {
+      setNewGameSetup(null);
       setHostError(result.error);
       return;
     }
@@ -251,6 +253,7 @@ export default function HomePage() {
     const result = await createMultiplayerRoom("Host", setup.playerCount, centerEffect, true);
     setHosting(false);
     if ("error" in result) {
+      setNewGameSetup(null);
       setHostError(result.error);
       return;
     }
@@ -280,8 +283,8 @@ export default function HomePage() {
         <header className="flex w-full flex-col gap-5">
           <div className="flex w-full items-center justify-between gap-2">
             <h1 className="font-serif text-3xl leading-none font-bold tracking-tight sm:text-4xl">
-              <span className="text-zinc-900 dark:text-zinc-50">Court of the </span>
-              <span className="text-red-700 dark:text-red-500">Kingslayer</span>
+              <span className="text-zinc-900 dark:text-zinc-50">Betrayer&apos;s </span>
+              <span className="text-red-700 dark:text-red-500">Ball</span>
             </h1>
             <ThemeToggle />
           </div>
@@ -317,9 +320,10 @@ export default function HomePage() {
           />
         )}
 
+        {hostError && <MultiplayerUnavailableModal onClose={() => setHostError(null)} />}
+
         <div className="flex w-full flex-col gap-4">
           <h2 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">Play</h2>
-          {hostError && <p className="text-xs text-red-600 dark:text-red-400">{hostError}</p>}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <PlayOption
               title="Singleplayer"

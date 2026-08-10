@@ -5,12 +5,20 @@ import { io, Socket } from "socket.io-client";
 import { ClientToServerEvents, fromWireState, LobbyState, ServerToClientEvents } from "@/lib/server/protocol";
 import { CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
 import { clearCredentials, loadCredentials, saveCredentials, StoredCredentials } from "./multiplayerCredentials";
+import { MULTIPLAYER_UNAVAILABLE_MESSAGE } from "./multiplayerUnavailable";
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 export interface MultiplayerSession {
   /** True once this socket has completed its handshake -- not the same as being seated in the room yet. */
   connected: boolean;
+  /** True once the socket has failed at least one connection attempt (e.g. no Socket.IO
+   * server reachable at all, like a single-player-only Vercel deploy) -- distinct from
+   * simply "not connected yet," which also covers the normal brief moment before the
+   * first handshake completes. The socket keeps retrying in the background regardless
+   * (socket.io-client's default reconnection behavior), so this can flip back to false
+   * via the ordinary `connect` handler if the server comes back. */
+  connectFailed: boolean;
   lobby: LobbyState | null;
   /** Deserialized from the last game:state push (see fromWireState) -- null before the game starts. */
   gameState: GameState | null;
@@ -40,6 +48,7 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
   const socketRef = useRef<ClientSocket | null>(null);
   const credentialsRef = useRef<StoredCredentials | null>(null);
   const [connected, setConnected] = useState(false);
+  const [connectFailed, setConnectFailed] = useState(false);
   const [lobby, setLobby] = useState<LobbyState | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
@@ -53,6 +62,7 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
 
     socket.on("connect", () => {
       setConnected(true);
+      setConnectFailed(false);
       const stored = loadCredentials(roomCode);
       if (!stored) {
         setNeedsName(true);
@@ -74,6 +84,10 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
     });
 
     socket.on("disconnect", () => setConnected(false));
+    socket.on("connect_error", () => {
+      setConnectFailed(true);
+      setError(MULTIPLAYER_UNAVAILABLE_MESSAGE);
+    });
     socket.on("lobby:update", (next) => setLobby(next));
     socket.on("game:state", ({ state, myPlayerId: id }) => {
       setGameState(fromWireState(state));
@@ -153,5 +167,5 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
     [roomCode]
   );
 
-  return { connected, lobby, gameState, myPlayerId, needsName, roomClosed, error, join, startGame, rematch, endRoom, dispatch };
+  return { connected, connectFailed, lobby, gameState, myPlayerId, needsName, roomClosed, error, join, startGame, rematch, endRoom, dispatch };
 }

@@ -107,7 +107,7 @@ function buildBoardStateMarkdown(state: GameState, endResult: ResolutionResult |
   const revealAll = state.phase === "ended";
   const lines: string[] = [];
 
-  lines.push("# Court of the Kingslayer State", "");
+  lines.push("# Betrayer's Ball State", "");
   lines.push(`- **Round:** ${state.round} / ${state.config.roundCap}`);
   lines.push(`- **Phase:** ${state.phase}`);
   lines.push(`- **Players:** ${state.config.playerCount}`);

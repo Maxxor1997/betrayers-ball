@@ -2,6 +2,7 @@ import { io, Socket } from "socket.io-client";
 import { ClientToServerEvents, ServerToClientEvents } from "@/lib/server/protocol";
 import { CenterEffectId } from "@/lib/engine/types";
 import { saveCredentials } from "./multiplayerCredentials";
+import { MULTIPLAYER_UNAVAILABLE_MESSAGE } from "./multiplayerUnavailable";
 
 /**
  * One-shot "create a room" call for the home screen -- opens its own throwaway
@@ -36,6 +37,6 @@ export function createMultiplayerRoom(
         }
       });
     });
-    socket.on("connect_error", (err) => finish({ error: err.message || "Couldn't reach the game server." }));
+    socket.on("connect_error", () => finish({ error: MULTIPLAYER_UNAVAILABLE_MESSAGE }));
   });
 }

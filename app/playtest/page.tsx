@@ -571,7 +571,7 @@ function Playtest() {
       <header className="flex w-full max-w-4xl flex-col gap-2">
         <div className="flex w-full items-center justify-between gap-2">
           <h1 className="text-lg font-semibold sm:text-xl">
-            Court of the Kingslayer <span className="font-normal text-zinc-500">— playtest stats</span>
+            Betrayer&apos;s Ball <span className="font-normal text-zinc-500">— playtest stats</span>
           </h1>
           <ThemeToggle />
         </div>

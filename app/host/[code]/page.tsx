@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMultiplayerSession } from "@/app/hooks/useMultiplayerSession";
+import { MultiplayerUnavailableBanner } from "@/app/components/MultiplayerUnavailableNotice";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
 import { BoardGrid } from "@/app/components/Board";
@@ -134,7 +135,11 @@ function Display() {
         </div>
       )}
 
-      {!session.roomClosed && !session.connected && <p className="text-sm text-zinc-500">Connecting to the game server…</p>}
+      {!session.roomClosed && !session.connected && session.connectFailed && <MultiplayerUnavailableBanner />}
+
+      {!session.roomClosed && !session.connected && !session.connectFailed && (
+        <p className="text-sm text-zinc-500">Connecting to the game server…</p>
+      )}
 
       {!session.roomClosed && session.connected && session.needsName && (
         <div className="flex w-full max-w-xs flex-col items-center gap-3 rounded-lg border border-zinc-300 p-5 text-center dark:border-zinc-700">

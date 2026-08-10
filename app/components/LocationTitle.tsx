@@ -2,7 +2,7 @@ import { CenterEffectDef, splitTitle } from "@/lib/content/centerEffects";
 
 /**
  * The gameplay screen's big stylized location title -- same font/size treatment as
- * the home screen's own "Court of the Kingslayer", but per-location: a themed color
+ * the home screen's own "Betrayer's Ball", but per-location: a themed color
  * (CenterEffectDef.themeColorClass) picked out around whichever part of the name is
  * most evocative (CenterEffectDef.titleHighlight), the rest in the default
  * foreground color. `def` is null only for multiplayer's brief window before the
