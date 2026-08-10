@@ -177,7 +177,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   },
   Berserker: {
     id: "Berserker",
-    name: "Heaving Hydra",
+    name: "Hydra",
     base: 2,
     bucket: "Engine",
     get text() {
