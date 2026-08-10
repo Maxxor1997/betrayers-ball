@@ -283,8 +283,8 @@ export default function HomePage() {
         <header className="flex w-full flex-col gap-5">
           <div className="flex w-full items-center justify-between gap-2">
             <h1 className="font-serif text-3xl leading-none font-bold tracking-tight sm:text-4xl">
-              <span className="text-zinc-900 dark:text-zinc-50">Betrayer&apos;s </span>
-              <span className="text-red-700 dark:text-red-500">Ball</span>
+              <span className="text-red-700 dark:text-red-500">Betrayer&apos;s </span>
+              <span className="text-zinc-900 dark:text-zinc-50">Ball</span>
             </h1>
             <ThemeToggle />
           </div>
