@@ -115,7 +115,7 @@ export function BoardGrid({
                 onMouseEnter={() => setHoveredKey(key)}
                 onMouseLeave={() => setHoveredKey((prev) => (prev === key ? null : prev))}
               >
-                <div className="flex aspect-square w-full items-center justify-center rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400">
+                <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400">
                   {displayLabel}
                 </div>
                 {hoveredKey === key && (
@@ -170,8 +170,12 @@ export function BoardGrid({
                 >
                   {displayFaceUp ? (
                     <>
+                      {/* Keyed off the cell's own rendered size (@container), not the
+                          viewport -- an 8p board's cells can be too small to show a
+                          readable name even on a wide desktop screen, and a 2-3p
+                          board's cells can be plenty roomy even on a phone. */}
                       <span
-                        className={`hidden w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight sm:block ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
+                        className={`hidden w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight @[52px]:block ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
                       >
                         {def.name}
                       </span>
