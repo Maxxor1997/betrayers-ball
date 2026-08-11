@@ -8,6 +8,7 @@ import { inBounds, isOwnerlessPosition } from "@/lib/engine/board";
 import { PLAYER_COLOR_CLASSES } from "@/lib/config/players";
 import { computeNegatedInstanceIds, ResolvedCard } from "@/lib/engine/resolution";
 import { CardId, GameState, Position, posKey } from "@/lib/engine/types";
+import { useHasHover } from "@/app/hooks/useHasHover";
 import { visibleBreakdown } from "./scoreBreakdown";
 
 /** Index-based, not identity-based -- same seat position always gets the same color regardless of who (human or AI, single- or multiplayer) sits there. */
@@ -59,6 +60,7 @@ export function BoardGrid({
   const rows = Array.from({ length: height }, (_, y) => y);
   const cols = Array.from({ length: width }, (_, x) => x);
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const hasHover = useHasHover();
 
   // Cells are sized to fill their grid column (aspect-square, no fixed px) rather than
   // a fixed h-20 w-20 -- with wider/taller boards (7-8p can be 11+ columns or rows) a
@@ -91,6 +93,13 @@ export function BoardGrid({
         gridTemplateColumns: `repeat(${width}, minmax(0, 1fr))`,
         width: `min(100%, ${naturalWidthPx}px, ${widthForHeightBudget})`,
       }}
+      // Dismisses any open tooltip on mobile when tapping elsewhere on the board --
+      // an empty cell, or a card whose own tap-toggle stopped this click from
+      // reaching here (see the two card blocks below). Also covers "doing another
+      // action" for free: placing a card or flipping one both land on this same
+      // handler (their own onClick doesn't touch hoveredKey or stop propagation), so
+      // a lingering tooltip from a previous tap gets cleared as a side effect.
+      onClick={() => setHoveredKey(null)}
     >
       {rows.map((y) =>
         cols.map((x) => {
@@ -112,9 +121,12 @@ export function BoardGrid({
               <div
                 key={key}
                 className="relative @container"
-                onMouseEnter={() => setHoveredKey(key)}
-                onMouseLeave={() => setHoveredKey((prev) => (prev === key ? null : prev))}
-                onClick={() => setHoveredKey((prev) => (prev === key ? null : key))}
+                // Hover-capable devices get real hover; touch devices get an explicit
+                // tap-to-toggle instead -- never both (see useHasHover's doc comment
+                // for why mixing them needs two taps on touch to ever show anything).
+                onMouseEnter={hasHover ? () => setHoveredKey(key) : undefined}
+                onMouseLeave={hasHover ? () => setHoveredKey((prev) => (prev === key ? null : prev)) : undefined}
+                onClick={hasHover ? undefined : (e) => { e.stopPropagation(); setHoveredKey((prev) => (prev === key ? null : key)); }}
               >
                 {/* Below the threshold, the label can't fit without wrapping (which,
                     combined with the aspect-square cell, either overflows or looks
@@ -168,16 +180,26 @@ export function BoardGrid({
               <div
                 key={key}
                 className="relative"
-                onMouseEnter={() => setHoveredKey(key)}
-                onMouseLeave={() => setHoveredKey((prev) => (prev === key ? null : prev))}
-                // On the wrapper (not just the button) so it still fires when the
-                // button itself is disabled -- most cards aren't flip-clickable, and a
-                // disabled <button> never dispatches (or bubbles) a click at all.
-                onClick={() => setHoveredKey((prev) => (prev === key ? null : key))}
+                // Hover-capable devices get real hover; touch devices get an explicit
+                // tap-to-toggle instead -- never both (see useHasHover's doc comment
+                // for why mixing them needs two taps on touch to ever show anything).
+                // The tap toggle lives on the wrapper (not just the button) so it
+                // still fires when the button itself is disabled -- most cards aren't
+                // flip-clickable, and a disabled <button> never dispatches a click.
+                onMouseEnter={hasHover ? () => setHoveredKey(key) : undefined}
+                onMouseLeave={hasHover ? () => setHoveredKey((prev) => (prev === key ? null : prev)) : undefined}
+                onClick={hasHover ? undefined : (e) => { e.stopPropagation(); setHoveredKey((prev) => (prev === key ? null : key)); }}
               >
                 <button
-                  onClick={() => onCellClick(pos)}
-                  disabled={!clickable}
+                  // Not a native `disabled` attribute -- see Hand.tsx's own card
+                  // button for why: disabled buttons unreliably suppress mouse events
+                  // across browsers, including mouseenter on the wrapping div above
+                  // (which is what actually listens for hover), silently killing this
+                  // card's hover/tooltip whenever it isn't flip-clickable right now.
+                  onClick={() => {
+                    if (clickable) onCellClick(pos);
+                  }}
+                  aria-disabled={!clickable}
                   title={clickable ? "Tap to flip face-up" : undefined}
                   className={`@container flex aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 p-1 text-center ${ownerColorClass(state, card.ownerId)} ${
                     clickable ? "cursor-pointer ring-2 ring-amber-400" : ""

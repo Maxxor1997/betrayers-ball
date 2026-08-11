@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CardArt } from "@/app/components/CardArt";
+import { useHasHover } from "@/app/hooks/useHasHover";
 import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, isAvailableAtPlayerCount } from "@/lib/content/centerEffects";
 import { SELECTABLE_LOBBY_SIZES } from "@/lib/config/players";
@@ -123,6 +124,7 @@ export function CardCatalog({
   /** When set, the "(Np)" header becomes an interactive player-count select instead of static text -- only the standalone home-screen catalog (no real game to pin the count to) passes this. */
   onPlayerCountChange?: (playerCount: number) => void;
 }) {
+  const hasHover = useHasHover();
   const [hoveredCard, setHoveredCard] = useState<{ id: CardId; rect: DOMRect } | null>(null);
   const [hoveredBucket, setHoveredBucket] = useState<{ bucket: CardBucket; rect: DOMRect } | null>(null);
   const [hoveredLocationsHeader, setHoveredLocationsHeader] = useState<DOMRect | null>(null);
@@ -244,19 +246,23 @@ export function CardCatalog({
                       <div
                         key={id}
                         className="relative flex min-w-0 items-center gap-2"
-                        onMouseEnter={(e) => setHoveredCard({ id, rect: anchorRect(e.currentTarget) })}
-                        onMouseLeave={() => setHoveredCard((prev) => (prev?.id === id ? null : prev))}
-                        // Touch devices have no hover -- tap toggles the same tooltip
-                        // a mouse would get from hovering, so mobile can still read a
-                        // card's full description, not just the (now 2-line) summary.
-                        // The rect is read synchronously here, not inside the setState
-                        // updater below -- a native event's `currentTarget` is only
-                        // valid during the event's own dispatch, so reading it lazily
-                        // inside a deferred updater callback can hit a null target.
-                        onClick={(e) => {
-                          const rect = anchorRect(e.currentTarget);
-                          setHoveredCard((prev) => (prev?.id === id ? null : { id, rect }));
-                        }}
+                        // Hover-capable devices get real hover; touch devices get an
+                        // explicit tap-to-toggle instead -- never both (mixing them
+                        // means a tap's synthetic mouseenter and click cancel each
+                        // other out, needing two taps to ever show anything -- see
+                        // useHasHover's doc comment). The tap's rect is read
+                        // synchronously, not inside the setState updater -- a native
+                        // event's currentTarget is only valid during its own dispatch.
+                        onMouseEnter={hasHover ? (e) => setHoveredCard({ id, rect: anchorRect(e.currentTarget) }) : undefined}
+                        onMouseLeave={hasHover ? () => setHoveredCard((prev) => (prev?.id === id ? null : prev)) : undefined}
+                        onClick={
+                          hasHover
+                            ? undefined
+                            : (e) => {
+                                const rect = anchorRect(e.currentTarget);
+                                setHoveredCard((prev) => (prev?.id === id ? null : { id, rect }));
+                              }
+                        }
                       >
                         <div
                           className={`relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${boxToneClass}`}

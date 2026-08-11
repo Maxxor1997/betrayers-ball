@@ -309,7 +309,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     base: 4,
     bucket: "Engine",
     get text() {
-      return `Gives +2 to each adj. ${CARD_DEFS.Footman.name}, +1 to others`;
+      return `+2 to adj. ${CARD_DEFS.Footman.name}, +1 to others`;
     },
     get fullText() {
       return `Gives +2 to each adjacent ${CARD_DEFS.Footman.name}, +1 to each other adjacent card (any owner, not itself).`;

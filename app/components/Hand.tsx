@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CardArt } from "@/app/components/CardArt";
 import { CARD_DEFS } from "@/lib/content/cards";
+import { useHasHover } from "@/app/hooks/useHasHover";
 import { CardId, CardInstance } from "@/lib/engine/types";
 
 export interface HandProps {
@@ -21,6 +22,7 @@ export interface HandProps {
 export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, onHoverCardId, disabled, ownerAccentClass }: HandProps) {
   const sortedCards = [...cards].sort((a, b) => CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name));
   const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(null);
+  const hasHover = useHasHover();
 
   // Cards shrink in width together (flex-basis 7rem down to a 4rem floor) to try to
   // fit one row without wrapping, but height stays fixed rather than tracking width
@@ -29,6 +31,15 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
   // purpose: setting overflow-x to anything but "visible" forces the browser to also
   // clip overflow-y (a CSS rule, not a bug), which would cut off these cards' hover
   // tooltips.
+  //
+  // The button's own content is top-anchored (justify-start, not justify-center):
+  // centering the whole name/icon/base/description stack as one block means a card
+  // whose description happens to wrap onto more lines pushes its icon and base value
+  // further up than a neighboring card with a short one-line description -- so a row
+  // of hand cards had their icons/values sitting at different heights depending on
+  // effect text length, purely as a side effect of centering. Anchoring to the top
+  // keeps name/icon/base at the same fixed height on every card regardless of how
+  // much room the description below them needs.
   return (
     <div className="flex w-full flex-wrap justify-center gap-2 py-1">
       {sortedCards.map((card) => {
@@ -39,28 +50,64 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
             key={card.instanceId}
             className="relative"
             style={{ flex: "1 1 7rem", minWidth: "4rem", maxWidth: "7rem" }}
-            onMouseEnter={() => {
-              setHoveredInstanceId(card.instanceId);
-              onHoverCardId(card.cardId);
-            }}
-            onMouseLeave={() => {
-              setHoveredInstanceId((prev) => (prev === card.instanceId ? null : prev));
-              onHoverCardId(null);
-            }}
+            // Hover-capable devices get real hover; touch devices get an explicit
+            // tap-to-toggle instead -- never both. Mixing them means a tap fires a
+            // synthetic mouseenter immediately followed by click, so a click that
+            // *toggles* what mouseenter just turned on cancels out on the same tap --
+            // needing a second tap to ever show anything (see useHasHover's doc
+            // comment). The tap toggle lives on the wrapper (not the button, which is
+            // disabled outside your turn and so wouldn't bubble a click at all).
+            onMouseEnter={
+              hasHover
+                ? () => {
+                    setHoveredInstanceId(card.instanceId);
+                    onHoverCardId(card.cardId);
+                  }
+                : undefined
+            }
+            onMouseLeave={
+              hasHover
+                ? () => {
+                    setHoveredInstanceId((prev) => (prev === card.instanceId ? null : prev));
+                    onHoverCardId(null);
+                  }
+                : undefined
+            }
+            onClick={
+              hasHover
+                ? undefined
+                : () => {
+                    const next = hoveredInstanceId === card.instanceId ? null : card.instanceId;
+                    setHoveredInstanceId(next);
+                    onHoverCardId(next ? card.cardId : null);
+                  }
+            }
           >
             <button
-              onClick={() => onCardClick(card.instanceId)}
+              // Not a native `disabled` attribute -- disabled buttons unreliably
+              // suppress mouse events across browsers (WebKit especially), including
+              // mouseenter on an ancestor that's listening for it, which was silently
+              // killing this card's hover/tooltip during an opponent's turn even
+              // though the listener itself lives on the wrapping div above, not this
+              // button. Gating the handler body instead keeps the button a normal,
+              // fully hoverable element; aria-disabled keeps it announced correctly.
+              onClick={() => {
+                if (!disabled) onCardClick(card.instanceId);
+              }}
               draggable={!disabled}
               onDragStart={(e) => onCardDragStart(e, card.instanceId)}
-              disabled={disabled}
-              className={`@container flex h-28 w-full flex-col items-center justify-center gap-1 rounded-md border-2 p-1.5 text-center ${
+              aria-disabled={disabled}
+              className={`@container flex h-28 w-full flex-col items-center justify-start gap-1 rounded-md border-2 p-1.5 text-center ${
                 disabled ? "cursor-default" : "cursor-grab active:cursor-grabbing"
               } ${selected ? "border-amber-500 bg-amber-50 dark:bg-amber-950" : ownerAccentClass}`}
             >
               <span className="w-full text-[length:clamp(8px,20cqw,10px)] leading-tight break-words font-semibold">{def.name}</span>
               <CardArt cardId={card.cardId} className="h-8 w-8 shrink-0" />
               <span className="text-[length:clamp(14px,32cqw,20px)] leading-none font-bold">{def.base}</span>
-              <span className="w-full text-[length:clamp(7px,16cqw,9px)] leading-tight break-words text-zinc-500 dark:text-zinc-400">
+              {/* Truncated to 2 lines, not left to grow -- the card's fixed h-28 stays
+                  put, and hovering already surfaces the full effect text via the
+                  tooltip below, so a long summary doesn't need to fit here in full. */}
+              <span className="line-clamp-2 w-full text-[length:clamp(7px,16cqw,9px)] leading-tight break-words text-zinc-500 dark:text-zinc-400">
                 {def.text}
               </span>
             </button>

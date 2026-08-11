@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { PLAYER_BORDER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
@@ -64,6 +65,7 @@ function PlayerTable({
   votesByRound: Map<number, boolean>;
 }) {
   const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(null);
+  const hasHover = useHasHover();
 
   return (
     <div
@@ -90,14 +92,25 @@ function PlayerTable({
             return (
               <tr key={c.instanceId} className="border-b border-zinc-100 dark:border-zinc-800">
                 <td className="py-1 pr-2 text-zinc-500">{i + 1}</td>
-                <td
-                  className="relative py-1 pr-2"
-                  onMouseEnter={() => setHoveredInstanceId(c.instanceId)}
-                  onMouseLeave={() => setHoveredInstanceId((prev) => (prev === c.instanceId ? null : prev))}
-                >
-                  <span className="cursor-help underline decoration-zinc-400 decoration-dotted underline-offset-2">
+                <td className="relative py-1 pr-2">
+                  {/* A real <button>, not a plain <span> -- on mobile, a long-press on
+                      plain text triggers the browser's native text-selection/translate
+                      popup instead of anything useful here. A button has its own tap
+                      semantics and select-none blocks that selection outright. Hover
+                      vs. tap-to-toggle is split the same way as everywhere else in the
+                      app -- see useHasHover's doc comment for why mixing both means a
+                      tap needs two taps to ever show anything. */}
+                  <button
+                    type="button"
+                    className="cursor-help touch-manipulation [-webkit-touch-callout:none] underline decoration-zinc-400 decoration-dotted underline-offset-2 select-none"
+                    onMouseEnter={hasHover ? () => setHoveredInstanceId(c.instanceId) : undefined}
+                    onMouseLeave={hasHover ? () => setHoveredInstanceId((prev) => (prev === c.instanceId ? null : prev)) : undefined}
+                    onClick={
+                      hasHover ? undefined : () => setHoveredInstanceId((prev) => (prev === c.instanceId ? null : c.instanceId))
+                    }
+                  >
                     {CARD_DEFS[c.cardId].name}
-                  </span>
+                  </button>
                   {hoveredInstanceId === c.instanceId && (
                     <div className="pointer-events-none absolute top-full left-0 z-20 mt-1 w-max min-w-[9rem] max-w-[16rem] rounded bg-zinc-900 px-2 py-1.5 text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
                       {visibleBreakdown(c.breakdown).map((d, j) => (
