@@ -309,10 +309,10 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     base: 4,
     bucket: "Engine",
     get text() {
-      return `gives +2 to each adj. ${CARD_DEFS.Footman.name}, +1 to others`;
+      return `Gives +2 to each adj. ${CARD_DEFS.Footman.name}, +1 to others`;
     },
     get fullText() {
-      return `+2 to each adjacent ${CARD_DEFS.Footman.name}, +1 to each other adjacent card (any owner, not itself).`;
+      return `Gives +2 to each adjacent ${CARD_DEFS.Footman.name}, +1 to each other adjacent card (any owner, not itself).`;
     },
     count: [6, 6, 6, 6, 8, 10, 12],
     valueModifier: ({ board, bounds, pos, addDelta }) => {
@@ -393,7 +393,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Inquisitor",
     base: 4,
     bucket: "Control",
-    text: "−3 per adj. face-down card",
+    text: "−3 to each adj. face-down card",
     fullText: "−3 to each adjacent face-down card (any owner).",
     count: [4, 4, 4, 4, 5, 6, 6],
     valueModifier: ({ board, bounds, pos, addDelta }) => {

@@ -111,13 +111,23 @@ export function BoardGrid({
             return (
               <div
                 key={key}
-                className="relative"
+                className="relative @container"
                 onMouseEnter={() => setHoveredKey(key)}
                 onMouseLeave={() => setHoveredKey((prev) => (prev === key ? null : prev))}
+                onClick={() => setHoveredKey((prev) => (prev === key ? null : key))}
               >
-                <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400">
+                {/* Below the threshold, the label can't fit without wrapping (which,
+                    combined with the aspect-square cell, either overflows or looks
+                    like a mangled two-line squeeze) -- so it's just a solid tinted
+                    block instead, no text. Same idea as the card name's own
+                    @container cutoff, just a different fallback since this tile has
+                    no icon to fall back to. */}
+                <div
+                  className={`hidden aspect-square w-full items-center justify-center overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400 @[52px]:flex`}
+                >
                   {displayLabel}
                 </div>
+                <div className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} bg-current`} />
                 {hoveredKey === key && (
                   <div className="pointer-events-none absolute -top-9 left-1/2 z-10 w-max max-w-[14rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
                     {displayLabel} — {detail}
@@ -135,10 +145,11 @@ export function BoardGrid({
             const faded = revealAll && !card.faceUp;
             const def = CARD_DEFS[card.cardId];
             // Hovering a known card (revealed, or your own even if still face-down)
-            // shows its full effect text -- a UI convenience, not a state change. An
-            // opponent's still-hidden card shows nothing, so no info leaks before a flip.
-            // The hover listener lives on the wrapper div (not the button) so it still
-            // fires even when the button itself is disabled.
+            // shows its short effect text -- same summary as the hand/catalog, not the
+            // full rules text, so a mid-game hover stays a quick glance rather than a
+            // wall of text. An opponent's still-hidden card shows nothing, so no info
+            // leaks before a flip. The hover listener lives on the wrapper div (not the
+            // button) so it still fires even when the button itself is disabled.
             const tooltipOwner = nameFor(card.ownerId);
             // Same "identity known to the viewer" rule as the tooltip above -- an
             // opponent's still-hidden card never gets highlighted, even if it secretly
@@ -146,9 +157,9 @@ export function BoardGrid({
             const identityKnown = displayFaceUp || card.ownerId === viewerId;
             const highlighted = identityKnown && highlightedCardId !== null && card.cardId === highlightedCardId;
             const tooltipDetail = displayFaceUp
-              ? `${def.name} (${def.base}) — ${def.fullText}`
+              ? `${def.name} (${def.base}) — ${def.text}`
               : card.ownerId === viewerId
-                ? `${def.name} (${def.base}) — ${def.fullText} — only visible to you`
+                ? `${def.name} (${def.base}) — ${def.text} — only visible to you`
                 : "face-down card";
             // Only once the game has ended does a score breakdown exist -- see Game()'s
             // `resolvedCards`, computed once and shared with EndScreen's summary table.
@@ -159,6 +170,10 @@ export function BoardGrid({
                 className="relative"
                 onMouseEnter={() => setHoveredKey(key)}
                 onMouseLeave={() => setHoveredKey((prev) => (prev === key ? null : prev))}
+                // On the wrapper (not just the button) so it still fires when the
+                // button itself is disabled -- most cards aren't flip-clickable, and a
+                // disabled <button> never dispatches (or bubbles) a click at all.
+                onClick={() => setHoveredKey((prev) => (prev === key ? null : key))}
               >
                 <button
                   onClick={() => onCellClick(pos)}
@@ -179,9 +194,9 @@ export function BoardGrid({
                       >
                         {def.name}
                       </span>
-                      <CardArt cardId={card.cardId} className={`h-2/5 w-2/5 shrink-0 ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`} />
+                      <CardArt cardId={card.cardId} className={`h-1/2 w-1/2 shrink-0 ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`} />
                       <span
-                        className={`text-[length:clamp(11px,34cqw,18px)] leading-none font-bold ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
+                        className={`text-[length:clamp(9px,26cqw,15px)] leading-none font-bold ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
                       >
                         {def.base}
                       </span>

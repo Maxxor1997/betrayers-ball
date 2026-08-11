@@ -16,21 +16,28 @@ import { CardBucket, CardId, CenterEffectId } from "@/lib/engine/types";
  * (CSS forces overflow-x to clip too whenever overflow-y is scrollable, so any
  * tooltip meant to extend sideways out of a vertically-scrolling sidebar needs this).
  */
-/** Minimum gap kept between a FixedTooltip and the top/bottom viewport edges. */
+/** Minimum gap kept between a FixedTooltip and the viewport edges. */
 const TOOLTIP_VIEWPORT_MARGIN = 8;
 
 export function FixedTooltip({ rect, children }: { rect: DOMRect; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
-  // Starts aligned to the hovered element's top; clamped down to the tooltip's actual
-  // rendered height once known (a hovered element near the bottom of the viewport --
-  // e.g. a scrolled sidebar entry -- would otherwise position the tooltip's *top* on
-  // screen while its body extends off the bottom edge, invisible).
+  // Starts aligned to the hovered element's top-right; clamped once the tooltip's
+  // actual rendered size is known (a hovered element near the bottom of the viewport
+  // -- e.g. a scrolled sidebar entry -- would otherwise position the tooltip's *top*
+  // on screen while its body extends off the bottom edge, invisible). Same idea
+  // horizontally, capped against the right edge -- the anchor is always the small
+  // swatch box (see anchorRect below), never the full-width row, so simple clamping
+  // is enough; it doesn't need to flip to the anchor's other side.
   const [top, setTop] = useState(rect.top);
+  const [left, setLeft] = useState(rect.right + 4);
 
   useLayoutEffect(() => {
     const height = ref.current?.offsetHeight ?? 0;
     const maxTop = window.innerHeight - height - TOOLTIP_VIEWPORT_MARGIN;
     setTop(Math.min(Math.max(rect.top, TOOLTIP_VIEWPORT_MARGIN), Math.max(maxTop, TOOLTIP_VIEWPORT_MARGIN)));
+
+    const width = ref.current?.offsetWidth ?? 0;
+    setLeft(Math.min(rect.right + 4, window.innerWidth - width - TOOLTIP_VIEWPORT_MARGIN));
   }, [rect]);
 
   if (typeof document === "undefined") return null;
@@ -38,7 +45,7 @@ export function FixedTooltip({ rect, children }: { rect: DOMRect; children: Reac
     <div
       ref={ref}
       className="pointer-events-none fixed z-50 w-max max-w-[14rem] rounded bg-zinc-900 px-2 py-1 text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black"
-      style={{ top, left: rect.right + 4 }}
+      style={{ top, left }}
     >
       {children}
     </div>,
@@ -224,12 +231,32 @@ export function CardCatalog({
                           : onOpponentBoard
                             ? "border-emerald-300/70 bg-emerald-50/50 dark:border-emerald-800/70 dark:bg-emerald-950/40"
                             : "border-zinc-300 dark:border-zinc-700";
+                    // Tooltip position anchors to the small 64px swatch box (this
+                    // row's first child), not the whole row -- the row itself
+                    // stretches to the sidebar's full width (nearly the whole phone
+                    // screen on mobile), which was pushing the tooltip's computed
+                    // position way off to one side instead of sitting predictably
+                    // next to the actual card art.
+                    function anchorRect(row: HTMLElement): DOMRect {
+                      return (row.firstElementChild as HTMLElement | null)?.getBoundingClientRect() ?? row.getBoundingClientRect();
+                    }
                     return (
                       <div
                         key={id}
                         className="relative flex min-w-0 items-center gap-2"
-                        onMouseEnter={(e) => setHoveredCard({ id, rect: e.currentTarget.getBoundingClientRect() })}
+                        onMouseEnter={(e) => setHoveredCard({ id, rect: anchorRect(e.currentTarget) })}
                         onMouseLeave={() => setHoveredCard((prev) => (prev?.id === id ? null : prev))}
+                        // Touch devices have no hover -- tap toggles the same tooltip
+                        // a mouse would get from hovering, so mobile can still read a
+                        // card's full description, not just the (now 2-line) summary.
+                        // The rect is read synchronously here, not inside the setState
+                        // updater below -- a native event's `currentTarget` is only
+                        // valid during the event's own dispatch, so reading it lazily
+                        // inside a deferred updater callback can hit a null target.
+                        onClick={(e) => {
+                          const rect = anchorRect(e.currentTarget);
+                          setHoveredCard((prev) => (prev?.id === id ? null : { id, rect }));
+                        }}
                       >
                         <div
                           className={`relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${boxToneClass}`}
@@ -242,7 +269,7 @@ export function CardCatalog({
                           <div className="truncate text-xs font-medium">
                             {def.name} <span className="text-zinc-500 dark:text-zinc-400">×{copies}</span>
                           </div>
-                          <div className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">{def.text}</div>
+                          <div className="line-clamp-2 text-[10px] text-zinc-500 dark:text-zinc-400">{def.text}</div>
                         </div>
                         {hoveredCard?.id === id && <FixedTooltip rect={hoveredCard.rect}>{def.fullText}</FixedTooltip>}
                       </div>

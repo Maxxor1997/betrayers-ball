@@ -1,5 +1,7 @@
 "use client";
 
+import { CARD_DEFS } from "@/lib/content/cards";
+
 function StepBadge({ n }: { n: number }) {
   return (
     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[11px] font-semibold text-white dark:bg-zinc-100 dark:text-black">
@@ -43,12 +45,14 @@ function MiniBoard() {
   );
 }
 
+/** Real card data (name/base/text), not hardcoded copy that can drift out of sync with an actual rebalance -- this is Footman's CardDef, currently named Shieldbearer. */
 function MiniCard() {
+  const def = CARD_DEFS.Footman;
   return (
     <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 border-blue-500 bg-blue-50 p-1 text-center dark:bg-blue-950">
-      <span className="text-[9px] font-semibold leading-tight">Footman</span>
-      <span className="text-lg font-bold leading-none">5</span>
-      <span className="text-[7px] leading-tight text-zinc-500 dark:text-zinc-400">+1 if 3+ owned in row/col</span>
+      <span className="text-[9px] font-semibold leading-tight">{def.name}</span>
+      <span className="text-lg font-bold leading-none">{def.base}</span>
+      <span className="text-[7px] leading-tight text-zinc-500 dark:text-zinc-400">{def.text}</span>
     </div>
   );
 }
@@ -115,10 +119,10 @@ export function InstructionsModal({ onClose }: { onClose: () => void }) {
           <section>
             <h3 className="mb-1 font-semibold">Adjacency</h3>
             <p className="text-zinc-600 dark:text-zinc-400">
-              "Adjacent" and "neighbor" always mean the same thing, everywhere in this game — both for where you're
+              &ldquo;Adjacent&rdquo; and &ldquo;neighbor&rdquo; always mean the same thing, everywhere in this game — both for where you&rsquo;re
               allowed to place, and for every card effect that reads either word: <strong className="text-zinc-800 dark:text-zinc-200">orthogonal only</strong> (same
-              row or column, one cell over) — <strong className="text-zinc-800 dark:text-zinc-200">never diagonal</strong>. A card's short
-              summary abbreviates this to <strong className="text-zinc-800 dark:text-zinc-200">"adj."</strong> to save space — hover any card for
+              row or column, one cell over) — <strong className="text-zinc-800 dark:text-zinc-200">never diagonal</strong>. A card&rsquo;s short
+              summary abbreviates this to <strong className="text-zinc-800 dark:text-zinc-200">&ldquo;adj.&rdquo;</strong> to save space — hover any card for
               the full, unabbreviated wording.
             </p>
           </section>
@@ -130,7 +134,7 @@ export function InstructionsModal({ onClose }: { onClose: () => void }) {
               <ul className="max-w-xs list-disc space-y-1 pl-4 text-zinc-600 dark:text-zinc-400">
                 <li>Name and base value, shown in your hand and once revealed.</li>
                 <li>A short effect summary — hover any card (hand or board) for the full rules text.</li>
-                <li>You can always see your own hand and any face-up card; opponents' face-down cards stay hidden.</li>
+                <li>You can always see your own hand and any face-up card; opponents&rsquo; face-down cards stay hidden.</li>
               </ul>
             </div>
           </section>
@@ -138,7 +142,7 @@ export function InstructionsModal({ onClose }: { onClose: () => void }) {
           <section>
             <h3 className="mb-1 font-semibold">Scoring</h3>
             <p className="text-zinc-600 dark:text-zinc-400">
-              Nothing is scored during play. When the game ends, every card's final value is computed according
+              Nothing is scored during play. When the game ends, every card&rsquo;s final value is computed according
               to the state on the board. Highest total wins; ties share the win.
             </p>
           </section>
