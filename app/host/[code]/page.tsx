@@ -311,7 +311,6 @@ function DisplayGameView({
           dragOverKey={null}
           revealAll={state.phase === "ended"}
           resolvedCards={resolvedCards}
-          highlightedCardId={null}
           onCellClick={() => {}}
           onCellDragOver={() => {}}
           onCellDragLeave={() => {}}

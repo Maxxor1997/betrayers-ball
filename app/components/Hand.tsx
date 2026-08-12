@@ -2,25 +2,20 @@
 
 import { CardArt } from "@/app/components/CardArt";
 import { CARD_DEFS } from "@/lib/content/cards";
-import { useHasHover } from "@/app/hooks/useHasHover";
-import { CardId, CardInstance } from "@/lib/engine/types";
+import { CardInstance } from "@/lib/engine/types";
 
 export interface HandProps {
   cards: CardInstance[];
   selectedInstanceId: string | null;
   onCardClick: (instanceId: string) => void;
   onCardDragStart: (e: React.DragEvent, instanceId: string) => void;
-  /** Fires as the mouse enters/leaves a hand card, with that card's type (or null on
-   * leave) -- lets the board highlight matching cards elsewhere. */
-  onHoverCardId: (cardId: CardId | null) => void;
   disabled: boolean;
   /** The viewer's own board accent (see lib/config/players.ts's playerAccentClass) -- an unselected hand card's border/fill matches this, so it's visually the same color as that same card once placed on the board, not a hardcoded blue that only happens to match a fixed seat. */
   ownerAccentClass: string;
 }
 
-export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, onHoverCardId, disabled, ownerAccentClass }: HandProps) {
+export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disabled, ownerAccentClass }: HandProps) {
   const sortedCards = [...cards].sort((a, b) => CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name));
-  const hasHover = useHasHover();
 
   // Cards shrink in width together (flex-basis 7rem down to a 4rem floor) to try to
   // fit one row without wrapping, but height stays fixed rather than tracking width
@@ -44,17 +39,7 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
         const def = CARD_DEFS[card.cardId];
         const selected = card.instanceId === selectedInstanceId;
         return (
-          <div
-            key={card.instanceId}
-            className="relative"
-            style={{ flex: "1 1 7rem", minWidth: "4rem", maxWidth: "7rem" }}
-            // Desktop-only hover, gated on hasHover so a tap on a touch device (which
-            // fires a synthetic mouseenter but has no real mouseleave) can't leave a
-            // stale highlight stuck on. No tooltip here anymore -- just the
-            // board-highlight side effect (see onHoverCardId's doc comment above).
-            onMouseEnter={hasHover ? () => onHoverCardId(card.cardId) : undefined}
-            onMouseLeave={hasHover ? () => onHoverCardId(null) : undefined}
-          >
+          <div key={card.instanceId} className="relative" style={{ flex: "1 1 7rem", minWidth: "4rem", maxWidth: "7rem" }}>
             <button
               // Not a native `disabled` attribute -- disabled buttons unreliably
               // suppress mouse events across browsers (WebKit especially), including

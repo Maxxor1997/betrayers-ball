@@ -8,7 +8,7 @@ import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { ResolutionResult, resolveBoard, ResolvedCard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
-import { CardId, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
+import { CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { BoardGrid } from "@/app/components/Board";
 import { Hand } from "@/app/components/Hand";
 import { GameStatusPanel } from "@/app/components/GameStatusPanel";
@@ -56,7 +56,6 @@ export function PlaySelf({
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [pendingFlip, setPendingFlip] = useState<{ instanceId: string; label: string } | null>(null);
-  const [highlightedCardId, setHighlightedCardId] = useState<CardId | null>(null);
   // Guards against double-tallying the same finished game -- the "ended" effect below
   // can re-run (e.g. a parent re-render) while `state` is still the same ended game.
   const talliedRef = useRef(false);
@@ -190,7 +189,6 @@ export function PlaySelf({
           dragOverKey={dragOverKey}
           revealAll={state.phase === "ended"}
           resolvedCards={resolvedCards}
-          highlightedCardId={highlightedCardId}
           onCellClick={handleBoardCellClick}
           onCellDragOver={(e, key) => {
             if (!isHumanTurn || !legalCellKeys.has(key)) return;
@@ -222,7 +220,6 @@ export function PlaySelf({
                 e.dataTransfer.setData(DRAG_MIME, id);
                 e.dataTransfer.effectAllowed = "move";
               }}
-              onHoverCardId={setHighlightedCardId}
               disabled={!isHumanTurn}
               ownerAccentClass={playerAccentClass(state.players, SELF)}
             />

@@ -8,7 +8,7 @@ import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffe
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
-import { CardId, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
+import { CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, playerAccentClass, playerDotColorClass } from "@/lib/config/players";
 import { NewGameSetup, PendingFlip } from "./types";
@@ -260,7 +260,6 @@ function Game() {
   const [showInstructions, setShowInstructions] = useState(false);
   const [showMyStats, setShowMyStats] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
-  const [highlightedCardId, setHighlightedCardId] = useState<CardId | null>(null);
   const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobileViewport());
   // Tally exactly once per game, the moment it reaches "ended" -- reset whenever a new
   // game starts (confirmNewGame/playAgain below), same pattern the playtest page's own
@@ -551,7 +550,6 @@ function Game() {
         dragOverKey={dragOverKey}
         revealAll={state.phase === "ended"}
         resolvedCards={resolvedCards}
-        highlightedCardId={highlightedCardId}
         onCellClick={handleBoardCellClick}
         onCellDragOver={handleCellDragOver}
         onCellDragLeave={() => setDragOverKey(null)}
@@ -569,7 +567,6 @@ function Game() {
             selectedInstanceId={selectedInstanceId}
             onCardClick={handleHandCardClick}
             onCardDragStart={handleHandDragStart}
-            onHoverCardId={setHighlightedCardId}
             disabled={!isHumanTurn}
             ownerAccentClass={playerAccentClass(state.players, HUMAN)}
           />

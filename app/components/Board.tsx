@@ -6,7 +6,7 @@ import { CENTER_EFFECTS, centerEffectDescription, pseudoCardLiveValue } from "@/
 import { inBounds, isOwnerlessPosition } from "@/lib/engine/board";
 import { PLAYER_COLOR_CLASSES } from "@/lib/config/players";
 import { computeNegatedInstanceIds, ResolvedCard } from "@/lib/engine/resolution";
-import { CardId, GameState, Position, posKey } from "@/lib/engine/types";
+import { GameState, Position, posKey } from "@/lib/engine/types";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { visibleBreakdown } from "./scoreBreakdown";
@@ -30,10 +30,6 @@ export interface BoardGridProps {
   revealAll: boolean;
   /** Scoring breakdown per instanceId, once the game has ended -- see EndScreen. */
   resolvedCards?: Map<string, ResolvedCard>;
-  /** Card type currently hovered in the hand (see HandProps.onHoverCardId) -- every
-   * board card of this type whose identity is visible to the viewer gets highlighted,
-   * so e.g. hovering a Warlord in hand shows every Warlord already on the board. */
-  highlightedCardId: CardId | null;
   onCellClick: (pos: Position) => void;
   onCellDragOver: (e: React.DragEvent, key: string) => void;
   onCellDragLeave: () => void;
@@ -50,7 +46,6 @@ export function BoardGrid({
   dragOverKey,
   revealAll,
   resolvedCards,
-  highlightedCardId,
   onCellClick,
   onCellDragOver,
   onCellDragLeave,
@@ -168,11 +163,12 @@ export function BoardGrid({
             // leaks before a flip. The hover listener lives on the wrapper div (not the
             // button) so it still fires even when the button itself is disabled.
             const tooltipOwner = nameFor(card.ownerId);
-            // Same "identity known to the viewer" rule as the tooltip above -- an
-            // opponent's still-hidden card never gets highlighted, even if it secretly
-            // matches, so hovering your hand can't leak what's face-down on the board.
-            const identityKnown = displayFaceUp || card.ownerId === viewerId;
-            const highlighted = identityKnown && highlightedCardId !== null && card.cardId === highlightedCardId;
+            // A hand card selected (any type) highlights every one of the viewer's own
+            // cards on the board, face-up or still face-down -- own identity is always
+            // known regardless of face state, and this is the "which cells are mine"
+            // aid, not a "where are more of this type" one, so opponents' cards (even
+            // an exact type match) are deliberately excluded.
+            const highlighted = selectedInstanceId !== null && card.ownerId === viewerId;
             const tooltipDetail = displayFaceUp
               ? `${def.name} (${def.base}) — ${def.text}`
               : card.ownerId === viewerId

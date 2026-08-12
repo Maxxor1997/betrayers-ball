@@ -744,7 +744,6 @@ function Playtest() {
             selectedInstanceId={null}
             dragOverKey={null}
             revealAll
-            highlightedCardId={null}
             onCellClick={() => {}}
             onCellDragOver={() => {}}
             onCellDragLeave={() => {}}

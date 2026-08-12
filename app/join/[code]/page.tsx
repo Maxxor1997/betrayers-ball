@@ -22,7 +22,7 @@ import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffe
 import { playerAccentClass, playerDotColorClass } from "@/lib/config/players";
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
-import { CardId, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
+import { CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { LobbyState, SeatInfo } from "@/lib/server/protocol";
 
 const DRAG_MIME = "application/x-card-instance-id";
@@ -332,7 +332,6 @@ function GameView({
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [pendingFlip, setPendingFlip] = useState<{ instanceId: string; label: string } | null>(null);
-  const [highlightedCardId, setHighlightedCardId] = useState<CardId | null>(null);
   // Rematch's own location picker -- player count isn't reconfigurable (fixed to the
   // room's existing seats), so this only ever asks for a center effect.
   const [rematchSetup, setRematchSetup] = useState<NewGameSetup | null>(null);
@@ -347,7 +346,6 @@ function GameView({
       setSelectedInstanceId(null);
       setDragOverKey(null);
       setPendingFlip(null);
-      setHighlightedCardId(null);
     }
     prevPhaseRef.current = state.phase;
   }, [state.phase]);
@@ -488,7 +486,6 @@ function GameView({
           dragOverKey={dragOverKey}
           revealAll={state.phase === "ended"}
           resolvedCards={resolvedCards}
-          highlightedCardId={highlightedCardId}
           onCellClick={handleBoardCellClick}
           onCellDragOver={handleCellDragOver}
           onCellDragLeave={() => setDragOverKey(null)}
@@ -540,7 +537,6 @@ function GameView({
               selectedInstanceId={selectedInstanceId}
               onCardClick={handleHandCardClick}
               onCardDragStart={handleHandDragStart}
-              onHoverCardId={setHighlightedCardId}
               disabled={!isMyTurn}
               ownerAccentClass={playerAccentClass(state.players, myPlayerId)}
             />
