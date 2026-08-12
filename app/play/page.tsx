@@ -23,6 +23,7 @@ import { BoardGrid } from "@/app/components/Board";
 import { Hand } from "@/app/components/Hand";
 import { visibleBreakdown } from "@/app/components/scoreBreakdown";
 import { GameStatusPanel } from "@/app/components/GameStatusPanel";
+import { TurnActionChecklist } from "@/app/components/TurnActionChecklist";
 import { EndScreen } from "@/app/components/EndScreen";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
@@ -242,6 +243,16 @@ function Game() {
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [pendingFlip, setPendingFlip] = useState<PendingFlip | null>(null);
+  // Brief flash of TurnActionChecklist's second item as checked right after placing --
+  // placing normally ends the turn (and this component's own isHumanTurn) immediately,
+  // so without this the player would never actually see it tick before the turn moves
+  // on. hadFlipped is snapshotted at place-time (not read live afterward), since
+  // state.hasFlippedThisTurn resets for the next player the instant the turn advances.
+  const [justPlaced, setJustPlaced] = useState<{ hadFlipped: boolean } | null>(null);
+  const justPlacedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (justPlacedTimeoutRef.current) clearTimeout(justPlacedTimeoutRef.current);
+  }, []);
   // Player count and center effect are only ever chosen from this setup popup (opened
   // by "New game"), never editable while a game is in progress. Starts open only as a
   // fallback (a direct, param-less visit to /play) -- arriving from the home screen's
@@ -329,8 +340,12 @@ function Game() {
 
   function placeCard(instanceId: string, pos: Position) {
     if (!legalCellKeys.has(posKey(pos))) return;
+    const hadFlipped = state.hasFlippedThisTurn;
     dispatch({ type: "place", playerId: HUMAN, instanceId, position: pos });
     setSelectedInstanceId(null);
+    setJustPlaced({ hadFlipped });
+    if (justPlacedTimeoutRef.current) clearTimeout(justPlacedTimeoutRef.current);
+    justPlacedTimeoutRef.current = setTimeout(() => setJustPlaced(null), 600);
   }
 
   function handleHandCardClick(instanceId: string) {
@@ -523,22 +538,29 @@ function Game() {
       {showInstructions && <InstructionsModal onClose={() => setShowInstructions(false)} />}
       {showMyStats && <MyStatsModal onClose={() => setShowMyStats(false)} />}
 
-      {/* Always mounted with a reserved min-height, even when empty -- this line's
-          text changes on almost every turn transition (human selects a card, AI's
-          turn starts/ends, voting begins), and conditionally mounting/unmounting the
-          element entirely made the board visibly jump each time as its height came
-          and went. */}
-      <p className="min-h-[1.25rem] text-sm">
-        {state.phase === "playing"
-          ? isHumanTurn
-            ? selectedInstanceId
-              ? "Tap a highlighted cell to place the selected card (or just drag it there)."
-              : flipUnlocked && !state.hasFlippedThisTurn
-                ? "You can optionally flip a face-down card face-up first, then drag a card from your hand onto a highlighted cell to place it."
-                : "Drag a card from your hand onto a highlighted cell to place it."
-            : `${ownerDisplayName(state, currentPlayerId(state))} is thinking…`
-          : isVoting && !humanVotePending && "Tallying votes…"}
-      </p>
+      {/* Always mounted with a reserved min-height, even when empty -- this area's
+          content changes on almost every turn transition (human selects a card, AI's
+          turn starts/ends, voting begins), and conditionally mounting/unmounting it
+          entirely made the board visibly jump each time as its height came and went.
+          Tall enough for the two-line checklist (see TurnActionChecklist) since that's
+          the tallest state it ever needs to reserve room for. */}
+      <div className="flex min-h-[2.5rem] items-center justify-center text-sm">
+        {state.phase === "playing" && (isHumanTurn || justPlaced) ? (
+          <TurnActionChecklist
+            cardSelected={justPlaced ? false : selectedInstanceId !== null}
+            flipUnlocked={flipUnlocked}
+            hasFlippedThisTurn={justPlaced ? justPlaced.hadFlipped : state.hasFlippedThisTurn}
+            mustPass={justPlaced ? false : humanMustPass}
+            placeDone={justPlaced !== null}
+          />
+        ) : (
+          <p>
+            {state.phase === "playing"
+              ? `${ownerDisplayName(state, currentPlayerId(state))} is thinking…`
+              : isVoting && !humanVotePending && "Tallying votes…"}
+          </p>
+        )}
+      </div>
 
       <BoardGrid
         state={state}
@@ -650,8 +672,6 @@ function Game() {
         viewerId={HUMAN}
         nameFor={(id) => ownerDisplayName(state, id)}
         flipUnlocked={flipUnlocked}
-        isMyTurn={isHumanTurn}
-        myMustPass={humanMustPass}
         onCopyState={copyBoardState}
         copyFeedback={copyFeedback}
       />

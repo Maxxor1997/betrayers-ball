@@ -357,8 +357,6 @@ function DisplayGameView({
         viewerId={DISPLAY_VIEWER_ID}
         nameFor={(id) => nameFor(lobby, id)}
         flipUnlocked={flipUnlocked}
-        isMyTurn={false}
-        myMustPass={false}
       />
     </div>
   );

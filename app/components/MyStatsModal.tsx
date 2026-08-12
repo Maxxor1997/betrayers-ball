@@ -65,7 +65,7 @@ function SortTh<K extends string>({
       onClick={() => onClick(sortKey)}
       title={title}
     >
-      <span className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""}`}>
+      <span className={`inline-flex items-center gap-1 whitespace-nowrap ${align === "right" ? "flex-row-reverse" : ""}`}>
         {label}
         <span className={`text-[8px] ${active ? "" : "opacity-0"}`}>{dir === 1 ? "▲" : "▼"}</span>
       </span>

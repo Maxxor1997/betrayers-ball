@@ -55,42 +55,6 @@ function StatusCell({ label, active, number, text }: { label: string; active: bo
   );
 }
 
-function ChecklistItem({ done, disabled, label }: { done: boolean; disabled?: boolean; label: string }) {
-  return (
-    <div
-      className={`flex items-start gap-1.5 text-xs ${
-        disabled ? "text-zinc-400 line-through dark:text-zinc-600" : done ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-700 dark:text-zinc-300"
-      }`}
-    >
-      <span>{done ? "☑" : "☐"}</span>
-      {label}
-    </div>
-  );
-}
-
-/** Live checklist for the viewer's current turn -- ticks off the optional flip as soon as it's used. */
-function TurnChecklist({
-  isMyTurn,
-  hasFlippedThisTurn,
-  flipUnlocked,
-  mustPass,
-}: {
-  isMyTurn: boolean;
-  hasFlippedThisTurn: boolean;
-  flipUnlocked: boolean;
-  mustPass: boolean;
-}) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">
-        {isMyTurn ? "Your turn" : "Waiting"}
-      </span>
-      <ChecklistItem done={hasFlippedThisTurn} disabled={!isMyTurn || !flipUnlocked} label="Flip a card (optional)" />
-      <ChecklistItem done={false} disabled={!isMyTurn} label={mustPass ? "Pass (no legal move)" : "Place a card"} />
-    </div>
-  );
-}
-
 /** ✓ voted to end, ✗ voted to continue, nothing if they haven't voted this round (or voting hasn't opened yet). */
 function VoteGlyph({ vote }: { vote: boolean | undefined }) {
   if (vote === undefined) return null;
@@ -289,24 +253,20 @@ function TurnOrderTracker({ state, viewerId, nameFor }: { state: GameState; view
   );
 }
 
-/** Compact status readout for the header: round, flip/vote availability, center effect, and the turn checklist. */
+/** Compact status readout for the header: round, flip/vote availability, center effect, and the turn order. */
 export function GameStatusPanel({
   state,
   viewerId,
   nameFor,
   flipUnlocked,
-  isMyTurn,
-  myMustPass,
   onCopyState,
   copyFeedback,
 }: {
   state: GameState;
-  /** Whose panel this is -- "opponent activity" excludes this id, and the turn checklist is framed relative to it. */
+  /** Whose panel this is -- the score tracker and turn-order "(You)" tag are both relative to this. */
   viewerId: string;
   nameFor: (id: string) => string;
   flipUnlocked: boolean;
-  isMyTurn: boolean;
-  myMustPass: boolean;
   /** Single-player only feature (the board-state markdown dump) -- omitted entirely (button hidden) when not provided, e.g. in multiplayer. */
   onCopyState?: () => void;
   copyFeedback?: boolean;
@@ -357,7 +317,6 @@ export function GameStatusPanel({
           <>
             <div className="h-px w-full shrink-0 bg-zinc-300 dark:bg-zinc-700" />
             <TurnOrderTracker state={state} viewerId={viewerId} nameFor={nameFor} />
-            <TurnChecklist isMyTurn={isMyTurn} hasFlippedThisTurn={state.hasFlippedThisTurn} flipUnlocked={flipUnlocked} mustPass={myMustPass} />
           </>
         )}
         {onCopyState && (

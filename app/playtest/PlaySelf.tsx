@@ -12,6 +12,7 @@ import { CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/e
 import { BoardGrid } from "@/app/components/Board";
 import { Hand } from "@/app/components/Hand";
 import { GameStatusPanel } from "@/app/components/GameStatusPanel";
+import { TurnActionChecklist } from "@/app/components/TurnActionChecklist";
 import { EndScreen } from "@/app/components/EndScreen";
 
 const SELF = "self";
@@ -56,6 +57,16 @@ export function PlaySelf({
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [pendingFlip, setPendingFlip] = useState<{ instanceId: string; label: string } | null>(null);
+  // Brief flash of TurnActionChecklist's second item as checked right after placing --
+  // placing normally ends the turn (and this component's own isHumanTurn) immediately,
+  // so without this the player would never actually see it tick before the turn moves
+  // on. hadFlipped is snapshotted at place-time (not read live afterward), since
+  // state.hasFlippedThisTurn resets for the next player the instant the turn advances.
+  const [justPlaced, setJustPlaced] = useState<{ hadFlipped: boolean } | null>(null);
+  const justPlacedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (justPlacedTimeoutRef.current) clearTimeout(justPlacedTimeoutRef.current);
+  }, []);
   // Guards against double-tallying the same finished game -- the "ended" effect below
   // can re-run (e.g. a parent re-render) while `state` is still the same ended game.
   const talliedRef = useRef(false);
@@ -133,8 +144,12 @@ export function PlaySelf({
 
   function placeCard(instanceId: string, pos: Position) {
     if (!legalCellKeys.has(posKey(pos))) return;
+    const hadFlipped = state!.hasFlippedThisTurn;
     dispatch({ type: "place", playerId: SELF, instanceId, position: pos });
     setSelectedInstanceId(null);
+    setJustPlaced({ hadFlipped });
+    if (justPlacedTimeoutRef.current) clearTimeout(justPlacedTimeoutRef.current);
+    justPlacedTimeoutRef.current = setTimeout(() => setJustPlaced(null), 600);
   }
 
   function handleBoardCellClick(pos: Position) {
@@ -169,15 +184,23 @@ export function PlaySelf({
   return (
     <div className="flex w-full flex-1 flex-col gap-6 lg:flex-row lg:items-start lg:justify-center">
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">
-        <p className="min-h-[1.25rem] text-sm">
-          {state.phase === "playing"
-            ? isHumanTurn
-              ? selectedInstanceId
-                ? "Tap a highlighted cell to place the selected card (or just drag it there)."
-                : "Drag a card from your hand onto a highlighted cell to place it."
-              : `${nameFor(state, currentPlayerId(state))} is thinking…`
-            : isVoting && !humanVotePending && "Tallying votes…"}
-        </p>
+        <div className="flex min-h-[2.5rem] items-center justify-center text-sm">
+          {state.phase === "playing" && (isHumanTurn || justPlaced) ? (
+            <TurnActionChecklist
+              cardSelected={justPlaced ? false : selectedInstanceId !== null}
+              flipUnlocked={flipUnlocked}
+              hasFlippedThisTurn={justPlaced ? justPlaced.hadFlipped : state.hasFlippedThisTurn}
+              mustPass={justPlaced ? false : humanMustPass}
+              placeDone={justPlaced !== null}
+            />
+          ) : (
+            <p>
+              {state.phase === "playing"
+                ? `${nameFor(state, currentPlayerId(state))} is thinking…`
+                : isVoting && !humanVotePending && "Tallying votes…"}
+            </p>
+          )}
+        </div>
 
         <BoardGrid
           state={state}
@@ -303,8 +326,6 @@ export function PlaySelf({
         viewerId={SELF}
         nameFor={(id) => nameFor(state, id)}
         flipUnlocked={flipUnlocked}
-        isMyTurn={isHumanTurn}
-        myMustPass={humanMustPass}
       />
     </div>
   );

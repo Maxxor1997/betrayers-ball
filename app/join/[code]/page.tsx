@@ -17,6 +17,7 @@ import { CardCatalog } from "@/app/components/CardCatalog";
 import { InstructionsModal } from "@/app/components/InstructionsModal";
 import { LocationTitle } from "@/app/components/LocationTitle";
 import { NewGameModal, NewGameSetup } from "@/app/components/NewGameModal";
+import { TurnActionChecklist } from "@/app/components/TurnActionChecklist";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { playerAccentClass, playerDotColorClass } from "@/lib/config/players";
@@ -335,6 +336,16 @@ function GameView({
   // Rematch's own location picker -- player count isn't reconfigurable (fixed to the
   // room's existing seats), so this only ever asks for a center effect.
   const [rematchSetup, setRematchSetup] = useState<NewGameSetup | null>(null);
+  // Brief flash of TurnActionChecklist's second item as checked right after placing --
+  // placing normally ends the turn (and this component's own isMyTurn) immediately, so
+  // without this the player would never actually see it tick before the turn moves on.
+  // hadFlipped is snapshotted at place-time (not read live afterward), since
+  // state.hasFlippedThisTurn resets for the next player the instant the turn advances.
+  const [justPlaced, setJustPlaced] = useState<{ hadFlipped: boolean } | null>(null);
+  const justPlacedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (justPlacedTimeoutRef.current) clearTimeout(justPlacedTimeoutRef.current);
+  }, []);
 
   // Rematch deals a fresh game into the same room/component tree (no navigation, no
   // remount) -- once the phase flips back from "ended" to "playing", any selection
@@ -346,6 +357,7 @@ function GameView({
       setSelectedInstanceId(null);
       setDragOverKey(null);
       setPendingFlip(null);
+      setJustPlaced(null);
     }
     prevPhaseRef.current = state.phase;
   }, [state.phase]);
@@ -375,8 +387,12 @@ function GameView({
 
   function placeCard(instanceId: string, pos: Position) {
     if (!legalCellKeys.has(posKey(pos))) return;
+    const hadFlipped = state.hasFlippedThisTurn;
     dispatch({ type: "place", playerId: myPlayerId, instanceId, position: pos });
     setSelectedInstanceId(null);
+    setJustPlaced({ hadFlipped });
+    if (justPlacedTimeoutRef.current) clearTimeout(justPlacedTimeoutRef.current);
+    justPlacedTimeoutRef.current = setTimeout(() => setJustPlaced(null), 600);
   }
 
   function handleHandCardClick(instanceId: string) {
@@ -464,17 +480,23 @@ function GameView({
 
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">
         {header}
-        <p className="min-h-[1.25rem] text-sm">
-          {state.phase === "playing"
-            ? isMyTurn
-              ? selectedInstanceId
-                ? "Tap a highlighted cell to place the selected card (or just drag it there)."
-                : flipUnlocked && !state.hasFlippedThisTurn
-                  ? "You can optionally flip a face-down card face-up first, then drag a card from your hand onto a highlighted cell to place it."
-                  : "Drag a card from your hand onto a highlighted cell to place it."
-              : `${nameFor(lobby, currentPlayerId(state))} is playing…`
-            : isVoting && !myVotePending && "Tallying votes…"}
-        </p>
+        <div className="flex min-h-[2.5rem] items-center justify-center text-sm">
+          {state.phase === "playing" && (isMyTurn || justPlaced) ? (
+            <TurnActionChecklist
+              cardSelected={justPlaced ? false : selectedInstanceId !== null}
+              flipUnlocked={flipUnlocked}
+              hasFlippedThisTurn={justPlaced ? justPlaced.hadFlipped : state.hasFlippedThisTurn}
+              mustPass={justPlaced ? false : myMustPass}
+              placeDone={justPlaced !== null}
+            />
+          ) : (
+            <p>
+              {state.phase === "playing"
+                ? `${nameFor(lobby, currentPlayerId(state))} is playing…`
+                : isVoting && !myVotePending && "Tallying votes…"}
+            </p>
+          )}
+        </div>
 
         <BoardGrid
           state={state}
@@ -594,8 +616,6 @@ function GameView({
         viewerId={myPlayerId}
         nameFor={(id) => nameFor(lobby, id)}
         flipUnlocked={flipUnlocked}
-        isMyTurn={isMyTurn}
-        myMustPass={myMustPass}
       />
     </div>
   );
