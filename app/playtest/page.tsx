@@ -782,14 +782,14 @@ function Playtest() {
         </div>
       )}
 
-      <div className="flex w-full max-w-4xl flex-wrap items-center justify-between gap-2">
+      <div className="flex w-full max-w-4xl flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-zinc-500">
           {totalPlayed === 0
             ? "No games tallied yet."
             : `${totalPlayed.toLocaleString()} card placements across ${stats.overall.gamesTallied.toLocaleString()} games so far -- averaging ${fmt(overallRoundLength, 2)} rounds/game.`}
         </p>
         {confirmingReset ? (
-          <div className="flex shrink-0 items-center gap-2 text-xs">
+          <div className="flex w-full flex-wrap items-center gap-2 text-xs sm:w-auto">
             <span className="text-zinc-500">Clear all tallied stats?</span>
             <button onClick={handleReset} className="rounded-full bg-red-600 px-3 py-1 text-white hover:bg-red-700">
               Reset
@@ -802,7 +802,7 @@ function Playtest() {
             </button>
           </div>
         ) : (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <div className="flex overflow-hidden rounded-full border border-zinc-300 text-xs dark:border-zinc-700">
               <button
                 onClick={() => setView("table")}
