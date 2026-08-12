@@ -196,7 +196,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     get fullText() {
       return `+2 for each ${CARD_DEFS.Berserker.name} owned by a different player, anywhere on the board.`;
     },
-    count: [0, 0, 0, 8, 7, 6, 6],
+    count: [0, 0, 0, 7, 7, 7, 7],
     valueModifier: ({ board, self, addDelta }) => {
       let otherOwnerBerserkers = 0;
       for (const other of board.values()) {
@@ -280,7 +280,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Control",
     text: "−2 to row",
     fullText: "−2 to every other card in its row (any owner, not itself).",
-    count: [0, 0, 0, 4, 5, 6, 8],
+    count: [0, 0, 0, 4, 5, 5, 6],
     valueModifier: ({ board, pos, self, addDelta }) => {
       for (const [otherKey, other] of board.entries()) {
         if (other.instanceId === self.instanceId) continue;

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { CardArt } from "@/app/components/CardArt";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { useHasHover } from "@/app/hooks/useHasHover";
@@ -21,7 +20,6 @@ export interface HandProps {
 
 export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, onHoverCardId, disabled, ownerAccentClass }: HandProps) {
   const sortedCards = [...cards].sort((a, b) => CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name));
-  const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(null);
   const hasHover = useHasHover();
 
   // Cards shrink in width together (flex-basis 7rem down to a 4rem floor) to try to
@@ -50,38 +48,12 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
             key={card.instanceId}
             className="relative"
             style={{ flex: "1 1 7rem", minWidth: "4rem", maxWidth: "7rem" }}
-            // Hover-capable devices get real hover; touch devices get an explicit
-            // tap-to-toggle instead -- never both. Mixing them means a tap fires a
-            // synthetic mouseenter immediately followed by click, so a click that
-            // *toggles* what mouseenter just turned on cancels out on the same tap --
-            // needing a second tap to ever show anything (see useHasHover's doc
-            // comment). The tap toggle lives on the wrapper (not the button, which is
-            // disabled outside your turn and so wouldn't bubble a click at all).
-            onMouseEnter={
-              hasHover
-                ? () => {
-                    setHoveredInstanceId(card.instanceId);
-                    onHoverCardId(card.cardId);
-                  }
-                : undefined
-            }
-            onMouseLeave={
-              hasHover
-                ? () => {
-                    setHoveredInstanceId((prev) => (prev === card.instanceId ? null : prev));
-                    onHoverCardId(null);
-                  }
-                : undefined
-            }
-            onClick={
-              hasHover
-                ? undefined
-                : () => {
-                    const next = hoveredInstanceId === card.instanceId ? null : card.instanceId;
-                    setHoveredInstanceId(next);
-                    onHoverCardId(next ? card.cardId : null);
-                  }
-            }
+            // Desktop-only hover, gated on hasHover so a tap on a touch device (which
+            // fires a synthetic mouseenter but has no real mouseleave) can't leave a
+            // stale highlight stuck on. No tooltip here anymore -- just the
+            // board-highlight side effect (see onHoverCardId's doc comment above).
+            onMouseEnter={hasHover ? () => onHoverCardId(card.cardId) : undefined}
+            onMouseLeave={hasHover ? () => onHoverCardId(null) : undefined}
           >
             <button
               // Not a native `disabled` attribute -- disabled buttons unreliably
@@ -104,18 +76,14 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
               <span className="w-full text-[length:clamp(8px,20cqw,10px)] leading-tight break-words font-semibold">{def.name}</span>
               <CardArt cardId={card.cardId} className="h-8 w-8 shrink-0" />
               <span className="text-[length:clamp(14px,32cqw,20px)] leading-none font-bold">{def.base}</span>
-              {/* Truncated to 2 lines, not left to grow -- the card's fixed h-28 stays
-                  put, and hovering already surfaces the full effect text via the
-                  tooltip below, so a long summary doesn't need to fit here in full. */}
+              {/* Truncated to 2 lines, not left to grow -- keeps the card's fixed h-28
+                  from growing with description length. Full text is available in the
+                  card catalog, not repeated here via a tooltip (removed -- finnicky on
+                  mobile). */}
               <span className="line-clamp-2 w-full text-[length:clamp(7px,16cqw,9px)] leading-tight break-words text-zinc-500 dark:text-zinc-400">
                 {def.text}
               </span>
             </button>
-            {hoveredInstanceId === card.instanceId && (
-              <div className="pointer-events-none absolute -top-9 left-1/2 z-20 w-max max-w-[12rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
-                {def.fullText}
-              </div>
-            )}
           </div>
         );
       })}

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { CardArt } from "@/app/components/CardArt";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, pseudoCardLiveValue } from "@/lib/content/centerEffects";
@@ -8,6 +7,7 @@ import { inBounds, isOwnerlessPosition } from "@/lib/engine/board";
 import { PLAYER_COLOR_CLASSES } from "@/lib/config/players";
 import { computeNegatedInstanceIds, ResolvedCard } from "@/lib/engine/resolution";
 import { CardId, GameState, Position, posKey } from "@/lib/engine/types";
+import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { visibleBreakdown } from "./scoreBreakdown";
 
@@ -59,7 +59,7 @@ export function BoardGrid({
   const { width, height } = state.config.boardBounds;
   const rows = Array.from({ length: height }, (_, y) => y);
   const cols = Array.from({ length: width }, (_, x) => x);
-  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const activeTooltipId = useActiveTooltipId();
   const hasHover = useHasHover();
 
   // Cells are sized to fill their grid column (aspect-square, no fixed px) rather than
@@ -93,13 +93,6 @@ export function BoardGrid({
         gridTemplateColumns: `repeat(${width}, minmax(0, 1fr))`,
         width: `min(100%, ${naturalWidthPx}px, ${widthForHeightBudget})`,
       }}
-      // Dismisses any open tooltip on mobile when tapping elsewhere on the board --
-      // an empty cell, or a card whose own tap-toggle stopped this click from
-      // reaching here (see the two card blocks below). Also covers "doing another
-      // action" for free: placing a card or flipping one both land on this same
-      // handler (their own onClick doesn't touch hoveredKey or stop propagation), so
-      // a lingering tooltip from a previous tap gets cleared as a side effect.
-      onClick={() => setHoveredKey(null)}
     >
       {rows.map((y) =>
         cols.map((x) => {
@@ -117,6 +110,7 @@ export function BoardGrid({
             const negated = computeNegatedInstanceIds(state.board, state.config.boardBounds);
             const liveValue = pseudoCardLiveValue(state.config.centerEffect, state.board, state.config.boardBounds, negated);
             const displayLabel = liveValue === null ? label : `${label} (${liveValue})`;
+            const tooltipId = `board:${key}`;
             return (
               <div
                 key={key}
@@ -124,9 +118,20 @@ export function BoardGrid({
                 // Hover-capable devices get real hover; touch devices get an explicit
                 // tap-to-toggle instead -- never both (see useHasHover's doc comment
                 // for why mixing them needs two taps on touch to ever show anything).
-                onMouseEnter={hasHover ? () => setHoveredKey(key) : undefined}
-                onMouseLeave={hasHover ? () => setHoveredKey((prev) => (prev === key ? null : prev)) : undefined}
-                onClick={hasHover ? undefined : (e) => { e.stopPropagation(); setHoveredKey((prev) => (prev === key ? null : key)); }}
+                // setActiveTooltip/toggleActiveTooltip (not local state) so this
+                // shares one "only one tooltip open at a time, anywhere in the app"
+                // source of truth with every other tap-to-toggle tooltip -- see
+                // activeTooltip.ts's doc comment.
+                onMouseEnter={hasHover ? () => setActiveTooltip(tooltipId) : undefined}
+                onMouseLeave={hasHover ? () => clearActiveTooltip(tooltipId) : undefined}
+                onClick={
+                  hasHover
+                    ? undefined
+                    : (e) => {
+                        e.stopPropagation();
+                        toggleActiveTooltip(tooltipId);
+                      }
+                }
               >
                 {/* Below the threshold, the label can't fit without wrapping (which,
                     combined with the aspect-square cell, either overflows or looks
@@ -140,7 +145,7 @@ export function BoardGrid({
                   {displayLabel}
                 </div>
                 <div className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} bg-current`} />
-                {hoveredKey === key && (
+                {activeTooltipId === tooltipId && (
                   <div className="pointer-events-none absolute -top-9 left-1/2 z-10 w-max max-w-[14rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
                     {displayLabel} — {detail}
                   </div>
@@ -176,6 +181,7 @@ export function BoardGrid({
             // Only once the game has ended does a score breakdown exist -- see Game()'s
             // `resolvedCards`, computed once and shared with EndScreen's summary table.
             const resolvedCard = resolvedCards?.get(card.instanceId);
+            const tooltipId = `board:${key}`;
             return (
               <div
                 key={key}
@@ -186,9 +192,19 @@ export function BoardGrid({
                 // The tap toggle lives on the wrapper (not just the button) so it
                 // still fires when the button itself is disabled -- most cards aren't
                 // flip-clickable, and a disabled <button> never dispatches a click.
-                onMouseEnter={hasHover ? () => setHoveredKey(key) : undefined}
-                onMouseLeave={hasHover ? () => setHoveredKey((prev) => (prev === key ? null : prev)) : undefined}
-                onClick={hasHover ? undefined : (e) => { e.stopPropagation(); setHoveredKey((prev) => (prev === key ? null : key)); }}
+                // setActiveTooltip/toggleActiveTooltip (not local state) -- see
+                // activeTooltip.ts's doc comment for why "only one tooltip open
+                // anywhere in the app" needs to be a shared store, not per-component.
+                onMouseEnter={hasHover ? () => setActiveTooltip(tooltipId) : undefined}
+                onMouseLeave={hasHover ? () => clearActiveTooltip(tooltipId) : undefined}
+                onClick={
+                  hasHover
+                    ? undefined
+                    : (e) => {
+                        e.stopPropagation();
+                        toggleActiveTooltip(tooltipId);
+                      }
+                }
               >
                 <button
                   // Not a native `disabled` attribute -- see Hand.tsx's own card
@@ -210,9 +226,13 @@ export function BoardGrid({
                       {/* Keyed off the cell's own rendered size (@container), not the
                           viewport -- an 8p board's cells can be too small to show a
                           readable name even on a wide desktop screen, and a 2-3p
-                          board's cells can be plenty roomy even on a phone. */}
+                          board's cells can be plenty roomy even on a phone. 72px (not
+                          52px) -- verified against the longest card name
+                          ("Shieldbearer") plus the button's own p-1 padding: below
+                          that it still truncates with an ellipsis mid-word, which is
+                          arguably worse than just not showing it at all. */}
                       <span
-                        className={`hidden w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight @[52px]:block ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
+                        className={`hidden w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight @[72px]:block ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
                       >
                         {def.name}
                       </span>
@@ -227,7 +247,7 @@ export function BoardGrid({
                     <span className="text-[length:clamp(12px,40cqw,20px)]">🂠</span>
                   )}
                 </button>
-                {hoveredKey === key && (
+                {activeTooltipId === tooltipId && (
                   <div className="pointer-events-none absolute -top-12 left-1/2 z-10 w-max max-w-[12rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-white shadow dark:bg-zinc-100 dark:text-black">
                     <div className="text-[10px] font-semibold leading-tight">{tooltipOwner}</div>
                     <div className="text-[10px] leading-tight">{tooltipDetail}</div>
@@ -257,11 +277,23 @@ export function BoardGrid({
           return (
             <button
               key={key}
-              onClick={() => onCellClick(pos)}
-              onDragOver={(e) => onCellDragOver(e, key)}
+              // Not a native `disabled` attribute -- a disabled button never
+              // dispatches a click event at all (by spec, not just unreliably), so a
+              // tap on a non-legal cell never bubbled up to the global
+              // dismiss-tooltip-on-click-elsewhere listener (see activeTooltip.ts).
+              // Gating the handlers' bodies instead keeps every cell equally tappable
+              // for that purpose while still doing nothing when it isn't legal.
+              onClick={() => {
+                if (isLegal) onCellClick(pos);
+              }}
+              onDragOver={(e) => {
+                if (isLegal) onCellDragOver(e, key);
+              }}
               onDragLeave={onCellDragLeave}
-              onDrop={(e) => onCellDrop(e, pos)}
-              disabled={!isLegal}
+              onDrop={(e) => {
+                if (isLegal) onCellDrop(e, pos);
+              }}
+              aria-disabled={!isLegal}
               className={`aspect-square w-full rounded-md border transition-colors ${
                 isLegal
                   ? dragOverKey === key

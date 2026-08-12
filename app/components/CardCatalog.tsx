@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CardArt } from "@/app/components/CardArt";
+import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, isAvailableAtPlayerCount } from "@/lib/content/centerEffects";
@@ -19,27 +20,44 @@ import { CardBucket, CardId, CenterEffectId } from "@/lib/engine/types";
  */
 /** Minimum gap kept between a FixedTooltip and the viewport edges. */
 const TOOLTIP_VIEWPORT_MARGIN = 8;
+/** "below" placement's indent from the anchor's left edge -- purely visual (reads as "belonging" to the row instead of flush against the screen edge), clamped same as everything else so it can never push the tooltip off-screen. */
+const TOOLTIP_BELOW_INDENT = 48;
 
-export function FixedTooltip({ rect, children }: { rect: DOMRect; children: React.ReactNode }) {
+export function FixedTooltip({
+  rect,
+  placement = "right",
+  children,
+}: {
+  rect: DOMRect;
+  /**
+   * "right" (default) -- anchors to the rect's top-right corner; only correct when
+   * the rect is a small, tightly-fitted anchor (e.g. the catalog's color swatch box),
+   * since the tooltip starts flush against that edge. "below" anchors to the rect's
+   * bottom-left instead -- for anchors that are a full-width row (e.g. TurnOrderTracker's
+   * player rows), where "right" would place the tooltip way out past the row's visible
+   * content, off at the edge of whatever container the row happens to fill.
+   */
+  placement?: "right" | "below";
+  children: React.ReactNode;
+}) {
   const ref = useRef<HTMLDivElement>(null);
-  // Starts aligned to the hovered element's top-right; clamped once the tooltip's
-  // actual rendered size is known (a hovered element near the bottom of the viewport
-  // -- e.g. a scrolled sidebar entry -- would otherwise position the tooltip's *top*
-  // on screen while its body extends off the bottom edge, invisible). Same idea
-  // horizontally, capped against the right edge -- the anchor is always the small
-  // swatch box (see anchorRect below), never the full-width row, so simple clamping
-  // is enough; it doesn't need to flip to the anchor's other side.
-  const [top, setTop] = useState(rect.top);
-  const [left, setLeft] = useState(rect.right + 4);
+  // Initial guess before the tooltip's real rendered size is known; clamped in the
+  // layout effect below once it is (a hovered element near the bottom/right of the
+  // viewport -- e.g. a scrolled sidebar entry -- would otherwise position the
+  // tooltip's *top-left* on screen while its body extends off an edge, invisible).
+  const [top, setTop] = useState(placement === "below" ? rect.bottom + 4 : rect.top);
+  const [left, setLeft] = useState(placement === "below" ? rect.left + TOOLTIP_BELOW_INDENT : rect.right + 4);
 
   useLayoutEffect(() => {
     const height = ref.current?.offsetHeight ?? 0;
     const maxTop = window.innerHeight - height - TOOLTIP_VIEWPORT_MARGIN;
-    setTop(Math.min(Math.max(rect.top, TOOLTIP_VIEWPORT_MARGIN), Math.max(maxTop, TOOLTIP_VIEWPORT_MARGIN)));
+    const idealTop = placement === "below" ? rect.bottom + 4 : rect.top;
+    setTop(Math.min(Math.max(idealTop, TOOLTIP_VIEWPORT_MARGIN), Math.max(maxTop, TOOLTIP_VIEWPORT_MARGIN)));
 
     const width = ref.current?.offsetWidth ?? 0;
-    setLeft(Math.min(rect.right + 4, window.innerWidth - width - TOOLTIP_VIEWPORT_MARGIN));
-  }, [rect]);
+    const idealLeft = placement === "below" ? rect.left + TOOLTIP_BELOW_INDENT : rect.right + 4;
+    setLeft(Math.min(Math.max(idealLeft, TOOLTIP_VIEWPORT_MARGIN), window.innerWidth - width - TOOLTIP_VIEWPORT_MARGIN));
+  }, [rect, placement]);
 
   if (typeof document === "undefined") return null;
   return createPortal(
@@ -125,9 +143,11 @@ export function CardCatalog({
   onPlayerCountChange?: (playerCount: number) => void;
 }) {
   const hasHover = useHasHover();
-  const [hoveredCard, setHoveredCard] = useState<{ id: CardId; rect: DOMRect } | null>(null);
-  const [hoveredBucket, setHoveredBucket] = useState<{ bucket: CardBucket; rect: DOMRect } | null>(null);
-  const [hoveredLocationsHeader, setHoveredLocationsHeader] = useState<DOMRect | null>(null);
+  // Only one tooltip is ever open anywhere in the app at once (see activeTooltip.ts),
+  // so a single locally-held rect is enough -- it's only ever read while its matching
+  // id is also the active one, which is exactly when it was most recently set.
+  const activeTooltipId = useActiveTooltipId();
+  const [activeRect, setActiveRect] = useState<DOMRect | null>(null);
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<CardBucket>>(new Set());
   // Collapsed by default, unlike the card buckets -- center effects are secondary
   // reference info, not something a new player needs open by default.
@@ -204,18 +224,36 @@ export function CardCatalog({
               <div className="relative mb-1.5">
                 <button
                   onClick={() => toggleBucket(bucket)}
-                  onMouseEnter={(e) => setHoveredBucket({ bucket, rect: e.currentTarget.getBoundingClientRect() })}
-                  onMouseLeave={() => setHoveredBucket((prev) => (prev?.bucket === bucket ? null : prev))}
+                  onMouseEnter={
+                    hasHover
+                      ? (e) => {
+                          setActiveRect(e.currentTarget.getBoundingClientRect());
+                          setActiveTooltip(`catalog:bucket:${bucket}`);
+                        }
+                      : undefined
+                  }
+                  onMouseLeave={hasHover ? () => clearActiveTooltip(`catalog:bucket:${bucket}`) : undefined}
                   className="flex w-full items-center gap-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
                 >
                   <span className="inline-block w-3 shrink-0">{bucketCollapsed ? "▶" : "▼"}</span>
                   {bucket}
-                  <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-400 text-[9px] normal-case text-zinc-400 dark:border-zinc-500 dark:text-zinc-500">
+                  <span
+                    className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-400 text-[9px] normal-case text-zinc-400 dark:border-zinc-500 dark:text-zinc-500"
+                    onClick={
+                      hasHover
+                        ? undefined
+                        : (e) => {
+                            e.stopPropagation();
+                            setActiveRect(e.currentTarget.getBoundingClientRect());
+                            toggleActiveTooltip(`catalog:bucket:${bucket}`);
+                          }
+                    }
+                  >
                     i
                   </span>
                 </button>
-                {hoveredBucket?.bucket === bucket && (
-                  <FixedTooltip rect={hoveredBucket.rect}>{BUCKET_DESCRIPTIONS[bucket]}</FixedTooltip>
+                {activeTooltipId === `catalog:bucket:${bucket}` && activeRect && (
+                  <FixedTooltip rect={activeRect}>{BUCKET_DESCRIPTIONS[bucket]}</FixedTooltip>
                 )}
               </div>
               {!bucketCollapsed && (
@@ -242,6 +280,7 @@ export function CardCatalog({
                     function anchorRect(row: HTMLElement): DOMRect {
                       return (row.firstElementChild as HTMLElement | null)?.getBoundingClientRect() ?? row.getBoundingClientRect();
                     }
+                    const tooltipId = `catalog:card:${id}`;
                     return (
                       <div
                         key={id}
@@ -253,14 +292,25 @@ export function CardCatalog({
                         // useHasHover's doc comment). The tap's rect is read
                         // synchronously, not inside the setState updater -- a native
                         // event's currentTarget is only valid during its own dispatch.
-                        onMouseEnter={hasHover ? (e) => setHoveredCard({ id, rect: anchorRect(e.currentTarget) }) : undefined}
-                        onMouseLeave={hasHover ? () => setHoveredCard((prev) => (prev?.id === id ? null : prev)) : undefined}
+                        // setActiveTooltip/toggleActiveTooltip (not local state) -- see
+                        // activeTooltip.ts's doc comment for why "only one tooltip
+                        // open anywhere in the app" needs to be a shared store.
+                        onMouseEnter={
+                          hasHover
+                            ? (e) => {
+                                setActiveRect(anchorRect(e.currentTarget));
+                                setActiveTooltip(tooltipId);
+                              }
+                            : undefined
+                        }
+                        onMouseLeave={hasHover ? () => clearActiveTooltip(tooltipId) : undefined}
                         onClick={
                           hasHover
                             ? undefined
                             : (e) => {
-                                const rect = anchorRect(e.currentTarget);
-                                setHoveredCard((prev) => (prev?.id === id ? null : { id, rect }));
+                                e.stopPropagation();
+                                setActiveRect(anchorRect(e.currentTarget));
+                                toggleActiveTooltip(tooltipId);
                               }
                         }
                       >
@@ -277,7 +327,7 @@ export function CardCatalog({
                           </div>
                           <div className="line-clamp-2 text-[10px] text-zinc-500 dark:text-zinc-400">{def.text}</div>
                         </div>
-                        {hoveredCard?.id === id && <FixedTooltip rect={hoveredCard.rect}>{def.fullText}</FixedTooltip>}
+                        {activeTooltipId === tooltipId && activeRect && <FixedTooltip rect={activeRect}>{def.fullText}</FixedTooltip>}
                       </div>
                     );
                   })}
@@ -289,17 +339,35 @@ export function CardCatalog({
         <div className="relative">
           <button
             onClick={() => setLocationsCollapsed((prev) => !prev)}
-            onMouseEnter={(e) => setHoveredLocationsHeader(e.currentTarget.getBoundingClientRect())}
-            onMouseLeave={() => setHoveredLocationsHeader(null)}
+            onMouseEnter={
+              hasHover
+                ? (e) => {
+                    setActiveRect(e.currentTarget.getBoundingClientRect());
+                    setActiveTooltip("catalog:locations");
+                  }
+                : undefined
+            }
+            onMouseLeave={hasHover ? () => clearActiveTooltip("catalog:locations") : undefined}
             className="flex w-full items-center gap-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
           >
             <span className="inline-block w-3 shrink-0">{locationsCollapsed ? "▶" : "▼"}</span>
             Locations
-            <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-400 text-[9px] normal-case text-zinc-400 dark:border-zinc-500 dark:text-zinc-500">
+            <span
+              className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-400 text-[9px] normal-case text-zinc-400 dark:border-zinc-500 dark:text-zinc-500"
+              onClick={
+                hasHover
+                  ? undefined
+                  : (e) => {
+                      e.stopPropagation();
+                      setActiveRect(e.currentTarget.getBoundingClientRect());
+                      toggleActiveTooltip("catalog:locations");
+                    }
+              }
+            >
               i
             </span>
           </button>
-          {hoveredLocationsHeader && <FixedTooltip rect={hoveredLocationsHeader}>{LOCATIONS_DESCRIPTION}</FixedTooltip>}
+          {activeTooltipId === "catalog:locations" && activeRect && <FixedTooltip rect={activeRect}>{LOCATIONS_DESCRIPTION}</FixedTooltip>}
           {!locationsCollapsed && (
             <div className="mt-1.5 flex flex-col gap-2">
               {LOCATION_COMPLEXITY_ORDER

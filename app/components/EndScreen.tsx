@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
@@ -64,7 +64,7 @@ function PlayerTable({
    */
   votesByRound: Map<number, boolean>;
 }) {
-  const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(null);
+  const activeTooltipId = useActiveTooltipId();
   const hasHover = useHasHover();
 
   return (
@@ -89,6 +89,7 @@ function PlayerTable({
         <tbody>
           {cards.map((c, i) => {
             const vote = votesByRound.get(i + 1);
+            const tooltipId = `endscreen:${c.instanceId}`;
             return (
               <tr key={c.instanceId} className="border-b border-zinc-100 dark:border-zinc-800">
                 <td className="py-1 pr-2 text-zinc-500">{i + 1}</td>
@@ -99,19 +100,27 @@ function PlayerTable({
                       semantics and select-none blocks that selection outright. Hover
                       vs. tap-to-toggle is split the same way as everywhere else in the
                       app -- see useHasHover's doc comment for why mixing both means a
-                      tap needs two taps to ever show anything. */}
+                      tap needs two taps to ever show anything. setActiveTooltip/
+                      toggleActiveTooltip (not local state) -- see activeTooltip.ts's
+                      doc comment for why "only one tooltip open anywhere in the app"
+                      needs to be a shared store, not per-component. */}
                   <button
                     type="button"
                     className="cursor-help touch-manipulation [-webkit-touch-callout:none] underline decoration-zinc-400 decoration-dotted underline-offset-2 select-none"
-                    onMouseEnter={hasHover ? () => setHoveredInstanceId(c.instanceId) : undefined}
-                    onMouseLeave={hasHover ? () => setHoveredInstanceId((prev) => (prev === c.instanceId ? null : prev)) : undefined}
+                    onMouseEnter={hasHover ? () => setActiveTooltip(tooltipId) : undefined}
+                    onMouseLeave={hasHover ? () => clearActiveTooltip(tooltipId) : undefined}
                     onClick={
-                      hasHover ? undefined : () => setHoveredInstanceId((prev) => (prev === c.instanceId ? null : c.instanceId))
+                      hasHover
+                        ? undefined
+                        : (e) => {
+                            e.stopPropagation();
+                            toggleActiveTooltip(tooltipId);
+                          }
                     }
                   >
                     {CARD_DEFS[c.cardId].name}
                   </button>
-                  {hoveredInstanceId === c.instanceId && (
+                  {activeTooltipId === tooltipId && (
                     <div className="pointer-events-none absolute top-full left-0 z-20 mt-1 w-max min-w-[9rem] max-w-[16rem] rounded bg-zinc-900 px-2 py-1.5 text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
                       {visibleBreakdown(c.breakdown).map((d, j) => (
                         <div key={j} className="flex justify-between gap-3 whitespace-nowrap">

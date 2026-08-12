@@ -1,9 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { FixedTooltip } from "@/app/components/CardCatalog";
+import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
+import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription } from "@/lib/content/centerEffects";
-import { PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
+import { PLAYER_TEXT_COLOR_CLASSES, playerDotColorClass } from "@/lib/config/players";
+import { currentPlayerId } from "@/lib/engine/turns";
 import { GameState } from "@/lib/engine/types";
 
 /** Index-based, not identity-based -- same as Board.tsx's ownerColorClass, just the text-color palette. */
@@ -85,62 +89,119 @@ function TurnChecklist({
   );
 }
 
-/**
- * Per-opponent summary of what they've revealed and how they voted last -- both drawn
- * from state history rather than the live board/votes, so it can't leak anything a
- * player wouldn't otherwise already know: `flipHistory` entries are only ever cards
- * that already got flipped face-up (already public the moment it happened), and only
- * the *last completed* voting round is shown (`voteHistory`), never the in-progress
- * `votes` -- those stay private until everyone's voted, per the locked-vote protocol.
- * Collapsed by default, same reasoning as CardCatalog's Locations section -- useful
- * reference, not something that needs to eat vertical space on every turn.
- */
-function OpponentActivityPanel({ state, viewerId, nameFor }: { state: GameState; viewerId: string; nameFor: (id: string) => string }) {
-  const [collapsed, setCollapsed] = useState(true);
-  const opponents = state.players.filter((p) => p.id !== viewerId);
-  if (opponents.length === 0) return null;
+/** ✓ voted to end, ✗ voted to continue, nothing if they haven't voted this round (or voting hasn't opened yet). */
+function VoteGlyph({ vote }: { vote: boolean | undefined }) {
+  if (vote === undefined) return null;
+  return vote ? (
+    <span className="text-emerald-600 dark:text-emerald-400" title="Voted to end the game">
+      ✓
+    </span>
+  ) : (
+    <span className="text-rose-600 dark:text-rose-400" title="Voted to keep playing">
+      ✗
+    </span>
+  );
+}
 
+/**
+ * Full player roster in seat/turn order, with whoever's turn it currently is visually
+ * highlighted -- unlike TurnChecklist ("Your turn" / "Waiting"), this names every
+ * player so waiting on someone else actually says *who*. Always visible (not
+ * collapsible) since this is the at-a-glance answer to "whose turn is it," not a
+ * detail you'd want to dig for.
+ *
+ * Folds in what used to be a separate "Opponent activity" section: a vote glyph sits
+ * right on each row for an instant read, and hovering (or tapping, on touch --
+ * see useHasHover) a row surfaces the same flip-history/vote detail that section used
+ * to show, via the same portal-based FixedTooltip CardCatalog's card rows use. Both
+ * are drawn from state *history* (`flipHistory`/`voteHistory`), not the live
+ * board/in-progress votes, so nothing leaks that a player wouldn't otherwise already
+ * know -- see the original section's doc comment (removed here) for that reasoning.
+ */
+function TurnOrderTracker({ state, viewerId, nameFor }: { state: GameState; viewerId: string; nameFor: (id: string) => string }) {
+  const activeId = currentPlayerId(state);
+  const hasHover = useHasHover();
+  // Only one tooltip is ever open anywhere in the app at once (see activeTooltip.ts),
+  // so a single locally-held rect is enough -- see CardCatalog's own activeRect for
+  // the same reasoning.
+  const activeTooltipId = useActiveTooltipId();
+  const [activeRect, setActiveRect] = useState<DOMRect | null>(null);
   const lastVoteRound = state.voteHistory[state.voteHistory.length - 1];
 
   return (
-    <div className="flex w-full flex-col gap-2 text-left">
-      <button
-        onClick={() => setCollapsed((prev) => !prev)}
-        className="flex w-full items-center justify-center gap-1 text-[10px] font-semibold tracking-wide text-zinc-500 uppercase hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-      >
-        <span className="inline-block w-3 shrink-0">{collapsed ? "▶" : "▼"}</span>
-        Opponent activity
-      </button>
-      {!collapsed && (
-        <div className="flex flex-col gap-3">
-          {opponents.map((p) => {
-            const flips = state.flipHistory.filter((f) => f.playerId === p.id);
-            const vote = lastVoteRound?.votes[p.id];
-            return (
-              <div key={p.id} className="flex flex-col gap-0.5">
-                <span className={`text-xs font-semibold ${ownerTextColorClass(state, p.id)}`}>{nameFor(p.id)}</span>
-                <span className="text-[10px] leading-snug text-zinc-500 dark:text-zinc-400">
-                  Flipped:{" "}
-                  {flips.length === 0
-                    ? "none yet"
-                    : flips.map((f, i) => (
-                        // Colored by the flipped card's owner, not the flipper -- a
-                        // player can blind-flip an opponent's face-down card too, so
-                        // this is what actually tells you whose card got revealed.
-                        <span key={f.instanceId}>
-                          {i > 0 && ", "}
-                          <span className={ownerTextColorClass(state, f.ownerId)}>{CARD_DEFS[f.cardId].name}</span>
-                        </span>
-                      ))}
-                </span>
-                <span className="text-[10px] leading-snug text-zinc-500 dark:text-zinc-400">
-                  Last vote: {vote === undefined ? "none yet" : `${vote ? "end" : "continue"} (round ${lastVoteRound!.round})`}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-[10px] font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">Turn order</span>
+      <div className="flex flex-col gap-0.5">
+        {state.players.map((p) => {
+          const active = p.id === activeId;
+          const vote = lastVoteRound?.votes[p.id];
+          const flips = state.flipHistory.filter((f) => f.playerId === p.id);
+          const tooltipId = `turnorder:${p.id}`;
+          return (
+            <div
+              key={p.id}
+              className={`relative flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs ${
+                active
+                  ? "border-emerald-500 bg-emerald-50 font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                  : "border-transparent text-zinc-600 dark:text-zinc-400"
+              }`}
+              // setActiveTooltip/toggleActiveTooltip (not local state) -- see
+              // activeTooltip.ts's doc comment for why "only one tooltip open
+              // anywhere in the app" needs to be a shared store, not per-component.
+              onMouseEnter={
+                hasHover
+                  ? (e) => {
+                      setActiveRect(e.currentTarget.getBoundingClientRect());
+                      setActiveTooltip(tooltipId);
+                    }
+                  : undefined
+              }
+              onMouseLeave={hasHover ? () => clearActiveTooltip(tooltipId) : undefined}
+              onClick={
+                hasHover
+                  ? undefined
+                  : (e) => {
+                      e.stopPropagation();
+                      setActiveRect(e.currentTarget.getBoundingClientRect());
+                      toggleActiveTooltip(tooltipId);
+                    }
+              }
+            >
+              <span className={`h-2 w-2 shrink-0 rounded-full ${playerDotColorClass(state.players, p.id)}`} />
+              <span className="min-w-0 flex-1 truncate">
+                {nameFor(p.id)}
+                {p.id === viewerId ? " (You)" : ""}
+              </span>
+              <VoteGlyph vote={vote} />
+              {activeTooltipId === tooltipId && activeRect && (
+                <FixedTooltip rect={activeRect} placement="below">
+                  <div className="flex flex-col gap-1 whitespace-nowrap">
+                    <span className={`font-semibold ${ownerTextColorClass(state, p.id)}`}>
+                      {nameFor(p.id)}
+                      {p.id === viewerId ? " (You)" : ""}
+                    </span>
+                    <span>
+                      Flipped:{" "}
+                      {flips.length === 0
+                        ? "none yet"
+                        : flips.map((f, i) => (
+                            // Colored by the flipped card's owner, not the flipper --
+                            // a player can blind-flip an opponent's face-down card
+                            // too, so this is what tells you whose card got revealed.
+                            <span key={f.instanceId}>
+                              {i > 0 && ", "}
+                              <span className={ownerTextColorClass(state, f.ownerId)}>{CARD_DEFS[f.cardId].name}</span>
+                            </span>
+                          ))}
+                    </span>
+                    <span>Last vote: {vote === undefined ? "none yet" : `${vote ? "end" : "continue"} (round ${lastVoteRound!.round})`}</span>
+                  </div>
+                </FixedTooltip>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -206,13 +267,10 @@ export function GameStatusPanel({
         {state.phase === "playing" && (
           <>
             <div className="h-px w-full shrink-0 bg-zinc-300 dark:bg-zinc-700" />
+            <TurnOrderTracker state={state} viewerId={viewerId} nameFor={nameFor} />
             <TurnChecklist isMyTurn={isMyTurn} hasFlippedThisTurn={state.hasFlippedThisTurn} flipUnlocked={flipUnlocked} mustPass={myMustPass} />
           </>
         )}
-        <div className="h-px w-full shrink-0 bg-zinc-300 dark:bg-zinc-700" />
-        <div className="w-full overflow-x-hidden lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
-          <OpponentActivityPanel state={state} viewerId={viewerId} nameFor={nameFor} />
-        </div>
         {onCopyState && (
           <>
             <div className="h-px w-full shrink-0 bg-zinc-300 dark:bg-zinc-700" />
