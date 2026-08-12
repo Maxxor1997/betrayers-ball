@@ -56,6 +56,13 @@ export function BoardGrid({
   const cols = Array.from({ length: width }, (_, x) => x);
   const activeTooltipId = useActiveTooltipId();
   const hasHover = useHasHover();
+  // EndScreen's per-card breakdown rows share this same tooltip store, namespaced
+  // `endscreen:${instanceId}` (see EndScreen.tsx) -- reusing that instead of adding a
+  // separate onHover callback/prop means hovering (or tapping, on touch) a row in the
+  // end-of-game breakdown highlights that exact card here for free, with the same
+  // hover-vs-tap and click/scroll-to-dismiss behavior every other tooltip already has.
+  const endScreenPrefix = "endscreen:";
+  const hoveredEndCardInstanceId = activeTooltipId?.startsWith(endScreenPrefix) ? activeTooltipId.slice(endScreenPrefix.length) : null;
 
   // Cells are sized to fill their grid column (aspect-square, no fixed px) rather than
   // a fixed h-20 w-20 -- with wider/taller boards (7-8p can be 11+ columns or rows) a
@@ -168,7 +175,8 @@ export function BoardGrid({
             // known regardless of face state, and this is the "which cells are mine"
             // aid, not a "where are more of this type" one, so opponents' cards (even
             // an exact type match) are deliberately excluded.
-            const highlighted = selectedInstanceId !== null && card.ownerId === viewerId;
+            const highlighted =
+              (selectedInstanceId !== null && card.ownerId === viewerId) || card.instanceId === hoveredEndCardInstanceId;
             const tooltipDetail = displayFaceUp
               ? `${def.name} (${def.base}) — ${def.text}`
               : card.ownerId === viewerId

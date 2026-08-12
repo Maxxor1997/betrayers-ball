@@ -9,6 +9,7 @@ import {
   overallAvgRoundLength,
   ownValueFor,
   placementBaseline,
+  placementMaxDeviation,
   simulateOneGame,
   simulateOneGameSteps,
   statsSummary,
@@ -53,6 +54,14 @@ describe("placementBaseline", () => {
     expect(placementBaseline(2)).toBe(1.5);
     expect(placementBaseline(4)).toBe(2.5);
     expect(placementBaseline(8)).toBe(4.5);
+  });
+});
+
+describe("placementMaxDeviation", () => {
+  it("is half the game's rank spread -- the furthest a rank can land from baseline", () => {
+    expect(placementMaxDeviation(2)).toBe(0.5);
+    expect(placementMaxDeviation(4)).toBe(1.5);
+    expect(placementMaxDeviation(8)).toBe(3.5);
   });
 });
 
@@ -172,22 +181,23 @@ describe("tallyGame", () => {
     expect(stats.cards.Giant.played).toBe(0);
   });
 
-  it("tallies placementDeltaSum against that game's own player-count baseline, not a global one", () => {
+  it("tallies placementDeltaSum against that game's own player-count baseline and scale, not a global one", () => {
     const stats = createEmptyStats();
     const board2p: Board = new Map();
     place(board2p, 0, 0, "Footman", "p1");
     place(board2p, 1, 0, "Warlord", "p2");
-    // p1 (Footman) wins -> rank 1; p2 (Warlord) -> rank 2. Baseline at 2p is 1.5.
+    // p1 (Footman) wins -> rank 1; p2 (Warlord) -> rank 2. Baseline at 2p is 1.5, max deviation 0.5.
     tallyGame(stats, resolveBoard(board2p, BOUNDS, 3).cards, { p1: 100, p2: 50 }, 2, 3);
-    expect(stats.cards.Footman.placementDeltaSum).toBeCloseTo(1 - placementBaseline(2)); // -0.5
-    expect(stats.cards.Warlord.placementDeltaSum).toBeCloseTo(2 - placementBaseline(2)); // +0.5
+    expect(stats.cards.Footman.placementDeltaSum).toBeCloseTo((1 - placementBaseline(2)) / placementMaxDeviation(2)); // -1 (best possible finish)
+    expect(stats.cards.Warlord.placementDeltaSum).toBeCloseTo((2 - placementBaseline(2)) / placementMaxDeviation(2)); // +1 (worst possible finish)
 
-    // Same rank-1 finish, but at 8p the baseline is 4.5 -- a much bigger accomplishment,
-    // and the delta should reflect that even though the raw rank (1) is identical.
+    // Same rank-1 finish, but at 8p -- despite the much bigger raw baseline gap, the
+    // normalized delta should land at exactly the same -1 (best possible finish at any
+    // player count), not some larger magnitude just because there were more seats.
     const board8p: Board = new Map();
     place(board8p, 0, 0, "Footman", "p1");
     tallyGame(stats, resolveBoard(board8p, BOUNDS, 3).cards, { p1: 100 }, 8, 3);
-    expect(stats.cards.Footman.placementDeltaSum).toBeCloseTo((1 - placementBaseline(2)) + (1 - placementBaseline(8)));
+    expect(stats.cards.Footman.placementDeltaSum).toBeCloseTo(-2); // -1 (2p) + -1 (8p)
   });
 
   it("accumulates across multiple games", () => {
@@ -330,9 +340,10 @@ describe("statsSummary", () => {
 
   it("avgPlacementDelta stays comparable across a mix of player counts, unlike avgPlacement", () => {
     const stats = createEmptyStats();
-    // Two 1st-place finishes for Footman: one at 2p (a modest accomplishment, baseline
-    // 1.5), one at 8p (a huge accomplishment, baseline 4.5). avgPlacement can't tell
-    // these apart (both contribute a bare rank of 1); avgPlacementDelta should.
+    // Two 1st-place finishes for Footman: one at 2p, one at 8p. avgPlacement can't tell
+    // these apart (both contribute a bare rank of 1); avgPlacementDelta should treat
+    // them as equally strong (both -1, the best possible finish at any player count),
+    // not weight the 8p one as a bigger accomplishment just because there were more seats.
     const board2p: Board = new Map();
     place(board2p, 0, 0, "Footman", "p1");
     tallyGame(stats, resolveBoard(board2p, BOUNDS, 3).cards, { p1: 10 }, 2, 3);
@@ -343,8 +354,7 @@ describe("statsSummary", () => {
 
     const row = statsSummary(stats).find((r) => r.cardId === "Footman")!;
     expect(row.avgPlacement).toBe(1); // both appearances were rank 1
-    expect(row.avgPlacementDelta).toBeCloseTo(((1 - placementBaseline(2)) + (1 - placementBaseline(8))) / 2);
-    expect(row.avgPlacementDelta!).toBeLessThan(0); // beat the baseline both times
+    expect(row.avgPlacementDelta).toBeCloseTo(-1);
   });
 
   it("computes playRate as played divided by copies-in-deck, scaling for cards with different print counts", () => {

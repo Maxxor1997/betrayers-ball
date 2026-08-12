@@ -1,5 +1,5 @@
 import { CardId, CenterEffectId } from "@/lib/engine/types";
-import { createEmptyBucket, createEmptyStats, placementBaseline, PlaytestStats, StatsBucket } from "./cardStats";
+import { createEmptyBucket, createEmptyStats, placementBaseline, placementMaxDeviation, PlaytestStats, StatsBucket } from "./cardStats";
 
 /**
  * localStorage, not sessionStorage -- unlike multiplayer's per-tab credentials, this
@@ -22,12 +22,12 @@ const STORAGE_KEY = "board-game:playtest-stats";
  * `playerCount`, when known (a per-player-count slice, not the blended total -- see
  * PlaytestStats.byPlayerCount), lets a missing `placementDeltaSum` be *exactly*
  * reconstructed from `placementSum`/`played` instead of defaulting to 0: every game in
- * a single-player-count bucket shares the same baseline, so
- * `sum(rank - baseline) == sum(rank) - played*baseline == placementSum -
- * played*baseline`. Defaulting to 0 there wouldn't just be imprecise, it would be
- * actively wrong -- it silently claims "exactly average" for every already-played
- * game, which is how "shows 0 for everything" happened the first time this kind of
- * field was added.
+ * a single-player-count bucket shares the same baseline and scale, so
+ * `sum((rank - baseline) / maxDeviation) == (sum(rank) - played*baseline) /
+ * maxDeviation == (placementSum - played*baseline) / maxDeviation`. Defaulting to 0
+ * there wouldn't just be imprecise, it would be actively wrong -- it silently claims
+ * "exactly average" for every already-played game, which is how "shows 0 for
+ * everything" happened the first time this kind of field was added.
  */
 function mergeBucket(parsed: unknown, playerCount?: number): StatsBucket {
   const bucket = createEmptyBucket();
@@ -39,7 +39,7 @@ function mergeBucket(parsed: unknown, playerCount?: number): StatsBucket {
     bucket.cards[id] = { ...bucket.cards[id], ...rawCard };
     if (playerCount !== undefined && !("placementDeltaSum" in rawCard)) {
       const entry = bucket.cards[id];
-      entry.placementDeltaSum = entry.placementSum - entry.played * placementBaseline(playerCount);
+      entry.placementDeltaSum = (entry.placementSum - entry.played * placementBaseline(playerCount)) / placementMaxDeviation(playerCount);
     }
   }
   if (p.overall && typeof p.overall === "object") bucket.overall = { ...bucket.overall, ...p.overall };

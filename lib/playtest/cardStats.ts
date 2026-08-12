@@ -25,13 +25,19 @@ export interface CardStats {
   /** Sum of the owning player's standard-competition placement (1st/2nd/...) in each game this card appeared in. */
   placementSum: number;
   /**
-   * Sum of (this placement's rank - placementBaseline(that game's playerCount)), once
-   * per appearance -- a raw placement number is meaningless to compare across player
-   * counts (1st of 8 and 1st of 2 aren't the same accomplishment, and a flat table
-   * blends games from every player count together), so this tracks each appearance's
-   * *relative* performance against "if this seat did exactly average for its own
-   * game," summed with the correct per-game baseline before any blending happens.
-   * See statsSummary's avgPlacementDelta.
+   * Sum of ((this placement's rank - placementBaseline(that game's playerCount)) /
+   * placementMaxDeviation(that game's playerCount)), once per appearance -- a raw
+   * placement number is meaningless to compare across player counts (1st of 8 and 1st
+   * of 2 aren't the same accomplishment, and a flat table blends games from every
+   * player count together), so this tracks each appearance's *relative* performance
+   * against "if this seat did exactly average for its own game," on a fixed [-1, 1]
+   * scale (-1 = best possible finish, +1 = worst possible finish, regardless of
+   * player count) before any blending happens. The /placementMaxDeviation division
+   * matters, not just the baseline subtraction: without it, the same *relative*
+   * dominance produces a mechanically bigger raw number at high player counts simply
+   * because there's more room on the ladder to move (a rank swing of 1 is a bigger
+   * fraction of a 4p game's spread than an 8p game's), not because the card is
+   * actually stronger there. See statsSummary's avgPlacementDelta.
    */
   placementDeltaSum: number;
   /** Sum of the ending round number (see OverallStats.roundLengthSum's doc comment) of every game this card appeared in -- once per placement, same weighting as every other per-card sum here. */
@@ -52,6 +58,11 @@ export interface CardStats {
 /** The average standard-competition placement a seat would get in a `playerCount`-player game with zero skill differentiation -- e.g. 2.5 at 4p, 4.5 at 8p. The reference point placementDeltaSum measures every real placement against. */
 export function placementBaseline(playerCount: number): number {
   return (playerCount + 1) / 2;
+}
+
+/** Half the spread of possible standard-competition placements in a `playerCount`-player game -- e.g. 0.5 at 2p, 1.5 at 4p, 3.5 at 8p. The furthest |rank - placementBaseline| any seat could ever record, so dividing by it turns a raw rank delta into a fixed [-1, 1] scale that's actually comparable across player counts (see placementDeltaSum's doc comment for why the raw, undivided delta isn't). */
+export function placementMaxDeviation(playerCount: number): number {
+  return (playerCount - 1) / 2;
 }
 
 /** Running totals that aren't about any one card -- currently just the game-length baseline every card's own avgRoundLength gets compared against. */
@@ -201,7 +212,7 @@ function tallyIntoBucket(
     entry.finalScoreSum += card.finalValue;
     const rank = ranks.get(card.ownerId)!;
     entry.placementSum += rank;
-    entry.placementDeltaSum += rank - baseline;
+    entry.placementDeltaSum += (rank - baseline) / placementMaxDeviation(playerCount);
     entry.roundLengthSum += roundsPlayed;
     entry.disruptionSum += disruptionFor(card, resolvedCards) / opponentCount;
   }
@@ -246,12 +257,13 @@ export interface CardStatsRow {
   avgFinalScore: number | null;
   avgPlacement: number | null;
   /**
-   * Average (rank - placementBaseline(that game's playerCount)) across every
-   * appearance -- negative means this card's owner placed better than a random seat
-   * would on average, positive means worse. Unlike avgPlacement, this is meaningful to
-   * compare across cards even when they were tallied across a mix of player counts,
-   * since each appearance is measured against its own game's baseline before being
-   * summed.
+   * Average ((rank - placementBaseline) / placementMaxDeviation) across every
+   * appearance, on a fixed [-1, 1] scale -- negative means this card's owner placed
+   * better than a random seat would on average, positive means worse, -1/+1 are the
+   * best/worst possible finish regardless of player count. Unlike avgPlacement, this
+   * is meaningful to compare across cards (and across player counts) even when they
+   * were tallied across a mix of player counts, since each appearance is measured
+   * against its own game's baseline and scale before being summed.
    */
   avgPlacementDelta: number | null;
   /** Average ending round of games this card appeared in -- compare against overallAvgRoundLength to see whether this card tends to show up in longer or shorter games than average. */

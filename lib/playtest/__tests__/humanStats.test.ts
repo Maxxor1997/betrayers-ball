@@ -56,23 +56,26 @@ describe("tallyHumanGame", () => {
     expect(cardStats.cards.Warlord.played).toBe(0);
   });
 
-  it("records the human's own rank (as a delta against that game's baseline), not an opponent's", () => {
+  it("records the human's own rank (as a delta against that game's baseline and scale), not an opponent's", () => {
     const cardStats = createEmptyStats();
     const placementStats = createEmptyHumanPlacementStats();
     const cards = [resolved("Footman", "human", 5), resolved("Warlord", "ai-1", 8)];
-    // Human scores lower here -- 2nd of 2, baseline 1.5, so delta +0.5.
+    // Human scores lower here -- 2nd of 2, baseline 1.5, max deviation 0.5, so delta
+    // (2 - 1.5) / 0.5 = +1 (the worst possible finish at 2p).
     tallyHumanGame(cardStats, placementStats, cards, { human: 5, "ai-1": 8 }, 2, 3, "none", "human");
 
     expect(placementStats.overall.gamesPlayed).toBe(1);
-    expect(avgPlacementDelta(placementStats.overall)).toBe(0.5);
+    expect(avgPlacementDelta(placementStats.overall)).toBe(1);
   });
 
   it("splits placement history by player count and by location, each comparable despite the size difference", () => {
     const cardStats = createEmptyStats();
     const placementStats = createEmptyHumanPlacementStats();
-    // A 2p win -- rank 1, baseline 1.5, delta -0.5.
+    // A 2p win -- rank 1, baseline 1.5, max deviation 0.5, delta -1 (best possible finish).
     tallyHumanGame(cardStats, placementStats, [resolved("Footman", "human", 10)], { human: 10, "ai-1": 5 }, 2, 3, "frontier", "human");
-    // A 4p last place at a different location -- rank 4, baseline 2.5, delta +1.5.
+    // A 4p last place at a different location -- rank 4, baseline 2.5, max deviation
+    // 1.5, delta +1 (worst possible finish, same magnitude as the 2p win above despite
+    // the different player count).
     tallyHumanGame(
       cardStats,
       placementStats,
@@ -85,10 +88,10 @@ describe("tallyHumanGame", () => {
     );
 
     expect(placementStats.overall.gamesPlayed).toBe(2);
-    expect(avgPlacementDelta(placementStats.byPlayerCount[2])).toBe(-0.5);
-    expect(avgPlacementDelta(placementStats.byPlayerCount[4])).toBe(1.5);
-    expect(avgPlacementDelta(placementStats.byCenterEffect.frontier)).toBe(-0.5);
-    expect(avgPlacementDelta(placementStats.byCenterEffect.mirrorPool)).toBe(1.5);
+    expect(avgPlacementDelta(placementStats.byPlayerCount[2])).toBe(-1);
+    expect(avgPlacementDelta(placementStats.byPlayerCount[4])).toBe(1);
+    expect(avgPlacementDelta(placementStats.byCenterEffect.frontier)).toBe(-1);
+    expect(avgPlacementDelta(placementStats.byCenterEffect.mirrorPool)).toBe(1);
   });
 });
 

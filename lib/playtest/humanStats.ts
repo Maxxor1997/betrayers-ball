@@ -1,6 +1,6 @@
 import { ResolvedCard } from "@/lib/engine/resolution";
 import { CenterEffectId } from "@/lib/engine/types";
-import { computeRanks, placementBaseline, PlaytestStats, tallyGame } from "./cardStats";
+import { computeRanks, placementBaseline, placementMaxDeviation, PlaytestStats, tallyGame } from "./cardStats";
 import { loadStats, mergeStats, resetStats, saveStats } from "./store";
 
 /**
@@ -17,12 +17,13 @@ const PLACEMENT_STORAGE_KEY = "board-game:human-placement-stats";
 export interface OwnPlacementBucket {
   gamesPlayed: number;
   /**
-   * Sum of (rank - placementBaseline(that game's playerCount)) across every game in
-   * this slice -- see avgPlacementDelta. A raw average rank isn't meaningful once a
-   * slice spans a mix of player counts (1st of 2 and 1st of 8 aren't the same
-   * accomplishment, and "by location" in particular can span every player count you've
-   * ever played that location at), so each game's contribution is measured against its
-   * own game's baseline before being summed, the same way CardStats.placementDeltaSum
+   * Sum of ((rank - placementBaseline(that game's playerCount)) /
+   * placementMaxDeviation(that game's playerCount)) across every game in this slice --
+   * see avgPlacementDelta. A raw average rank isn't meaningful once a slice spans a
+   * mix of player counts (1st of 2 and 1st of 8 aren't the same accomplishment, and
+   * "by location" in particular can span every player count you've ever played that
+   * location at), so each game's contribution is measured against its own game's
+   * baseline *and* scale before being summed, the same way CardStats.placementDeltaSum
    * works in cardStats.ts.
    */
   placementDeltaSum: number;
@@ -45,10 +46,10 @@ export function createEmptyHumanPlacementStats(): HumanPlacementStats {
 
 function tallyPlacementBucket(bucket: OwnPlacementBucket, rank: number, playerCount: number): void {
   bucket.gamesPlayed += 1;
-  bucket.placementDeltaSum += rank - placementBaseline(playerCount);
+  bucket.placementDeltaSum += (rank - placementBaseline(playerCount)) / placementMaxDeviation(playerCount);
 }
 
-/** Average (rank - baseline) across a slice -- negative means you tend to place better than a random seat would, positive means worse, 0 is exactly average. Null (not 0) if the slice has no games yet. Meaningful to compare across slices even when they mix player counts, unlike a raw average rank. */
+/** Average ((rank - baseline) / maxDeviation) across a slice, on a fixed [-1, 1] scale -- negative means you tend to place better than a random seat would, positive means worse, 0 is exactly average, -1/+1 are the best/worst possible finish regardless of player count. Null (not 0) if the slice has no games yet. Meaningful to compare across slices even when they mix player counts, unlike a raw average rank. */
 export function avgPlacementDelta(bucket: OwnPlacementBucket): number | null {
   return bucket.gamesPlayed === 0 ? null : bucket.placementDeltaSum / bucket.gamesPlayed;
 }

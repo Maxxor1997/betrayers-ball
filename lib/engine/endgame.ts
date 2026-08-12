@@ -1,6 +1,6 @@
 import { getLegalPlacementPositions } from "./board";
 import { redactedBoardFor } from "./playerView";
-import { resolveBoard } from "./resolution";
+import { resolveBoard, ResolutionResult } from "./resolution";
 import { Board, BoardBounds, CenterEffectId, GameResult, GameState } from "./types";
 
 export function isBoardFull(board: Board, bounds: BoardBounds): boolean {
@@ -48,24 +48,30 @@ export function computeGameResult(
 }
 
 /**
- * A player's own honest estimate of standing: "my total minus the best opponent's
- * total", using only what they could actually know -- their own cards plus anything
- * face-up. An opponent's still-hidden card never contributes its true effect here, so
- * this never leaks hidden information. Shared by the engine's automatic AI vote-fill
- * and by AI turn-decision modules that want a fair evaluation function.
+ * Full board resolution using only what `viewerId` could actually know -- their own
+ * cards (face-up or not) plus anything face-up on the board; an opponent's
+ * still-hidden card resolves as the neutral "Unknown" pseudo-card (see
+ * redactedBoardFor), never its true effect, so nothing here leaks hidden information.
+ * This is a live, provisional resolution, not the final one: because effects are
+ * neighbor-dependent, a card's contribution can (and will) change as more of the
+ * board fills in around it, so the same call made again next turn can legitimately
+ * return different numbers for cards already on the board.
  */
-export function estimateMargin(state: GameState, viewerId: string): number {
+export function estimatedResolutionFor(state: GameState, viewerId: string): ResolutionResult {
   const playerIds = state.players.map((p) => p.id);
   const evaluationBoard = redactedBoardFor(state.board, viewerId);
-  const { totalsByOwner } = resolveBoard(
-    evaluationBoard,
-    state.config.boardBounds,
-    state.round,
-    state.config.centerEffect,
-    playerIds
-  );
+  return resolveBoard(evaluationBoard, state.config.boardBounds, state.round, state.config.centerEffect, playerIds);
+}
+
+/**
+ * A player's own honest estimate of standing: "my total minus the best opponent's
+ * total", using only what they could actually know. Shared by the engine's automatic
+ * AI vote-fill and by AI turn-decision modules that want a fair evaluation function.
+ */
+export function estimateMargin(state: GameState, viewerId: string): number {
+  const { totalsByOwner } = estimatedResolutionFor(state, viewerId);
   const myScore = totalsByOwner[viewerId] ?? 0;
-  const bestOther = Math.max(0, ...playerIds.filter((id) => id !== viewerId).map((id) => totalsByOwner[id] ?? 0));
+  const bestOther = Math.max(0, ...state.players.filter((p) => p.id !== viewerId).map((p) => totalsByOwner[p.id] ?? 0));
   return myScore - bestOther;
 }
 

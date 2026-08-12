@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEmptyBucket, createEmptyStats, placementBaseline } from "../cardStats";
+import { createEmptyBucket, createEmptyStats, placementBaseline, placementMaxDeviation } from "../cardStats";
 import { loadStats, resetStats, saveStats } from "../store";
 
 /**
@@ -172,7 +172,7 @@ describe("loadStats/saveStats round-trip", () => {
       window.localStorage.setItem("board-game:playtest-stats", JSON.stringify(legacyShape));
 
       const loaded = loadStats();
-      const expected = 6 - 5 * placementBaseline(2);
+      const expected = (6 - 5 * placementBaseline(2)) / placementMaxDeviation(2);
       expect(loaded.byPlayerCount[2].cards.Footman.placementDeltaSum).toBeCloseTo(expected);
       expect(expected).not.toBe(0); // sanity: this legacy fixture isn't a case where 0 would coincidentally be right
     });
@@ -191,7 +191,7 @@ describe("loadStats/saveStats round-trip", () => {
       window.localStorage.setItem("board-game:playtest-stats", JSON.stringify(legacyShape));
 
       const loaded = loadStats();
-      const expected = (6 - 5 * placementBaseline(2)) + (6 - 3 * placementBaseline(8));
+      const expected = (6 - 5 * placementBaseline(2)) / placementMaxDeviation(2) + (6 - 3 * placementBaseline(8)) / placementMaxDeviation(8);
       expect(loaded.cards.Footman.placementDeltaSum).toBeCloseTo(expected);
       expect(expected).not.toBe(0);
     });

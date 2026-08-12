@@ -23,6 +23,56 @@ function fmtSigned(n: number | null, decimals = 2): string {
   return n > 0 ? `+${s}` : s;
 }
 
+type SortDir = 1 | -1;
+
+/** One sort-state hook per table (not one shared across all three) -- each table's columns are independent, so sorting "By card" shouldn't touch "By location"'s order. */
+function useTableSort<K extends string>(defaultKey: K, defaultDir: SortDir = 1) {
+  const [sort, setSort] = useState<{ key: K; dir: SortDir }>({ key: defaultKey, dir: defaultDir });
+  const toggle = (key: K) => setSort((prev) => (prev.key === key ? { key, dir: (prev.dir * -1) as SortDir } : { key, dir: 1 }));
+  return [sort, toggle] as const;
+}
+
+function sortRows<T>(rows: T[], keyFn: (row: T) => number | string, dir: SortDir): T[] {
+  return [...rows].sort((a, b) => {
+    const av = keyFn(a);
+    const bv = keyFn(b);
+    if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * dir;
+    return ((av as number) - (bv as number)) * dir;
+  });
+}
+
+/** Clickable column header -- click sorts by this column ascending, click again for descending. Arrow only shown on the currently-active column. */
+function SortTh<K extends string>({
+  label,
+  sortKey,
+  active,
+  dir,
+  onClick,
+  align = "left",
+  title,
+}: {
+  label: string;
+  sortKey: K;
+  active: boolean;
+  dir: SortDir;
+  onClick: (key: K) => void;
+  align?: "left" | "right";
+  title?: string;
+}) {
+  return (
+    <th
+      className={`cursor-pointer px-3 py-2 select-none hover:text-zinc-700 dark:hover:text-zinc-300 ${align === "right" ? "text-right" : "text-left"}`}
+      onClick={() => onClick(sortKey)}
+      title={title}
+    >
+      <span className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""}`}>
+        {label}
+        <span className={`text-[8px] ${active ? "" : "opacity-0"}`}>{dir === 1 ? "▲" : "▼"}</span>
+      </span>
+    </th>
+  );
+}
+
 /** Markdown export of everything in the modal -- same "one paste" spirit as the playtest page's own copy button. */
 function buildMarkdown(placementStats: HumanPlacementStats, cardRows: CardStatsRow[]): string {
   const lines: string[] = [
@@ -76,6 +126,13 @@ function PlacementRow({ label, bucket }: { label: string; bucket: OwnPlacementBu
   );
 }
 
+type PlacementSortKey = "label" | "games" | "delta";
+const PLACEMENT_KEY_FNS: Record<PlacementSortKey, (r: { label: string; bucket: OwnPlacementBucket }) => number | string> = {
+  label: (r) => r.label,
+  games: (r) => r.bucket.gamesPlayed,
+  delta: (r) => avgPlacementDelta(r.bucket) ?? -Infinity,
+};
+
 export function MyStatsModal({ onClose }: { onClose: () => void }) {
   // Snapshotted once on open, not live-subscribed -- a game finishing while this
   // modal happens to be open (e.g. an AI's turn resolving the game underneath it)
@@ -95,7 +152,29 @@ export function MyStatsModal({ onClose }: { onClose: () => void }) {
     .map(Number)
     .sort((a, b) => a - b);
   const locations = LOCATION_COMPLEXITY_ORDER.filter((id) => placementStats.byCenterEffect[id]);
-  const playedCardRows = [...cardRows].filter((r) => r.played > 0).sort((a, b) => b.played - a.played);
+  const playedCardRows = [...cardRows].filter((r) => r.played > 0);
+
+  const [pcSort, togglePcSort] = useTableSort<PlacementSortKey>("label");
+  const playerCountRows = sortRows(
+    playerCounts.map((pc) => ({ label: `${pc}p`, bucket: placementStats.byPlayerCount[pc] })),
+    PLACEMENT_KEY_FNS[pcSort.key],
+    pcSort.dir
+  );
+
+  const [locSort, toggleLocSort] = useTableSort<PlacementSortKey>("label");
+  const locationRows = sortRows(
+    locations.map((id) => ({ label: CENTER_EFFECTS[id].label, bucket: placementStats.byCenterEffect[id] })),
+    PLACEMENT_KEY_FNS[locSort.key],
+    locSort.dir
+  );
+
+  const [cardSort, toggleCardSort] = useTableSort<"label" | "played" | "delta">("played", -1);
+  const cardKeyFns: Record<"label" | "played" | "delta", (r: CardStatsRow) => number | string> = {
+    label: (r) => CARD_DEFS[r.cardId].name,
+    played: (r) => r.played,
+    delta: (r) => r.avgPlacementDelta ?? -Infinity,
+  };
+  const sortedPlayedCardRows = sortRows(playedCardRows, cardKeyFns[cardSort.key], cardSort.dir);
 
   function copyStats() {
     navigator.clipboard.writeText(buildMarkdown(placementStats, cardRows)).then(() => {
@@ -221,7 +300,7 @@ export function MyStatsModal({ onClose }: { onClose: () => void }) {
                 placement Δ{" "}
                 <span
                   className="font-semibold text-zinc-900 dark:text-zinc-100"
-                  title="Average (your rank - baseline for that game's player count) -- negative means you tend to place better than a random seat would, positive means worse, 0 is exactly average. Comparable across a mix of player counts, unlike a raw average rank."
+                  title="Average (your rank - baseline) / (half the game's rank spread), on a fixed -1..+1 scale -- negative means you tend to place better than a random seat would, positive means worse, 0 is exactly average, -1/+1 are the best/worst possible finish regardless of player count. Comparable across a mix of player counts, unlike a raw average rank."
                 >
                   {fmtSigned(avgPlacementDelta(placementStats.overall))}
                 </span>
@@ -236,14 +315,28 @@ export function MyStatsModal({ onClose }: { onClose: () => void }) {
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="border-b border-zinc-300 bg-zinc-50 text-xs text-zinc-500 uppercase dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
-                        <th className="px-3 py-2">Players</th>
-                        <th className="px-3 py-2 text-right">Games</th>
-                        <th className="px-3 py-2 text-right">Placement Δ</th>
+                        <SortTh label="Players" sortKey="label" active={pcSort.key === "label"} dir={pcSort.dir} onClick={togglePcSort} />
+                        <SortTh
+                          label="Games"
+                          sortKey="games"
+                          active={pcSort.key === "games"}
+                          dir={pcSort.dir}
+                          onClick={togglePcSort}
+                          align="right"
+                        />
+                        <SortTh
+                          label="Placement Δ"
+                          sortKey="delta"
+                          active={pcSort.key === "delta"}
+                          dir={pcSort.dir}
+                          onClick={togglePcSort}
+                          align="right"
+                        />
                       </tr>
                     </thead>
                     <tbody>
-                      {playerCounts.map((pc) => (
-                        <PlacementRow key={pc} label={`${pc}p`} bucket={placementStats.byPlayerCount[pc]} />
+                      {playerCountRows.map((r) => (
+                        <PlacementRow key={r.label} label={r.label} bucket={r.bucket} />
                       ))}
                     </tbody>
                   </table>
@@ -258,14 +351,28 @@ export function MyStatsModal({ onClose }: { onClose: () => void }) {
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="border-b border-zinc-300 bg-zinc-50 text-xs text-zinc-500 uppercase dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
-                        <th className="px-3 py-2">Location</th>
-                        <th className="px-3 py-2 text-right">Games</th>
-                        <th className="px-3 py-2 text-right">Placement Δ</th>
+                        <SortTh label="Location" sortKey="label" active={locSort.key === "label"} dir={locSort.dir} onClick={toggleLocSort} />
+                        <SortTh
+                          label="Games"
+                          sortKey="games"
+                          active={locSort.key === "games"}
+                          dir={locSort.dir}
+                          onClick={toggleLocSort}
+                          align="right"
+                        />
+                        <SortTh
+                          label="Placement Δ"
+                          sortKey="delta"
+                          active={locSort.key === "delta"}
+                          dir={locSort.dir}
+                          onClick={toggleLocSort}
+                          align="right"
+                        />
                       </tr>
                     </thead>
                     <tbody>
-                      {locations.map((id) => (
-                        <PlacementRow key={id} label={CENTER_EFFECTS[id].label} bucket={placementStats.byCenterEffect[id]} />
+                      {locationRows.map((r) => (
+                        <PlacementRow key={r.label} label={r.label} bucket={r.bucket} />
                       ))}
                     </tbody>
                   </table>
@@ -280,18 +387,28 @@ export function MyStatsModal({ onClose }: { onClose: () => void }) {
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="border-b border-zinc-300 bg-zinc-50 text-xs text-zinc-500 uppercase dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
-                        <th className="px-3 py-2">Card</th>
-                        <th className="px-3 py-2 text-right">Played</th>
-                        <th
-                          className="px-3 py-2 text-right"
-                          title="Average (your rank - baseline for that game's player count) when this card's in play -- negative means you tend to place better than a random seat would, positive means worse."
-                        >
-                          Placement Δ
-                        </th>
+                        <SortTh label="Card" sortKey="label" active={cardSort.key === "label"} dir={cardSort.dir} onClick={toggleCardSort} />
+                        <SortTh
+                          label="Played"
+                          sortKey="played"
+                          active={cardSort.key === "played"}
+                          dir={cardSort.dir}
+                          onClick={toggleCardSort}
+                          align="right"
+                        />
+                        <SortTh
+                          label="Placement Δ"
+                          sortKey="delta"
+                          active={cardSort.key === "delta"}
+                          dir={cardSort.dir}
+                          onClick={toggleCardSort}
+                          align="right"
+                          title="Average (your rank - baseline) / (half the game's rank spread), on a fixed -1..+1 scale, when this card's in play -- negative means you tend to place better than a random seat would, positive means worse."
+                        />
                       </tr>
                     </thead>
                     <tbody>
-                      {playedCardRows.map((row) => (
+                      {sortedPlayedCardRows.map((row) => (
                         <tr key={row.cardId} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
                           <td className="px-3 py-1.5 font-medium whitespace-nowrap">{CARD_DEFS[row.cardId].name}</td>
                           <td className="px-3 py-1.5 text-right">{row.played}</td>

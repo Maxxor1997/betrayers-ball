@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { BoardGrid } from "@/app/components/Board";
-import { LOCATION_COMPLEXITY_ORDER } from "@/app/components/CardCatalog";
+import { FixedTooltip, LOCATION_COMPLEXITY_ORDER } from "@/app/components/CardCatalog";
+import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
+import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, randomCenterEffectPool, selectableCenterEffects } from "@/lib/content/centerEffects";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
@@ -108,29 +110,21 @@ function byBucketThenName(a: CardStatsRow, b: CardStatsRow): number {
   return diff !== 0 ? diff : CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name);
 }
 
-/** Markdown table of the currently-sorted rows, for pasting elsewhere (bug reports, balance discussion) -- same values shown on screen, in the same order. */
-function buildStatsMarkdown(rows: CardStatsRow[], overallRoundLength: number | null): string {
-  const lines = [
-    `Overall average round length: ${fmt(overallRoundLength, 2)}`,
-    "",
-    "| Card | Bucket | Played | Own Δ base | Final score | Placement Δ avg | Avg round length | Disruption | Impact |",
-    "|---|---|---|---|---|---|---|---|---|",
-  ];
-  for (const row of rows) {
-    lines.push(
-      `| ${CARD_DEFS[row.cardId].name} | ${CARD_DEFS[row.cardId].bucket} | ${fmtPercent(row.playRate)} (${row.played}/${row.copiesInDeck}) | ${fmtSigned(ownScoreDelta(row))} | ${fmt(row.avgFinalScore)} | ${fmtSigned(row.avgPlacementDelta, 2)} | ${fmt(row.avgRoundLength, 2)} | ${fmtSigned(row.avgDisruption)} | ${fmtSigned(impactMetric(row), 3)} |`
-    );
-  }
-  return lines.join("\n") + "\n";
-}
-
 /** sim0/sim1/... (see cardStats.ts's simulateOneGame) -> "P1"/"P2"/... for the live board viewer, which has no real lobby to look names up in. */
 function simPlayerLabel(id: string): string {
   const n = Number(id.replace("sim", ""));
   return Number.isNaN(n) ? id : `P${n + 1}`;
 }
 
-type SortKey = "name" | "bucket" | "played" | "own" | "final" | "placement" | "roundLength" | "disruption" | "impact";
+/**
+ * The flat table's own metric columns are exactly the heatmap's "Color by" dropdown
+ * options (HEAT_METRIC_LABELS below), in the same order -- rather than a second,
+ * independently-maintained column list that can silently drift out of sync with what
+ * the heatmap offers (which is how the flat table ended up missing "Value" for a
+ * while). Same reasoning for reusing heatMetricValue/heatMetricFormat for every cell
+ * instead of one-off per-column formatting.
+ */
+type SortKey = "name" | "bucket" | HeatMetric;
 
 /**
  * The heatmap's row order is deliberately independent of the flat table's sortKey
@@ -211,6 +205,39 @@ function heatMetricFormat(row: CardStatsRow | undefined, metric: HeatMetric): st
     case "impact":
       return fmtSigned(impactMetric(row), 3);
   }
+}
+
+/** Longer explanation for each metric's column header, on both the flat table and the heatmap -- every metric gets one so no column is ever left without a hover explanation. */
+const HEAT_METRIC_TITLES: Record<HeatMetric, string> = {
+  placement:
+    "Average (placement rank - baseline) / (half the game's rank spread), on a fixed -1..+1 scale -- e.g. baseline is 2.5 at 4p, 4.5 at 8p, and the spread-halving keeps a rank-1 finish worth exactly -1 whether it beat 3 opponents or 7. Negative means better than a random seat would average; positive means worse; -1/+1 are the best/worst possible finish, regardless of player count.",
+  impact:
+    "-Placement Δ avg × play rate -- the unconditional expected placement swing this card contributes across a random game. High and positive means strong AND common (worth a balance look); near 0 means either weak or rare (a rare-but-strong card is 'situational', not broken); negative means common but actively bad (a trap card).",
+  playRate:
+    "Times placed on the board, as a share of every copy of this card that's existed across every tallied game -- scaled so a card with more printed copies doesn't just look more 'played' for having more copies",
+  value:
+    "What this card is actually worth to play -- a Control card's own base rarely moves on its own, so its value is base + average damage dealt to an opponent; every other card's value is its own base + conditional effects (avgOwnScore).",
+  own: "Base + only this card's own conditional effects (excluding neighbor/center-effect deltas), shown as +/- versus the card's printed base value",
+  final: "Full resolved value as actually scored, including neighbor and center effects",
+  disruption:
+    "Average net damage dealt to a single average opponent, per appearance -- damage to opponents' cards minus damage to this card's own side, divided by opponent count. Always 0 for a card with no outgoing effect on other cards.",
+  roundLength: "Average length (in rounds) of games this card appeared in.",
+};
+
+/** Markdown table of the currently-sorted rows, for pasting elsewhere (bug reports, balance discussion) -- same columns (and order) shown on screen, driven off the same HEAT_METRIC_LABELS list as the on-screen table and the heatmap's "Color by" dropdown. */
+function buildStatsMarkdown(rows: CardStatsRow[], overallRoundLength: number | null): string {
+  const metrics = Object.keys(HEAT_METRIC_LABELS) as HeatMetric[];
+  const lines = [
+    `Overall average round length: ${fmt(overallRoundLength, 2)}`,
+    "",
+    `| Card | Bucket | ${metrics.map((m) => HEAT_METRIC_LABELS[m]).join(" | ")} |`,
+    `|---|---|${metrics.map(() => "---").join("|")}|`,
+  ];
+  for (const row of rows) {
+    const cells = metrics.map((m) => heatMetricFormat(row, m));
+    lines.push(`| ${CARD_DEFS[row.cardId].name} | ${CARD_DEFS[row.cardId].bucket} | ${cells.join(" | ")} |`);
+  }
+  return lines.join("\n") + "\n";
 }
 
 /**
@@ -458,26 +485,9 @@ function Playtest() {
   }
 
   const rows = statsSummary(stats).sort((a, b) => {
-    switch (sortKey) {
-      case "name":
-        return sortDir * CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name);
-      case "bucket":
-        return sortDir * byBucketThenName(a, b);
-      case "played":
-        return compareNullable(a.playRate, b.playRate, sortDir);
-      case "own":
-        return compareNullable(ownScoreDelta(a), ownScoreDelta(b), sortDir);
-      case "final":
-        return compareNullable(a.avgFinalScore, b.avgFinalScore, sortDir);
-      case "placement":
-        return compareNullable(a.avgPlacementDelta, b.avgPlacementDelta, sortDir);
-      case "roundLength":
-        return compareNullable(a.avgRoundLength, b.avgRoundLength, sortDir);
-      case "disruption":
-        return compareNullable(a.avgDisruption, b.avgDisruption, sortDir);
-      case "impact":
-        return compareNullable(impactMetric(a), impactMetric(b), sortDir);
-    }
+    if (sortKey === "name") return sortDir * CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name);
+    if (sortKey === "bucket") return sortDir * byBucketThenName(a, b);
+    return compareNullable(heatMetricValue(a, sortKey), heatMetricValue(b, sortKey), sortDir);
   });
   const totalPlayed = rows.reduce((sum, r) => sum + r.played, 0);
   const overallRoundLength = overallAvgRoundLength(stats);
@@ -819,71 +829,37 @@ function Playtest() {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-zinc-300 bg-zinc-50 text-xs text-zinc-500 uppercase dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
-                <SortableHeader label="Card" sortKey="name" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                <SortableHeader label="Bucket" sortKey="bucket" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                 <SortableHeader
-                  label="Played"
-                  sortKey="played"
+                  label="Card"
+                  sortKey="name"
                   activeKey={sortKey}
                   dir={sortDir}
                   onClick={toggleSort}
-                  align="right"
-                  title="Times placed on the board, as a share of every copy of this card that's existed across every tallied game -- scaled so a card with more printed copies doesn't just look more 'played' for having more copies"
+                  tooltip="Card name -- click to sort alphabetically."
+                  tooltipId="playtest-flat:name"
                 />
                 <SortableHeader
-                  label="Own Δ base"
-                  sortKey="own"
+                  label="Bucket"
+                  sortKey="bucket"
                   activeKey={sortKey}
                   dir={sortDir}
                   onClick={toggleSort}
-                  align="right"
-                  title="Base + only this card's own conditional effects (excluding neighbor/center-effect deltas), shown as +/- versus the card's printed base value"
+                  tooltip="Slam / Engine / Control -- click to sort by bucket, then by name within it."
+                  tooltipId="playtest-flat:bucket"
                 />
-                <SortableHeader
-                  label="Final score"
-                  sortKey="final"
-                  activeKey={sortKey}
-                  dir={sortDir}
-                  onClick={toggleSort}
-                  align="right"
-                  title="Full resolved value as actually scored, including neighbor and center effects"
-                />
-                <SortableHeader
-                  label="Placement Δ avg"
-                  sortKey="placement"
-                  activeKey={sortKey}
-                  dir={sortDir}
-                  onClick={toggleSort}
-                  align="right"
-                  title="Average (placement rank - the random-baseline rank for that game's player count), e.g. baseline is 2.5 at 4p, 4.5 at 8p -- lets placement be compared fairly across a mix of player counts. Negative means better than a random seat would average; positive means worse."
-                />
-                <SortableHeader
-                  label="Avg round length"
-                  sortKey="roundLength"
-                  activeKey={sortKey}
-                  dir={sortDir}
-                  onClick={toggleSort}
-                  align="right"
-                  title={`Average length (in rounds) of games this card appeared in. Overall average across every tallied game: ${fmt(overallRoundLength, 2)}`}
-                />
-                <SortableHeader
-                  label="Disruption"
-                  sortKey="disruption"
-                  activeKey={sortKey}
-                  dir={sortDir}
-                  onClick={toggleSort}
-                  align="right"
-                  title="Average net damage dealt to a single average opponent, per appearance -- damage to opponents' cards minus damage to this card's own side, divided by opponent count. Always 0 for a card with no outgoing effect on other cards."
-                />
-                <SortableHeader
-                  label="Impact"
-                  sortKey="impact"
-                  activeKey={sortKey}
-                  dir={sortDir}
-                  onClick={toggleSort}
-                  align="right"
-                  title="-Placement Δ avg × play rate -- the unconditional expected placement swing this card contributes across a random game. High and positive means strong AND common (worth a balance look); near 0 means either weak or rare (a rare-but-strong card is 'situational', not broken); negative means common but actively bad (a trap card)."
-                />
+                {(Object.keys(HEAT_METRIC_LABELS) as HeatMetric[]).map((m) => (
+                  <SortableHeader
+                    key={m}
+                    label={HEAT_METRIC_LABELS[m]}
+                    sortKey={m}
+                    activeKey={sortKey}
+                    dir={sortDir}
+                    onClick={toggleSort}
+                    align="right"
+                    tooltip={m === "roundLength" ? `${HEAT_METRIC_TITLES[m]} Overall average across every tallied game: ${fmt(overallRoundLength, 2)}` : HEAT_METRIC_TITLES[m]}
+                    tooltipId={`playtest-flat:${m}`}
+                  />
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -891,15 +867,15 @@ function Playtest() {
                 <tr key={row.cardId} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
                   <td className="px-3 py-1.5 font-medium">{CARD_DEFS[row.cardId].name}</td>
                   <td className="px-3 py-1.5 text-zinc-500 dark:text-zinc-400">{CARD_DEFS[row.cardId].bucket}</td>
-                  <td className="px-3 py-1.5 text-right" title={`${row.played} / ${row.copiesInDeck} copies`}>
-                    {fmtPercent(row.playRate)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right">{fmtSigned(ownScoreDelta(row))}</td>
-                  <td className="px-3 py-1.5 text-right">{fmt(row.avgFinalScore)}</td>
-                  <td className="px-3 py-1.5 text-right">{fmtSigned(row.avgPlacementDelta, 2)}</td>
-                  <td className="px-3 py-1.5 text-right">{fmt(row.avgRoundLength, 2)}</td>
-                  <td className="px-3 py-1.5 text-right">{fmtSigned(row.avgDisruption)}</td>
-                  <td className="px-3 py-1.5 text-right">{fmtSigned(impactMetric(row), 3)}</td>
+                  {(Object.keys(HEAT_METRIC_LABELS) as HeatMetric[]).map((m) => (
+                    <td
+                      key={m}
+                      className="px-3 py-1.5 text-right"
+                      title={m === "playRate" ? `${row.played} / ${row.copiesInDeck} copies` : undefined}
+                    >
+                      {heatMetricFormat(row, m)}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -980,7 +956,8 @@ function Playtest() {
                       activeKey={heatmapSortKey}
                       dir={heatmapSortDir}
                       onClick={toggleHeatmapSort}
-                      title="Sort alphabetically -- click again to reverse. Doesn't affect the flat table's own sort."
+                      tooltip="Sort alphabetically -- click again to reverse. Doesn't affect the flat table's own sort."
+                      tooltipId="playtest-heat:name"
                     />
                     {heatmapColumns.map((column) => (
                       <SortableHeader
@@ -991,7 +968,8 @@ function Playtest() {
                         dir={heatmapSortDir}
                         onClick={toggleHeatmapSort}
                         align="right"
-                        title={`${column.title} -- click to sort by this column's value for the current heat metric, click again to reverse.`}
+                        tooltip={`${column.title} -- click to sort by this column's value for the current heat metric, click again to reverse.`}
+                        tooltipId={`playtest-heat:${column.key}`}
                       />
                     ))}
                   </tr>
@@ -1077,6 +1055,17 @@ function BarChartByPlayerCount({ title, counts, values }: { title: string; count
   );
 }
 
+/**
+ * Native `title` attributes (the old approach here) never show on touch -- most mobile
+ * browsers have no hover/long-press affordance for them at all, so every column
+ * description was silently invisible on a phone. Same fix as CardCatalog's bucket
+ * headers: hover-capable devices get the description on hovering the whole header;
+ * touch devices get it via a small tappable "i" that's separate from the header
+ * button itself, so tapping the header to sort and tapping the "i" to read the
+ * description don't fight over the same tap. `tooltipId` must be globally unique
+ * (this component is reused by both the flat table and the heatmap table, whose
+ * sortKey values can otherwise collide) -- see activeTooltip.ts.
+ */
 function SortableHeader<K extends string>({
   label,
   sortKey,
@@ -1084,7 +1073,8 @@ function SortableHeader<K extends string>({
   dir,
   onClick,
   align = "left",
-  title,
+  tooltip,
+  tooltipId,
 }: {
   label: string;
   sortKey: K;
@@ -1092,18 +1082,50 @@ function SortableHeader<K extends string>({
   dir: 1 | -1;
   onClick: (key: K) => void;
   align?: "left" | "right";
-  title?: string;
+  tooltip?: string;
+  tooltipId?: string;
 }) {
   const active = sortKey === activeKey;
+  const hasHover = useHasHover();
+  const activeTooltipId = useActiveTooltipId();
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const showInfo = tooltip !== undefined && tooltipId !== undefined;
+
   return (
-    <th className={`px-3 py-2 ${align === "right" ? "text-right" : "text-left"}`} title={title}>
-      <button
-        onClick={() => onClick(sortKey)}
-        className={`inline-flex items-center gap-1 hover:text-zinc-700 dark:hover:text-zinc-200 ${active ? "text-zinc-700 dark:text-zinc-200" : ""}`}
+    <th className={`relative px-3 py-2 ${align === "right" ? "text-right" : "text-left"}`}>
+      <span
+        className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""}`}
+        onMouseEnter={
+          showInfo && hasHover
+            ? (e) => {
+                setRect(e.currentTarget.getBoundingClientRect());
+                setActiveTooltip(tooltipId);
+              }
+            : undefined
+        }
+        onMouseLeave={showInfo && hasHover ? () => clearActiveTooltip(tooltipId) : undefined}
       >
-        {label}
-        <span className="w-2.5 text-[9px]">{active ? (dir === 1 ? "▲" : "▼") : ""}</span>
-      </button>
+        <button
+          onClick={() => onClick(sortKey)}
+          className={`inline-flex items-center gap-1 hover:text-zinc-700 dark:hover:text-zinc-200 ${active ? "text-zinc-700 dark:text-zinc-200" : ""}`}
+        >
+          {label}
+          <span className="w-2.5 text-[9px]">{active ? (dir === 1 ? "▲" : "▼") : ""}</span>
+        </button>
+        {showInfo && !hasHover && (
+          <span
+            className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-400 text-[9px] normal-case text-zinc-400 dark:border-zinc-500 dark:text-zinc-500"
+            onClick={(e) => {
+              e.stopPropagation();
+              setRect(e.currentTarget.getBoundingClientRect());
+              toggleActiveTooltip(tooltipId);
+            }}
+          >
+            i
+          </span>
+        )}
+      </span>
+      {showInfo && activeTooltipId === tooltipId && rect && <FixedTooltip rect={rect} placement="below">{tooltip}</FixedTooltip>}
     </th>
   );
 }

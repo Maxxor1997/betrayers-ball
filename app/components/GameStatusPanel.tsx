@@ -7,8 +7,10 @@ import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription } from "@/lib/content/centerEffects";
 import { PLAYER_TEXT_COLOR_CLASSES, playerDotColorClass } from "@/lib/config/players";
+import { estimatedResolutionFor } from "@/lib/engine/endgame";
 import { currentPlayerId } from "@/lib/engine/turns";
 import { GameState } from "@/lib/engine/types";
+import { visibleBreakdown } from "./scoreBreakdown";
 
 /** Index-based, not identity-based -- same as Board.tsx's ownerColorClass, just the text-color palette. */
 function ownerTextColorClass(state: GameState, ownerId: string): string {
@@ -100,6 +102,87 @@ function VoteGlyph({ vote }: { vote: boolean | undefined }) {
     <span className="text-rose-600 dark:text-rose-400" title="Voted to keep playing">
       ✗
     </span>
+  );
+}
+
+/**
+ * "How many points do I have right now" using only what the viewer could actually
+ * know -- see estimatedResolutionFor's doc comment for why this is a live, provisional
+ * number, not something that only goes up: because effects are neighbor-dependent, a
+ * card's contribution can (and will) shift as more of the board fills in around it,
+ * including on turns the viewer didn't take. Hovering (or tapping, on touch) shows the
+ * same per-card breakdown language EndScreen uses at game end, scoped to just the
+ * viewer's own placed cards, so "why is my score X" is never a mystery mid-game either.
+ */
+function MyScoreTracker({ state, viewerId }: { state: GameState; viewerId: string }) {
+  const hasHover = useHasHover();
+  const activeTooltipId = useActiveTooltipId();
+  const [activeRect, setActiveRect] = useState<DOMRect | null>(null);
+  const tooltipId = "myscore";
+
+  const { cards, totalsByOwner } = estimatedResolutionFor(state, viewerId);
+  const myScore = totalsByOwner[viewerId] ?? 0;
+  const myCards = cards.filter((c) => c.ownerId === viewerId);
+
+  return (
+    <div
+      className="relative flex w-full cursor-help flex-col items-center gap-0.5 text-center"
+      // Same hover-vs-tap split and shared-store wiring as TurnOrderTracker's rows --
+      // see activeTooltip.ts's doc comment for why this needs to be a shared store,
+      // not local state.
+      onMouseEnter={
+        hasHover
+          ? (e) => {
+              setActiveRect(e.currentTarget.getBoundingClientRect());
+              setActiveTooltip(tooltipId);
+            }
+          : undefined
+      }
+      onMouseLeave={hasHover ? () => clearActiveTooltip(tooltipId) : undefined}
+      onClick={
+        hasHover
+          ? undefined
+          : (e) => {
+              e.stopPropagation();
+              setActiveRect(e.currentTarget.getBoundingClientRect());
+              toggleActiveTooltip(tooltipId);
+            }
+      }
+    >
+      <span className="text-[10px] font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">Your score (est.)</span>
+      <span className="text-2xl leading-none font-bold text-zinc-900 dark:text-zinc-100">{myScore}</span>
+      {activeTooltipId === tooltipId && activeRect && (
+        <FixedTooltip rect={activeRect} placement="below">
+          <div className="flex flex-col gap-1.5">
+            {myCards.length === 0 ? (
+              <span className="whitespace-nowrap">No cards placed yet.</span>
+            ) : (
+              myCards.map((c) => (
+                <div key={c.instanceId} className="whitespace-nowrap">
+                  <div className="flex justify-between gap-3 font-semibold">
+                    <span>{CARD_DEFS[c.cardId].name}</span>
+                    <span>{c.finalValue}</span>
+                  </div>
+                  {visibleBreakdown(c.breakdown).map((d, i) => (
+                    <div key={i} className="flex justify-between gap-3 pl-2">
+                      <span>{d.label}</span>
+                      <span>
+                        {d.amount > 0 ? "+" : ""}
+                        {d.amount}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))
+            )}
+            <div className="mt-0.5 flex justify-between gap-3 border-t border-white/20 pt-1 font-semibold whitespace-nowrap dark:border-black/20">
+              <span>Total</span>
+              <span>{myScore}</span>
+            </div>
+          </div>
+        </FixedTooltip>
+      )}
+    </div>
   );
 }
 
@@ -248,6 +331,12 @@ export function GameStatusPanel({
     <aside className="w-full shrink-0 lg:sticky lg:top-8 lg:w-40 lg:self-start">
       <div className="flex flex-col items-center gap-4 rounded-xl border border-zinc-300 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-950">
         <RoundBadge round={state.round} roundCap={state.config.roundCap} />
+        {(state.phase === "playing" || state.phase === "voting") && state.players.some((p) => p.id === viewerId) && (
+          <>
+            <MyScoreTracker state={state} viewerId={viewerId} />
+            <div className="h-px w-full shrink-0 bg-zinc-300 dark:bg-zinc-700" />
+          </>
+        )}
         <div className="flex w-full flex-col gap-3">
           <StatusCell label={flipLabel} active={flipUnlocked} number={flipNumber} text={flipText} />
           <StatusCell
