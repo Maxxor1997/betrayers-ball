@@ -1,5 +1,5 @@
 import { adjacentPositions, getAdjacentCards, isOwnerlessPosition, parsePosKey, posKey } from "../engine/board";
-import { CARD_DEFS } from "../content/cards";
+import { CARD_DEFS, copiesForPlayerCount } from "../content/cards";
 import { computeAiVote, estimateMargin } from "../engine/endgame";
 import { redactedBoardFor } from "../engine/playerView";
 import { resolveBoard } from "../engine/resolution";
@@ -118,6 +118,34 @@ function infiltratorDefenseAdjustment(board: Board, bounds: BoardBounds, playerI
 }
 
 /**
+ * Downweight (not certainty -- see infiltratorDefenseAdjustment's doc comment for why
+ * this can't be exact either) for a blind opponent flip target sitting next to one or
+ * more of the flipper's own face-up cards: if the hidden target turns out to be a
+ * Doomherald (see lib/content/cards.ts), flipping it deals -3 to every one of its
+ * neighbors, including those same face-up cards of ours. Same neighbor scan as
+ * infiltratorDefenseAdjustment (deliberately -- an unknown target next to our own
+ * valuable stuff is simultaneously a defensive reason to flip it, if it's an
+ * Infiltrator staged to steal that value, and a risk reason not to, if it's a
+ * Doomherald staged to blast it), just the opposite sign and its own weight so the two
+ * can be tuned independently. Deliberately smaller in magnitude than
+ * INFILTRATOR_DEFENSE_WEIGHT_PER_BASE (not equal, which would cancel it out entirely)
+ * -- Infiltrator's threat is calibrated from real playtest data and Doomherald's isn't
+ * yet, so this starts as a real but subordinate caution on top of that proven signal,
+ * pending its own calibration once Doomherald has actually been played.
+ */
+const DOOMHERALD_RISK_WEIGHT_PER_BASE = 0.075;
+
+function doomheraldRiskAdjustment(board: Board, bounds: BoardBounds, playerId: string, target: CardInstance): number {
+  const entry = [...board.entries()].find(([, c]) => c.instanceId === target.instanceId)!;
+  const pos = parsePosKey(entry[0]);
+  let atRiskValue = 0;
+  for (const n of getAdjacentCards(board, bounds, pos)) {
+    if (n.ownerId === playerId && n.faceUp) atRiskValue += CARD_DEFS[n.cardId].base;
+  }
+  return -atRiskValue * DOOMHERALD_RISK_WEIGHT_PER_BASE;
+}
+
+/**
  * Nudges the flat opponent-flip exploration rate based on the flipper's own hand --
  * a face-down card still in hand isn't on the board yet, so this can't target a
  * specific placement, just lean the overall willingness to explore. Holding a
@@ -145,6 +173,22 @@ const HAND_BEACON_EXPLORATION_BONUS = 0.15;
 const INFILTRATOR_EXPLORATION_DISCOUNT = 0.15;
 
 /**
+ * Flat discount on the exploration rate whenever Doomherald has any copies in this
+ * game's deck at all -- unlike the Truthseeker/Beacon/Infiltrator nudges above (which
+ * only fire when the AI's own hand or board happens to hold the relevant card),
+ * this one doesn't depend on knowing anything hidden: deck composition
+ * (copiesForPlayerCount) is public, known to every player, even though which specific
+ * face-down card is a Doomherald never is. Without this, doomheraldRiskAdjustment
+ * alone only ever reshuffles *which* target gets picked once the AI has already
+ * committed to exploring -- it has no way to make the AI warier of exploring *at all*,
+ * so Doomherald existing in the deck wouldn't move the population-wide flip rate even
+ * a little, which defeats the point of a card meant to make blind flipping feel
+ * risky. This is the "there's a landmine somewhere out there" caution that
+ * doomheraldRiskAdjustment structurally can't express on its own.
+ */
+const DOOMHERALD_DECK_PRESENCE_EXPLORATION_DISCOUNT = 0.1;
+
+/**
  * Cards whose own printed effect doesn't care about their own face state at all --
  * Berserker's and Warlord's `valueModifier`s count matching cardIds straight off
  * `board.values()` with no `faceUp` check, so flipping either face-up changes nothing
@@ -170,10 +214,11 @@ const BLUFF_FLIP_PROBABILITY = 0.25;
  * a value-driven one, blind, weighted toward targets adjacent to the AI's own cards
  * (any known Truthseeker/Beacon neighbor, see truthseekerBeaconFlipAdjustment; extra
  * weight for threatening a valuable face-up card of ours, see
- * infiltratorDefenseAdjustment), at an exploration rate nudged by the AI's own hand
- * and board (see
- * HAND_TRUTHSEEKER_EXPLORATION_DISCOUNT/HAND_BEACON_EXPLORATION_BONUS/
- * INFILTRATOR_EXPLORATION_DISCOUNT).
+ * infiltratorDefenseAdjustment; extra caution near our own face-up cards, see
+ * doomheraldRiskAdjustment), at an exploration rate nudged by the AI's own hand and
+ * board (see HAND_TRUTHSEEKER_EXPLORATION_DISCOUNT/HAND_BEACON_EXPLORATION_BONUS/
+ * INFILTRATOR_EXPLORATION_DISCOUNT) and by public deck knowledge (see
+ * DOOMHERALD_DECK_PRESENCE_EXPLORATION_DISCOUNT).
  */
 function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null {
   const targets = getLegalFlipTargets(state);
@@ -214,6 +259,9 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
     if (hand.some((c) => c.cardId === "Truthseeker")) explorationProbability -= HAND_TRUTHSEEKER_EXPLORATION_DISCOUNT;
     if (hand.some((c) => c.cardId === "Beacon")) explorationProbability += HAND_BEACON_EXPLORATION_BONUS;
     if (hasVulnerableInfiltrator) explorationProbability -= INFILTRATOR_EXPLORATION_DISCOUNT;
+    if (copiesForPlayerCount(CARD_DEFS.Chronicler, state.config.playerCount) > 0) {
+      explorationProbability -= DOOMHERALD_DECK_PRESENCE_EXPLORATION_DISCOUNT;
+    }
     explorationProbability = Math.min(1, Math.max(0, explorationProbability));
 
     if (rng() < explorationProbability) {
@@ -222,7 +270,8 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
         (target) =>
           opponentTargetPriority(state.board, playerId, target) +
           truthseekerBeaconFlipAdjustment(state.board, state.config.boardBounds, playerId, target) +
-          infiltratorDefenseAdjustment(state.board, state.config.boardBounds, playerId, target),
+          infiltratorDefenseAdjustment(state.board, state.config.boardBounds, playerId, target) +
+          doomheraldRiskAdjustment(state.board, state.config.boardBounds, playerId, target),
         rng
       );
       return best.instanceId;
@@ -293,14 +342,29 @@ const COMMANDER_EARLY_GAME_BONUS_PER_ROUND = 0.5;
 const GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN = 0.18;
 
 /**
- * Combines GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN across every opponent-turn still
- * available before scoring, as "at least one of N independent attempts lands on it"
- * (1 - (1-p)^N) -- saturating, not linear, so it never overshoots 1 the way naively
- * multiplying opponentCount * roundsRemaining * p would once N gets large at 8p.
+ * Rough chance, per *opponent turn* once flips are actually unlocked, that a given
+ * opponent's blind exploration flip lands on this specific face-down Doomherald rather
+ * than some other face-down card. Doomherald is also `opponentOnlyFlip` (see
+ * lib/content/cards.ts) -- same shape as Gloryseeker's own rate above (a random blind
+ * target from the same shared pool), so this starts at the same value pending its own
+ * playtest calibration once real games/sims have actually been run with it -- it isn't
+ * expected to land exactly on Gloryseeker's number long-term, just a reasonable prior
+ * to start from rather than an uncalibrated guess out of nowhere.
  */
-function glorySeekerFlipChance(roundsWithFlipAvailable: number, opponentCount: number): number {
+const DOOMHERALD_FLIP_CHANCE_PER_OPPONENT_TURN = 0.18;
+
+/**
+ * Combines a per-opponent-turn flip rate across every opponent-turn still available
+ * before scoring, as "at least one of N independent attempts lands on it"
+ * (1 - (1-p)^N) -- saturating, not linear, so it never overshoots 1 the way naively
+ * multiplying opponentCount * roundsRemaining * p would once N gets large at 8p. Shared
+ * by every `opponentOnlyFlip` card's placement heuristic (Gloryseeker, Doomherald --
+ * see their own per-turn rate constants above), since "some opponent eventually takes
+ * a blind flip that happens to land here" is the same shape of event for any of them.
+ */
+function saturatingFlipChance(perOpponentTurnRate: number, roundsWithFlipAvailable: number, opponentCount: number): number {
   const opponentTurns = roundsWithFlipAvailable * opponentCount;
-  return 1 - (1 - GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN) ** opponentTurns;
+  return 1 - (1 - perOpponentTurnRate) ** opponentTurns;
 }
 
 /** Flat per-remaining-round discount on a face-down Infiltrator's current swap value, reflecting the cumulative risk it gets flipped (forfeiting the swap) before scoring. */
@@ -406,7 +470,7 @@ function placementHeuristicAdjustment(
         if (placedCard.faceUp) return 0;
         const roundsWithFlipAvailable = Math.max(0, expectedFinalRound(postState.config) - Math.max(preState.round, postState.config.flipUnlockRound));
         const opponentCount = postState.players.length - 1;
-        const flipChance = glorySeekerFlipChance(roundsWithFlipAvailable, opponentCount);
+        const flipChance = saturatingFlipChance(GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN, roundsWithFlipAvailable, opponentCount);
         return 4 * flipChance;
       }
 
@@ -423,16 +487,27 @@ function placementHeuristicAdjustment(
       }
 
       case "Chronicler": {
-        // +1 per round elapsed *when the game ends* -- the fair margin only ever counts
-        // postState.round (the current round, frozen at "as if scoring right now"), so
-        // it's systematically undervalued the earlier it's placed. Top it up to what
-        // it's really expected to be worth once the game actually ends.
-        return expectedFinalRound(postState.config) - postState.round;
+        // "Doomherald": -3 to every adjacent card (any owner) once face-up, but
+        // opponentOnlyFlip means only an opponent can trigger it -- the fair margin
+        // only ever sees this if it's ALREADY face-up (the rare case; skip). Placed
+        // face-down (the common case), credit the expected value: chance an opponent
+        // eventually flips it (same saturating model as Gloryseeker, its own rate --
+        // see DOOMHERALD_FLIP_CHANCE_PER_OPPONENT_TURN) times the net damage among
+        // its *current* neighbors -- hitting an opponent's card is a real margin gain,
+        // hitting one of ours is a real cost, and both happen together if triggered,
+        // so they're netted rather than only crediting the upside.
+        if (placedCard.faceUp) return 0;
+        const roundsWithFlipAvailable = Math.max(0, expectedFinalRound(postState.config) - Math.max(preState.round, postState.config.flipUnlockRound));
+        const opponentCount = postState.players.length - 1;
+        const flipChance = saturatingFlipChance(DOOMHERALD_FLIP_CHANCE_PER_OPPONENT_TURN, roundsWithFlipAvailable, opponentCount);
+        const neighbors = getAdjacentCards(postState.board, postState.config.boardBounds, action.position);
+        let netNeighborDamage = 0;
+        for (const n of neighbors) netNeighborDamage += n.ownerId === playerId ? -3 : 3;
+        return netNeighborDamage * flipChance;
       }
 
       case "DyingGod": {
-        // -1 per round elapsed *when the game ends* -- Chronicler's mirror, and the
-        // same one-ply blind spot in the opposite direction: the fair margin's
+        // -1 per round elapsed *when the game ends* -- the fair margin's
         // postState.round snapshot is systematically *overvalued* the earlier it's
         // placed (round 1 looks like base-1, when it's really headed toward
         // base-expectedFinalRound). Dock it down to what it's really expected to be

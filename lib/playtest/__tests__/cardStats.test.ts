@@ -6,6 +6,7 @@ import {
   computeRanks,
   createEmptyStats,
   disruptionFor,
+  overallAvgFlipRate,
   overallAvgRoundLength,
   ownValueFor,
   placementBaseline,
@@ -372,6 +373,40 @@ describe("statsSummary", () => {
     const rows = statsSummary(createEmptyStats());
     expect(rows.some((r) => r.cardId === "Unknown")).toBe(false);
   });
+
+  it("computes flipRate as the fraction of appearances that are face-up at game end", () => {
+    const stats = createEmptyStats();
+    const boardUp: Board = new Map();
+    place(boardUp, 0, 0, "Footman", "p1", true);
+    tallyGame(stats, resolveBoard(boardUp, BOUNDS, 3).cards, { p1: 10 }, 2, 3);
+
+    const boardDown: Board = new Map();
+    place(boardDown, 0, 0, "Footman", "p1", false);
+    tallyGame(stats, resolveBoard(boardDown, BOUNDS, 3).cards, { p1: 10 }, 2, 3);
+
+    const row = statsSummary(stats).find((r) => r.cardId === "Footman")!;
+    expect(row.flipRate).toBe(0.5); // 1 of 2 appearances face-up
+  });
+
+  it("gives a forceFaceUp card a flip rate of exactly 1 -- it's always known, never actually flipped", () => {
+    const stats = createEmptyStats();
+    const board: Board = new Map();
+    // forceFaceUp (see lib/content/cards.ts) is enforced by applyPlace at placement
+    // time, not by resolveBoard -- by the time a card reaches resolution its faceUp
+    // is already whatever placement settled on, so a Giant is placed face-up directly
+    // here rather than relying on that placement-time rule this resolution-level test
+    // doesn't go through.
+    place(board, 0, 0, "Giant", "p1", true);
+    tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10 }, 2, 3);
+
+    const row = statsSummary(stats).find((r) => r.cardId === "Giant")!;
+    expect(row.flipRate).toBe(1);
+  });
+
+  it("flipRate is null (not 0) for a card that's never been played", () => {
+    const row = statsSummary(createEmptyStats()).find((r) => r.cardId === "Footman")!;
+    expect(row.flipRate).toBeNull();
+  });
 });
 
 describe("overallAvgRoundLength", () => {
@@ -384,6 +419,33 @@ describe("overallAvgRoundLength", () => {
     tallyGame(stats, [], { p1: 0 }, 2, 2);
     tallyGame(stats, [], { p1: 0 }, 2, 8);
     expect(overallAvgRoundLength(stats)).toBe(5);
+  });
+});
+
+describe("overallAvgFlipRate", () => {
+  it("is null before anything's been tallied", () => {
+    expect(overallAvgFlipRate(createEmptyStats())).toBeNull();
+  });
+
+  it("averages the face-up fraction of the board across every tallied game", () => {
+    const stats = createEmptyStats();
+    const allUp: Board = new Map();
+    place(allUp, 0, 0, "Footman", "p1", true);
+    place(allUp, 1, 0, "Warlord", "p2", true);
+    tallyGame(stats, resolveBoard(allUp, BOUNDS, 3).cards, { p1: 10, p2: 5 }, 2, 3); // 2/2 face-up
+
+    const halfUp: Board = new Map();
+    place(halfUp, 0, 0, "Footman", "p1", true);
+    place(halfUp, 1, 0, "Warlord", "p2", false);
+    tallyGame(stats, resolveBoard(halfUp, BOUNDS, 3).cards, { p1: 10, p2: 5 }, 2, 3); // 1/2 face-up
+
+    expect(overallAvgFlipRate(stats)).toBeCloseTo((1 + 0.5) / 2);
+  });
+
+  it("doesn't divide by zero for a game with no cards on the board", () => {
+    const stats = createEmptyStats();
+    tallyGame(stats, [], { p1: 0 }, 2, 2);
+    expect(overallAvgFlipRate(stats)).toBe(0);
   });
 });
 

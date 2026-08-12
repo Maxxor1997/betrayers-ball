@@ -15,6 +15,7 @@ import { CardBucket, CardId, CenterEffectId, GameState } from "@/lib/engine/type
 import {
   CardStatsRow,
   createEmptyStats,
+  overallAvgFlipRate,
   overallAvgRoundLength,
   PlaytestStats,
   simulateOneGame,
@@ -145,7 +146,7 @@ function compareNullable(a: number | null, b: number | null, dir: 1 | -1): numbe
   return dir * (a - b);
 }
 
-type HeatMetric = "placement" | "impact" | "playRate" | "value" | "own" | "final" | "disruption" | "roundLength";
+type HeatMetric = "placement" | "impact" | "playRate" | "value" | "own" | "final" | "disruption" | "roundLength" | "flipRate";
 
 const HEAT_METRIC_LABELS: Record<HeatMetric, string> = {
   placement: "Placement Δ avg",
@@ -156,6 +157,7 @@ const HEAT_METRIC_LABELS: Record<HeatMetric, string> = {
   final: "Final score",
   disruption: "Disruption",
   roundLength: "Avg round length",
+  flipRate: "Flip rate",
 };
 
 /** Only "placement" has a real notion of better/worse (lower rank number wins) -- every other metric is purely informational, so its heatmap coloring is just a plain magnitude scale, not a judgment. */
@@ -182,6 +184,8 @@ function heatMetricValue(row: CardStatsRow | undefined, metric: HeatMetric): num
       return cardValueMetric(row);
     case "impact":
       return impactMetric(row);
+    case "flipRate":
+      return row.flipRate;
   }
 }
 
@@ -204,6 +208,8 @@ function heatMetricFormat(row: CardStatsRow | undefined, metric: HeatMetric): st
       return fmt(cardValueMetric(row));
     case "impact":
       return fmtSigned(impactMetric(row), 3);
+    case "flipRate":
+      return fmtPercent(row.flipRate);
   }
 }
 
@@ -222,13 +228,16 @@ const HEAT_METRIC_TITLES: Record<HeatMetric, string> = {
   disruption:
     "Average net damage dealt to a single average opponent, per appearance -- damage to opponents' cards minus damage to this card's own side, divided by opponent count. Always 0 for a card with no outgoing effect on other cards.",
   roundLength: "Average length (in rounds) of games this card appeared in.",
+  flipRate:
+    "Fraction of this card's appearances that are face-up by game end (flipped by a player, or forceFaceUp -- always known either way). Compare against the board-wide average to see whether this card tends to stay hidden more or less than everything else.",
 };
 
 /** Markdown table of the currently-sorted rows, for pasting elsewhere (bug reports, balance discussion) -- same columns (and order) shown on screen, driven off the same HEAT_METRIC_LABELS list as the on-screen table and the heatmap's "Color by" dropdown. */
-function buildStatsMarkdown(rows: CardStatsRow[], overallRoundLength: number | null): string {
+function buildStatsMarkdown(rows: CardStatsRow[], overallRoundLength: number | null, overallFlipRate: number | null): string {
   const metrics = Object.keys(HEAT_METRIC_LABELS) as HeatMetric[];
   const lines = [
     `Overall average round length: ${fmt(overallRoundLength, 2)}`,
+    `Overall average flip rate: ${fmtPercent(overallFlipRate)}`,
     "",
     `| Card | Bucket | ${metrics.map((m) => HEAT_METRIC_LABELS[m]).join(" | ")} |`,
     `|---|---|${metrics.map(() => "---").join("|")}|`,
@@ -291,12 +300,13 @@ function buildHeatmapMarkdown(rows: CardStatsRow[], playerCounts: number[], look
 function buildEverythingMarkdown(
   rows: CardStatsRow[],
   overallRoundLength: number | null,
+  overallFlipRate: number | null,
   stats: PlaytestStats,
   heatmapRows: CardStatsRow[],
   availablePlayerCounts: number[],
   heatmapLookup: Map<number, Map<CardId, CardStatsRow>>
 ): string {
-  const sections = [buildStatsMarkdown(rows, overallRoundLength)];
+  const sections = [buildStatsMarkdown(rows, overallRoundLength, overallFlipRate)];
 
   if (availablePlayerCounts.length > 0) {
     const roundLengthLines = [
@@ -307,6 +317,15 @@ function buildEverythingMarkdown(
       ...availablePlayerCounts.map((pc) => `| ${pc}p | ${fmt(overallAvgRoundLength(stats.byPlayerCount[pc]), 2)} |`),
     ];
     sections.push(roundLengthLines.join("\n") + "\n");
+
+    const flipRateLines = [
+      "Average flip rate by player count",
+      "",
+      "| Player count | Avg flip rate |",
+      "|---|---|",
+      ...availablePlayerCounts.map((pc) => `| ${pc}p | ${fmtPercent(overallAvgFlipRate(stats.byPlayerCount[pc]))} |`),
+    ];
+    sections.push(flipRateLines.join("\n") + "\n");
 
     for (const metric of Object.keys(HEAT_METRIC_LABELS) as HeatMetric[]) {
       sections.push(buildHeatmapMarkdown(heatmapRows, availablePlayerCounts, heatmapLookup, metric));
@@ -347,7 +366,7 @@ function Playtest() {
   const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [heatmapSortKey, setHeatmapSortKey] = useState<HeatmapSortKey>("bucket");
   const [heatmapSortDir, setHeatmapSortDir] = useState<1 | -1>(1);
-  const [chartMode, setChartMode] = useState<"roundLength" | "cardValue">("roundLength");
+  const [chartMode, setChartMode] = useState<"roundLength" | "cardValue" | "flipRate">("roundLength");
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [copyTableFeedback, setCopyTableFeedback] = useState(false);
   const [view, setView] = useState<"table" | "heatmap">("table");
@@ -491,6 +510,7 @@ function Playtest() {
   });
   const totalPlayed = rows.reduce((sum, r) => sum + r.played, 0);
   const overallRoundLength = overallAvgRoundLength(stats);
+  const overallFlipRate = overallAvgFlipRate(stats);
   const totalGamesConfigured = gameCount * (runAllPlayerCounts ? ALL_PLAYER_COUNTS.length : 1);
 
   // Heatmap data -- every available player count's own StatsBucket, summarized and
@@ -553,7 +573,7 @@ function Playtest() {
 
   /** The top button -- everything on the page, regardless of which view is active. */
   function copyEverything() {
-    const text = buildEverythingMarkdown(rows, overallRoundLength, stats, heatmapRows, availablePlayerCounts, heatmapLookup);
+    const text = buildEverythingMarkdown(rows, overallRoundLength, overallFlipRate, stats, heatmapRows, availablePlayerCounts, heatmapLookup);
     navigator.clipboard.writeText(text).then(() => {
       setCopyFeedback(true);
       setTimeout(() => setCopyFeedback(false), 1500);
@@ -562,7 +582,7 @@ function Playtest() {
 
   /** The button next to the flat table -- just that table, not the heatmap/round-length breakdowns too. */
   function copyTable() {
-    navigator.clipboard.writeText(buildStatsMarkdown(rows, overallRoundLength)).then(() => {
+    navigator.clipboard.writeText(buildStatsMarkdown(rows, overallRoundLength, overallFlipRate)).then(() => {
       setCopyTableFeedback(true);
       setTimeout(() => setCopyTableFeedback(false), 1500);
     });
@@ -856,7 +876,13 @@ function Playtest() {
                     dir={sortDir}
                     onClick={toggleSort}
                     align="right"
-                    tooltip={m === "roundLength" ? `${HEAT_METRIC_TITLES[m]} Overall average across every tallied game: ${fmt(overallRoundLength, 2)}` : HEAT_METRIC_TITLES[m]}
+                    tooltip={
+                      m === "roundLength"
+                        ? `${HEAT_METRIC_TITLES[m]} Overall average across every tallied game: ${fmt(overallRoundLength, 2)}`
+                        : m === "flipRate"
+                          ? `${HEAT_METRIC_TITLES[m]} Overall average across every tallied game: ${fmtPercent(overallFlipRate)}`
+                          : HEAT_METRIC_TITLES[m]
+                    }
                     tooltipId={`playtest-flat:${m}`}
                   />
                 ))}
@@ -896,6 +922,12 @@ function Playtest() {
             >
               Card value
             </button>
+            <button
+              onClick={() => setChartMode("flipRate")}
+              className={`px-3 py-1 whitespace-nowrap ${chartMode === "flipRate" ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-black" : "hover:bg-zinc-100 dark:hover:bg-zinc-900"}`}
+            >
+              Flip rate
+            </button>
           </div>
           {chartMode === "roundLength" ? (
             <BarChartByPlayerCount
@@ -903,11 +935,18 @@ function Playtest() {
               counts={availablePlayerCounts}
               values={availablePlayerCounts.map((pc) => overallAvgRoundLength(stats.byPlayerCount[pc]))}
             />
-          ) : (
+          ) : chartMode === "cardValue" ? (
             <BarChartByPlayerCount
               title="Average card value by player count"
               counts={availablePlayerCounts}
               values={availablePlayerCounts.map((pc) => averageCardValueAt(heatmapLookup.get(pc)))}
+            />
+          ) : (
+            <BarChartByPlayerCount
+              title="Average flip rate by player count -- fraction of the board face-up at game end"
+              counts={availablePlayerCounts}
+              values={availablePlayerCounts.map((pc) => overallAvgFlipRate(stats.byPlayerCount[pc]))}
+              format={fmtPercent}
             />
           )}
           <div className="flex flex-wrap items-center gap-3">
@@ -1028,7 +1067,18 @@ function Playtest() {
  * modes render identically instead of looking like two different widgets. A null
  * value (never-tallied at that count) renders as an empty bar and "—", not a gap.
  */
-function BarChartByPlayerCount({ title, counts, values }: { title: string; counts: number[]; values: (number | null)[] }) {
+function BarChartByPlayerCount({
+  title,
+  counts,
+  values,
+  format = (n) => n!.toFixed(2),
+}: {
+  title: string;
+  counts: number[];
+  values: (number | null)[];
+  /** How to render each bar's own label -- defaults to 2-decimal fixed, but a 0..1-ranged metric (e.g. flip rate) wants a percent instead. Never called with null (the caller already handles that case separately). */
+  format?: (n: number | null) => string;
+}) {
   if (counts.length === 0) return null;
   const numericValues = values.filter((v): v is number => v !== null);
   const max = numericValues.length > 0 ? Math.max(...numericValues, 0) : 0;
@@ -1046,7 +1096,7 @@ function BarChartByPlayerCount({ title, counts, values }: { title: string; count
               <div className="h-4 flex-1 overflow-hidden rounded bg-zinc-100 dark:bg-zinc-800">
                 <div className="h-full rounded bg-blue-500/70" style={{ width: `${widthPct}%` }} />
               </div>
-              <span className="w-10 shrink-0 text-right font-medium">{value === null ? "—" : value.toFixed(2)}</span>
+              <span className="w-10 shrink-0 text-right font-medium">{value === null ? "—" : format(value)}</span>
             </div>
           );
         })}

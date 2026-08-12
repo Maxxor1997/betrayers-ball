@@ -53,6 +53,19 @@ export interface CardStats {
    * math naturally works out to for a card that never touches a neighbor.
    */
   disruptionSum: number;
+  /**
+   * Sum of 1 for each appearance that's face-up at game end, 0 otherwise -- so
+   * faceUpAtEndSum / played (see statsSummary's flipRate) reads as "what fraction of
+   * this card's appearances end up revealed by scoring time," the actual thing a
+   * hidden-info balance question (is flipping too free, is a given card enough of a
+   * deterrent) needs measured directly instead of inferred from downstream metrics
+   * like placement/disruption. A forceFaceUp card (e.g. Giant) trivially tallies 1
+   * every time, correctly reading as "always known." Not "was it flipped by a player
+   * action" specifically -- a still-hidden card and a never-flipped-because-it-didn't-
+   * need-to-be card (forceFaceUp) are both just "face-up at end" from this metric's
+   * point of view, which is what actually matters for the hidden-info question.
+   */
+  faceUpAtEndSum: number;
 }
 
 /** The average standard-competition placement a seat would get in a `playerCount`-player game with zero skill differentiation -- e.g. 2.5 at 4p, 4.5 at 8p. The reference point placementDeltaSum measures every real placement against. */
@@ -65,11 +78,18 @@ export function placementMaxDeviation(playerCount: number): number {
   return (playerCount - 1) / 2;
 }
 
-/** Running totals that aren't about any one card -- currently just the game-length baseline every card's own avgRoundLength gets compared against. */
+/** Running totals that aren't about any one card -- the game-length baseline every card's own avgRoundLength gets compared against, and the board-wide flip-rate baseline every card's own flipRate gets compared against. */
 export interface OverallStats {
   gamesTallied: number;
   /** Sum of the round each tallied game ended on -- once per game, regardless of how many cards it had. */
   roundLengthSum: number;
+  /**
+   * Sum of (face-up card count / total card count on the board), once per tallied
+   * game's final state -- the board-wide version of each card's own faceUpAtEndSum
+   * (see CardStats), blended across every card type instead of tracking one. See
+   * overallAvgFlipRate.
+   */
+  faceUpFractionSum: number;
 }
 
 /** One "slice" of tallied stats -- everything, or scoped to just one player count (see PlaytestStats.byPlayerCount). Both are folded by the same tallyGame/read by the same statsSummary/overallAvgRoundLength, since a per-player-count slice is shaped identically to the all-games total. */
@@ -111,9 +131,10 @@ export function createEmptyBucket(): StatsBucket {
       placementDeltaSum: 0,
       roundLengthSum: 0,
       disruptionSum: 0,
+      faceUpAtEndSum: 0,
     };
   }
-  return { cards, overall: { gamesTallied: 0, roundLengthSum: 0 } };
+  return { cards, overall: { gamesTallied: 0, roundLengthSum: 0, faceUpFractionSum: 0 } };
 }
 
 export function createEmptyStats(): PlaytestStats {
@@ -199,6 +220,9 @@ function tallyIntoBucket(
 
   bucket.overall.gamesTallied += 1;
   bucket.overall.roundLengthSum += roundsPlayed;
+  if (resolvedCards.length > 0) {
+    bucket.overall.faceUpFractionSum += resolvedCards.filter((c) => c.faceUp).length / resolvedCards.length;
+  }
 
   const ranks = computeRanks(scores);
   const baseline = placementBaseline(playerCount);
@@ -215,6 +239,7 @@ function tallyIntoBucket(
     entry.placementDeltaSum += (rank - baseline) / placementMaxDeviation(playerCount);
     entry.roundLengthSum += roundsPlayed;
     entry.disruptionSum += disruptionFor(card, resolvedCards) / opponentCount;
+    if (card.faceUp) entry.faceUpAtEndSum += 1;
   }
 }
 
@@ -270,6 +295,8 @@ export interface CardStatsRow {
   avgRoundLength: number | null;
   /** Average net damage dealt to a single average opponent per appearance -- see disruptionFor and CardStats.disruptionSum. 0 (not null) for a card that's been played but never touches another card's value; null only if it's never been played at all, same convention as every other average here. */
   avgDisruption: number | null;
+  /** Fraction of this card's appearances that are face-up by game end -- see CardStats.faceUpAtEndSum. Compare against overallAvgFlipRate to see whether this card tends to stay hidden more or less than the board average. */
+  flipRate: number | null;
 }
 
 /** Derived per-card averages for display -- null (not 0) for a card that's never been played, so a UI can render "—" instead of a misleading 0. Takes any StatsBucket -- the all-games total or one player count's slice are shaped identically. */
@@ -287,6 +314,7 @@ export function statsSummary(bucket: StatsBucket): CardStatsRow[] {
       avgPlacementDelta: s.played === 0 ? null : s.placementDeltaSum / s.played,
       avgRoundLength: s.played === 0 ? null : s.roundLengthSum / s.played,
       avgDisruption: s.played === 0 ? null : s.disruptionSum / s.played,
+      flipRate: s.played === 0 ? null : s.faceUpAtEndSum / s.played,
     };
   });
 }
@@ -294,6 +322,11 @@ export function statsSummary(bucket: StatsBucket): CardStatsRow[] {
 /** Baseline "how long do tallied games last, on average" -- independent of any one card, for comparison against each card's own avgRoundLength. Null (not 0) if nothing's been tallied yet. Takes any StatsBucket, same as statsSummary. */
 export function overallAvgRoundLength(bucket: StatsBucket): number | null {
   return bucket.overall.gamesTallied === 0 ? null : bucket.overall.roundLengthSum / bucket.overall.gamesTallied;
+}
+
+/** Baseline "what fraction of the board ends up face-up, on average" -- independent of any one card, for comparison against each card's own flipRate. Null (not 0) if nothing's been tallied yet. Takes any StatsBucket, same as statsSummary. */
+export function overallAvgFlipRate(bucket: StatsBucket): number | null {
+  return bucket.overall.gamesTallied === 0 ? null : bucket.overall.faceUpFractionSum / bucket.overall.gamesTallied;
 }
 
 /**

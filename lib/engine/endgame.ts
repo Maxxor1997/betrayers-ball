@@ -99,33 +99,33 @@ function marginToVoteYesProbability(margin: number): number {
 }
 
 /**
- * Extra margin credit for cards whose value is a known, exact function of the round --
- * Dying God (-1/round) and Chronicler (+1/round) are the only two where "what would
- * one more round do to my score" can be answered precisely instead of guessed at.
- * A Dying God owner is strictly worse off if the game keeps going, so gets a nudge
- * toward voting yes (lock in the current, better value now); a Chronicler owner is
- * strictly better off, so gets a nudge toward voting no (let the round advance).
- * Own cards only -- a still-hidden opponent card might secretly be either, but
- * there's no fair way to guess that without leaking hidden information, matching
- * every other heuristic in this codebase.
+ * Extra margin credit for Dying God, the only card left whose value is a known, exact
+ * function of the round -- "what would one more round do to my score" can be answered
+ * precisely (-1) instead of guessed at. Its owner is strictly worse off if the game
+ * keeps going, so gets a nudge toward voting yes (lock in the current, better value
+ * now). Chronicler ("Doomherald") used to get the mirrored nudge here when its own
+ * effect was +1/round elapsed -- now that it's "-3 to adjacent cards while face-up,
+ * opponent-only flip" (see lib/content/cards.ts), its value has nothing to do with
+ * the round anymore, just whether an opponent ever flips it; there's no similarly
+ * precise, cheap-to-compute vote nudge for that, so it's left to the plain margin
+ * estimate like everything else uncertain. Own cards only -- a still-hidden opponent
+ * Dying God might exist too, but there's no fair way to guess that without leaking
+ * hidden information, matching every other heuristic in this codebase.
  */
 function roundSensitiveVoteAdjustment(state: GameState, playerId: string): number {
   let adjustment = 0;
   for (const c of state.board.values()) {
-    if (c.ownerId !== playerId) continue;
-    if (c.cardId === "DyingGod") adjustment += 1;
-    else if (c.cardId === "Chronicler") adjustment -= 1;
+    if (c.ownerId === playerId && c.cardId === "DyingGod") adjustment += 1;
   }
   return adjustment;
 }
 
 /**
  * Vote yes/no off the player's own (fair) margin estimate, via
- * marginToVoteYesProbability, plus roundSensitiveVoteAdjustment for Dying God/
- * Chronicler. Otherwise deliberately ignores the round: whether to end is a fresh
- * decision every time voting comes up, not a countdown; the round cap already
- * force-ends the game on its own once reached, so there's no separate need to ramp
- * pressure by round here too.
+ * marginToVoteYesProbability, plus roundSensitiveVoteAdjustment for Dying God.
+ * Otherwise deliberately ignores the round: whether to end is a fresh decision every
+ * time voting comes up, not a countdown; the round cap already force-ends the game on
+ * its own once reached, so there's no separate need to ramp pressure by round here too.
  */
 export function computeAiVote(state: GameState, playerId: string, rng: () => number): boolean {
   const margin = estimateMargin(state, playerId) + roundSensitiveVoteAdjustment(state, playerId);

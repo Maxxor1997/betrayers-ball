@@ -244,15 +244,22 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   },
   Chronicler: {
     id: "Chronicler",
-    name: "Chronicler",
-    disabled: true,
-    base: 1,
-    bucket: "Engine",
-    text: "+1 per round elapsed",
-    fullText: "+1 for every round elapsed when the game ends.",
-    count: [4, 4, 4, 4, 5, 6, 7],
-    valueModifier: ({ round, self, addDelta }) => {
-      if (round > 0) addDelta(self.instanceId, round, `${CARD_DEFS.Chronicler.name} (round ${round} elapsed)`);
+    name: "Doomherald",
+    base: 3,
+    bucket: "Control",
+    text: "If face-up: −3 to all adj., can't self-flip",
+    fullText:
+      "−3 to every adjacent card (any owner, not itself) while this card is face-up. Its own owner can't flip it -- only an opponent can.",
+    // Same modest-copy tier as the deck's other high-ceiling Control cards
+    // (Suppressor/PlagueBearer) -- its worst case (up to 4 adjacent cards hit for
+    // -3 each) is the biggest single-action swing in the set, so it stays rare.
+    count: [2, 2, 2, 2, 3, 3, 4],
+    opponentOnlyFlip: true,
+    valueModifier: ({ board, bounds, pos, self, addDelta }) => {
+      if (!self.faceUp) return;
+      for (const n of getAdjacentCards(board, bounds, pos)) {
+        addDelta(n.instanceId, -3, `${CARD_DEFS.Chronicler.name} (face-up)`);
+      }
     },
   },
   Giant: {

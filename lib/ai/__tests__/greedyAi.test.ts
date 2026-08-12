@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CARD_DEFS, copiesForPlayerCount } from "../../content/cards";
 import { chooseGreedyAiAction } from "../greedyAi";
 import { applyAction, createGame, DEFAULT_2P_CONFIG } from "../../engine/game";
 import { currentPlayerId } from "../../engine/turns";
@@ -117,6 +118,16 @@ let counter = 0;
 function card(cardId: CardId, ownerId: string, faceUp = false): CardInstance {
   return { instanceId: `c${counter++}`, cardId, ownerId, faceUp };
 }
+
+/**
+ * The exploration-rate tests below need to know the *real* current base rate,
+ * including greedyAi.ts's DOOMHERALD_DECK_PRESENCE_EXPLORATION_DISCOUNT -- which only
+ * applies while Chronicler/Doomherald actually has copies in the deck at this CONFIG's
+ * player count. Computed from the same public API the production code uses
+ * (copiesForPlayerCount) rather than hardcoded, since that card is under active
+ * tuning and gets toggled disabled/enabled in cards.ts independently of this file.
+ */
+const BASE_EXPLORATION = copiesForPlayerCount(CARD_DEFS.Chronicler, CONFIG.playerCount) > 0 ? 0.65 : 0.75;
 
 function makeState(overrides: Partial<GameState> = {}): GameState {
   const board: Board = overrides.board ?? new Map();
@@ -383,10 +394,11 @@ describe("chooseGreedyAiAction — Truthseeker/Beacon-aware flip targeting", () 
       ],
     });
 
-    // 0.65 clears the base 0.75 exploration rate (flips) but not the Truthseeker-in-
-    // hand-discounted 0.60 (doesn't).
-    const baseline = chooseGreedyAiAction(withoutTruthseeker, "p1", () => 0.65);
-    const discounted = chooseGreedyAiAction(withTruthseeker, "p1", () => 0.65);
+    // Midpoint between BASE_EXPLORATION and the further Truthseeker-in-hand-discounted
+    // rate (-0.15) -- clears the baseline but not the discounted one.
+    const midpoint = () => BASE_EXPLORATION - 0.075;
+    const baseline = chooseGreedyAiAction(withoutTruthseeker, "p1", midpoint);
+    const discounted = chooseGreedyAiAction(withTruthseeker, "p1", midpoint);
     expect(baseline.type).toBe("flip");
     expect(discounted.type).not.toBe("flip");
   });
@@ -413,10 +425,11 @@ describe("chooseGreedyAiAction — Truthseeker/Beacon-aware flip targeting", () 
       ],
     });
 
-    // 0.80 clears the Beacon-in-hand-boosted 0.90 exploration rate (flips) but not
-    // the base 0.75 (doesn't).
-    const baseline = chooseGreedyAiAction(withoutBeacon, "p1", () => 0.8);
-    const boosted = chooseGreedyAiAction(withBeacon, "p1", () => 0.8);
+    // Midpoint between BASE_EXPLORATION and the Beacon-in-hand-boosted rate (+0.15) --
+    // clears the boosted rate but not the plain baseline.
+    const midpoint = () => BASE_EXPLORATION + 0.075;
+    const baseline = chooseGreedyAiAction(withoutBeacon, "p1", midpoint);
+    const boosted = chooseGreedyAiAction(withBeacon, "p1", midpoint);
     expect(baseline.type).not.toBe("flip");
     expect(boosted.type).toBe("flip");
   });
@@ -443,10 +456,11 @@ describe("chooseGreedyAiAction — Truthseeker/Beacon-aware flip targeting", () 
       ],
     });
 
-    // 0.65 clears the base 0.75 exploration rate (flips) but not the Infiltrator-in-
-    // hand-discounted 0.60 (doesn't).
-    const baseline = chooseGreedyAiAction(withoutInfiltrator, "p1", () => 0.65);
-    const discounted = chooseGreedyAiAction(withInfiltrator, "p1", () => 0.65);
+    // Midpoint between BASE_EXPLORATION and the further Infiltrator-in-hand-discounted
+    // rate (-0.15) -- clears the baseline but not the discounted one.
+    const midpoint = () => BASE_EXPLORATION - 0.075;
+    const baseline = chooseGreedyAiAction(withoutInfiltrator, "p1", midpoint);
+    const discounted = chooseGreedyAiAction(withInfiltrator, "p1", midpoint);
     expect(baseline.type).toBe("flip");
     expect(discounted.type).not.toBe("flip");
   });
@@ -481,7 +495,8 @@ describe("chooseGreedyAiAction — Truthseeker/Beacon-aware flip targeting", () 
       ],
     });
 
-    const action = chooseGreedyAiAction(state, "p1", () => 0.65);
+    // No Infiltrator discount (already face-up) -- just BASE_EXPLORATION itself.
+    const action = chooseGreedyAiAction(state, "p1", () => BASE_EXPLORATION - 0.05);
     expect(action.type).toBe("flip");
   });
 });
@@ -496,32 +511,44 @@ describe("chooseGreedyAiAction — Truthseeker/Beacon-aware flip targeting", () 
  * not just that the targeted card's own score moved somewhere internally.
  */
 describe("chooseGreedyAiAction — placement heuristics correct for what a one-ply evaluation can't see", () => {
-  it("values Chronicler at the expected end-of-game round instead of the current (early) round", () => {
-    // Naive (round-1) values: Chronicler = base+1, Bannerman = base (no neighbors yet
-    // to boost) -- Bannerman wins on its own. The expected-final-round top-up should
-    // flip it.
-    const chronicler = card("Chronicler", "p1");
+  it("credits a face-down Doomherald (Chronicler) with expected damage to its current neighbors, weighted by the chance an opponent flips it", () => {
+    // Doomherald deals -3 to every adjacent card once face-up, but opponentOnlyFlip
+    // means only an opponent can ever trigger it -- placed face-down (the common
+    // case), the raw margin sees none of that yet. Two already-placed enemy
+    // neighbors should out-credit a flat Bannerman (base 4, no neighbors of its own
+    // to buff -- buffing these same enemy Footmen would only help the opponent, so
+    // its own best placement is an isolated cell, e.g. next to the empty center)
+    // even though Doomherald's own base (3) is lower and it currently does nothing
+    // on its own.
+    const board: Board = new Map();
+    board.set(posKey({ x: 1, y: 0 }), card("Footman", "p2", true));
+    board.set(posKey({ x: 0, y: 1 }), card("Footman", "p2", true));
+    const doomherald = card("Chronicler", "p1");
     const bannerman = card("Bannerman", "p1");
     const state = makeState({
+      board,
       round: 1,
       players: [
-        { id: "p1", hand: [chronicler, bannerman], isAI: true },
+        { id: "p1", hand: [doomherald, bannerman], isAI: true },
         { id: "p2", hand: [], isAI: true },
       ],
     });
 
     const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
     expect(action.type).toBe("place");
-    if (action.type === "place") expect(action.instanceId).toBe(chronicler.instanceId);
+    if (action.type === "place") {
+      expect(action.instanceId).toBe(doomherald.instanceId);
+      expect(action.position).toEqual({ x: 0, y: 0 });
+    }
   });
 
-  it("values Dying God at the expected end-of-game round instead of the current (early) round -- Chronicler's mirror", () => {
+  it("values Dying God at the expected end-of-game round instead of the current (early) round", () => {
     // Naive (round-1) values: Dying God = base(10)-1=9. Pretender's only possible
     // neighbor on an empty board is the ownerless center, which getAdjacentCards
     // excludes (it's not a real CardInstance), so its own -4 never fires and it's
     // effectively a flat base = 7 -- Dying God wins on its inflated early snapshot.
-    // The same expected-final-round correction that tops Chronicler up docks Dying God
-    // down instead: 10 - expectedFinalRound(4.5) = 5.5, which now loses to Pretender.
+    // The expected-final-round correction docks Dying God down instead:
+    // 10 - expectedFinalRound(4.5) = 5.5, which now loses to Pretender.
     const dyingGod = card("DyingGod", "p1");
     const pretender = card("Pretender", "p1");
     const state = makeState({

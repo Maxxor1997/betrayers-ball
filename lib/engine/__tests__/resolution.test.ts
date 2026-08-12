@@ -346,16 +346,28 @@ describe("resolveBoard — Gloryseeker", () => {
   });
 });
 
-describe("resolveBoard — Chronicler", () => {
-  it.each([3, 4, 5, 6].map((round) => [round, CARD_DEFS.Chronicler.base + round]))(
-    "round %i -> value %i",
-    (round, expected) => {
-      const board: Board = new Map();
-      const c = place(board, 0, 0, "Chronicler", "p1");
-      const { cards } = resolveBoard(board, BOUNDS, round);
-      expect(find(cards, c.instanceId).finalValue).toBe(expected);
-    }
-  );
+describe("resolveBoard — Chronicler (Doomherald)", () => {
+  it("no effect while face-down -- just its own base", () => {
+    const board: Board = new Map();
+    const c = place(board, 1, 1, "Chronicler", "p1", false);
+    const neighbor = place(board, 0, 1, "Footman", "p2", true);
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, c.instanceId).finalValue).toBe(CARD_DEFS.Chronicler.base);
+    expect(find(cards, neighbor.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+  });
+
+  it("gives -3 to every adjacent card (any owner) while face-up, not itself, not non-adjacent cards", () => {
+    const board: Board = new Map();
+    const c = place(board, 1, 1, "Chronicler", "p1", true);
+    const ownNeighbor = place(board, 0, 1, "Footman", "p1", true);
+    const enemyNeighbor = place(board, 2, 1, "Footman", "p2", true);
+    const nonAdjacent = place(board, 1, 3, "Footman", "p2", true);
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, c.instanceId).finalValue).toBe(CARD_DEFS.Chronicler.base);
+    expect(find(cards, ownNeighbor.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 3);
+    expect(find(cards, enemyNeighbor.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 3);
+    expect(find(cards, nonAdjacent.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+  });
 });
 
 describe("resolveBoard — Dying God", () => {
@@ -368,16 +380,6 @@ describe("resolveBoard — Dying God", () => {
       expect(find(cards, c.instanceId).finalValue).toBe(expected);
     }
   );
-
-  it("mirrors Chronicler's value range exactly, just inverted", () => {
-    const board: Board = new Map();
-    const chronicler = place(board, 0, 0, "Chronicler", "p1");
-    const dyingGod = place(board, 5, 5, "DyingGod", "p2");
-    const { cards } = resolveBoard(board, BOUNDS, 4);
-    // Chronicler at round 4 == Dying God at round 3 (its highest value), and vice versa.
-    expect(find(cards, chronicler.instanceId).finalValue).toBe(CARD_DEFS.Chronicler.base + 4);
-    expect(find(cards, dyingGod.instanceId).finalValue).toBe(CARD_DEFS.DyingGod.base - 4);
-  });
 });
 
 describe("resolveBoard — Earthshaker", () => {

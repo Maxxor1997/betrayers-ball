@@ -215,15 +215,16 @@ describe("computeAiVote", () => {
     expect(computeAiVote(state, "p1", () => 0.5)).toBe(true);
   });
 
-  it("nudges toward voting no when the player holds a Chronicler -- continuing only makes it better", () => {
+  it("no longer gives Chronicler (Doomherald) a special vote nudge -- its value isn't round-sensitive anymore", () => {
+    // Now that Chronicler is "-3 to adjacent cards while face-up, opponentOnlyFlip"
+    // (see lib/content/cards.ts) instead of the old +1/round elapsed, there's nothing
+    // round-precise left to credit -- an isolated, face-down Chronicler (own base 3,
+    // no effect until flipped) should vote exactly like a flat base-3 card would, with
+    // no extra nudge either way.
     const board: Board = new Map();
-    // Chronicler's value at round 3 is 1+3=4; an isolated Bannerman (its own effect
-    // only targets neighbors, never itself) sits at its flat base 4 too -- raw margin
-    // ties at 0 again, but Chronicler's -1 vote nudge pulls yes-probability to ~0.45,
-    // just enough to flip the same boundary rng to no.
     board.set(posKey({ x: 0, y: 0 }), card("Chronicler", "p1"));
-    board.set(posKey({ x: 5, y: 5 }), card("Bannerman", "p2"));
+    board.set(posKey({ x: 5, y: 5 }), card("PlagueBearer", "p2")); // flat base 3, no neighbors to trigger its own effect
     const state = makeState({ board, round: 3 });
-    expect(computeAiVote(state, "p1", () => 0.5)).toBe(false);
+    expect(computeAiVote(state, "p1", () => 0.5)).toBe(false); // tied margin (0-0) -> exactly 50/50, rng 0.5 -> no (see the tied test above)
   });
 });
