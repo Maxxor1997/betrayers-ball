@@ -1,10 +1,10 @@
-import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
+import { chooseAiActionForDifficulty, DEFAULT_AI_DIFFICULTY } from "@/lib/ai/difficulty";
 import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { Rng } from "@/lib/engine/deck";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { FLOORED_AT_ZERO_LABEL, ResolvedCard } from "@/lib/engine/resolution";
 import { currentPlayerId } from "@/lib/engine/turns";
-import { CardId, CenterEffectId, GameState } from "@/lib/engine/types";
+import { AiDifficulty, CardId, CenterEffectId, GameState } from "@/lib/engine/types";
 
 /** Running totals for one card across however many completed games have been tallied -- see statsSummary for the derived per-game averages a UI actually wants. */
 export interface CardStats {
@@ -339,15 +339,21 @@ export function overallAvgFlipRate(bucket: StatsBucket): number | null {
  * "ended". `simulateOneGame` below is the plain (non-stepped) equivalent for bulk runs
  * that don't need to observe intermediate states.
  */
-export function* simulateOneGameSteps(playerCount: number, centerEffect: CenterEffectId, rng: Rng): Generator<GameState, GameState, void> {
+export function* simulateOneGameSteps(
+  playerCount: number,
+  centerEffect: CenterEffectId,
+  rng: Rng,
+  /** Trailing optional, defaulting to "medium" -- so every existing call site that predates AI difficulty keeps working unchanged. */
+  aiDifficulty: AiDifficulty = DEFAULT_AI_DIFFICULTY
+): Generator<GameState, GameState, void> {
   const playerIds = Array.from({ length: playerCount }, (_, i) => `sim${i}`);
-  const config = configForPlayerCount(playerCount, centerEffect);
+  const config = configForPlayerCount(playerCount, centerEffect, aiDifficulty);
   const firstPlayerIndex = Math.floor(rng() * playerIds.length);
   let state = createGame(playerIds, config, rng, playerIds, firstPlayerIndex);
 
   while (state.phase === "playing") {
     const activeId = currentPlayerId(state);
-    const action = chooseGreedyAiAction(state, activeId, rng);
+    const action = chooseAiActionForDifficulty(state, activeId, aiDifficulty, rng);
     state = applyAction(state, action, rng);
     yield state;
   }
@@ -355,8 +361,8 @@ export function* simulateOneGameSteps(playerCount: number, centerEffect: CenterE
 }
 
 /** Plain (non-stepped) equivalent of simulateOneGameSteps -- for bulk runs that only need the finished game. */
-export function simulateOneGame(playerCount: number, centerEffect: CenterEffectId, rng: Rng): GameState {
-  const gen = simulateOneGameSteps(playerCount, centerEffect, rng);
+export function simulateOneGame(playerCount: number, centerEffect: CenterEffectId, rng: Rng, aiDifficulty: AiDifficulty = DEFAULT_AI_DIFFICULTY): GameState {
+  const gen = simulateOneGameSteps(playerCount, centerEffect, rng, aiDifficulty);
   let step = gen.next();
   while (!step.done) step = gen.next();
   return step.value;

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GameSession } from "../session";
 import { DISPLAY_VIEWER_ID, fromWireState, LobbyState, WireGameState } from "../protocol";
 import { currentPlayerId, getLegalPlacementCells } from "@/lib/engine/turns";
+import { AiDifficulty } from "@/lib/engine/types";
 
 function deterministicRng(seed: number) {
   let s = seed;
@@ -12,7 +13,7 @@ function deterministicRng(seed: number) {
 }
 
 /** Records every push a session makes, and captures the host's own token (GameSession exposes it via `.hostToken` -- see its doc comment for why that getter exists). */
-function harness(playerCount: number, seed = 1, displayHosted = false) {
+function harness(playerCount: number, seed = 1, displayHosted = false, aiDifficulty: AiDifficulty = "medium") {
   const lobbyPushes: LobbyState[] = [];
   const statePushes: { playerId: string; state: WireGameState }[] = [];
   const session = new GameSession(
@@ -26,7 +27,8 @@ function harness(playerCount: number, seed = 1, displayHosted = false) {
       onPlayerState: (playerId, state) => statePushes.push({ playerId, state }),
     },
     deterministicRng(seed),
-    displayHosted
+    displayHosted,
+    aiDifficulty
   );
   return { session, lobbyPushes, statePushes, hostToken: session.hostToken };
 }
@@ -254,7 +256,7 @@ describe("GameSession start / dispatch", () => {
 describe("GameSession rematch", () => {
   it("rejects rematch before the game has ever started", () => {
     const { session, hostToken } = harness(2);
-    const result = session.rematch(hostToken, "none");
+    const result = session.rematch(hostToken, "none", "medium");
     expect(result).toMatchObject({ error: expect.any(String) });
   });
 
@@ -262,14 +264,14 @@ describe("GameSession rematch", () => {
     const { session, hostToken } = harness(2);
     const guest = session.addPlayer("Guest") as { playerId: string; token: string };
     session.start(hostToken);
-    const result = session.rematch(guest.token, "none");
+    const result = session.rematch(guest.token, "none", "medium");
     expect(result).toMatchObject({ error: expect.any(String) });
   });
 
   it("rejects rematch while a game is still in progress", () => {
     const { session, hostToken } = harness(2);
     session.start(hostToken);
-    const result = session.rematch(hostToken, "none");
+    const result = session.rematch(hostToken, "none", "medium");
     expect(result).toMatchObject({ error: expect.any(String) });
   });
 
@@ -284,7 +286,7 @@ describe("GameSession rematch", () => {
     expect(ended.result).not.toBeNull();
 
     const pushCountBefore = statePushes.length;
-    const result = session.rematch(hostToken, "none");
+    const result = session.rematch(hostToken, "none", "medium");
     expect(result).toEqual({ ok: true });
 
     // Same room, same roomCode/seats -- rematch never leaves the registry, so no new
@@ -309,13 +311,41 @@ describe("GameSession rematch", () => {
     session.start(hostToken);
     await playUntilEnded(session, hostToken, statePushes);
 
-    const result = session.rematch(hostToken, "shadowlands");
+    const result = session.rematch(hostToken, "shadowlands", "medium");
     expect(result).toEqual({ ok: true });
     expect(session.getLobbyState().centerEffect).toBe("shadowlands");
 
     await vi.advanceTimersByTimeAsync(0);
     const freshState = fromWireState(statePushes.at(-1)!.state);
     expect(freshState.config.centerEffect).toBe("shadowlands");
+
+    vi.useRealTimers();
+  });
+
+  it("deals the game with whatever AI difficulty the room was created with", async () => {
+    vi.useFakeTimers();
+    const { session, hostToken, statePushes } = harness(2, 1, false, "easy");
+    session.start(hostToken);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const freshState = fromWireState(statePushes.at(-1)!.state);
+    expect(freshState.config.aiDifficulty).toBe("easy");
+
+    vi.useRealTimers();
+  });
+
+  it("can change the AI difficulty for the rematch, same as the location", async () => {
+    vi.useFakeTimers();
+    const { session, hostToken, statePushes } = harness(2);
+    session.start(hostToken);
+    await playUntilEnded(session, hostToken, statePushes);
+
+    const result = session.rematch(hostToken, "none", "hard");
+    expect(result).toEqual({ ok: true });
+
+    await vi.advanceTimersByTimeAsync(0);
+    const freshState = fromWireState(statePushes.at(-1)!.state);
+    expect(freshState.config.aiDifficulty).toBe("hard");
 
     vi.useRealTimers();
   });

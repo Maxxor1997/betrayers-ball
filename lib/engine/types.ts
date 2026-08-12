@@ -82,6 +82,17 @@ export type CenterEffectId =
   | "frontier"
   | "summit";
 
+/**
+ * Which strategy module an AI seat's turns are computed by -- see
+ * lib/ai/difficulty.ts's chooseAiActionForDifficulty, the single dispatcher every
+ * AI-turn call site should go through instead of importing a specific strategy module
+ * directly. "easy" is uniform-random, "medium" is a 1-ply greedy evaluator with
+ * per-card heuristic patches (see lib/ai/greedyAi.ts), "hard" is a determinized,
+ * depth-capped Monte Carlo tree search (see lib/ai/mcts.ts) that simulates ahead
+ * using cheap random rollouts rather than "medium"'s own (more expensive) evaluation.
+ */
+export type AiDifficulty = "easy" | "medium" | "hard";
+
 export interface GameConfig {
   boardBounds: BoardBounds;
   handSize: number;
@@ -96,6 +107,8 @@ export interface GameConfig {
    * (see centerEffects.ts's flipGate) delays it a further round on top of that,
    * regardless of player count. */
   playerCount: number;
+  /** Which strategy every AI seat in this game uses -- see AiDifficulty's doc comment. */
+  aiDifficulty: AiDifficulty;
 }
 
 export interface GameResult {

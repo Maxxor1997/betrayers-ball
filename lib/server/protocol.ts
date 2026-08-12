@@ -1,4 +1,4 @@
-import { CardInstance, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
+import { AiDifficulty, CardInstance, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
 
 /**
  * Reserved pseudo-playerId for a "shared screen" host -- see board_game_design.md's
@@ -74,6 +74,8 @@ export interface CreateRoomPayload {
   centerEffect: CenterEffectId;
   /** Jackbox-style shared screen: the host takes no seat (ignores hostName), and all playerCount seats are open for real players/AI. */
   asDisplay: boolean;
+  /** Strategy every AI seat backfilled at Start uses -- see AiDifficulty's doc comment. */
+  aiDifficulty: AiDifficulty;
 }
 export interface CreateRoomResult {
   roomCode: string;
@@ -115,6 +117,7 @@ export interface RematchPayload {
   roomCode: string;
   token: string;
   centerEffect: CenterEffectId;
+  aiDifficulty: AiDifficulty;
 }
 
 export interface GameActionPayload {

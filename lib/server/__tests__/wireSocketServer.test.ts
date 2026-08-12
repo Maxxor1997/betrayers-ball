@@ -79,7 +79,7 @@ describe("wireSocketServer", () => {
 
   it("creates a room and returns a host token + room code", async () => {
     const host = client();
-    const result = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false })) as AckResult<CreateRoomResult>;
+    const result = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false, aiDifficulty: "medium" })) as AckResult<CreateRoomResult>;
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.roomCode).toMatch(/^[A-Z]+$/);
@@ -89,7 +89,7 @@ describe("wireSocketServer", () => {
   it("pushes the host their own initial lobby right after room:create -- not only once someone else joins", async () => {
     const host = client();
     const lobbyPromise = new Promise<LobbyState>((resolve) => host.once("lobby:update", resolve));
-    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false })) as AckResult<CreateRoomResult>;
+    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false, aiDifficulty: "medium" })) as AckResult<CreateRoomResult>;
     if (!created.ok) throw new Error("setup failed");
     const lobby = await lobbyPromise;
     expect(lobby.seats).toHaveLength(1);
@@ -98,7 +98,7 @@ describe("wireSocketServer", () => {
 
   it("lets a second player join and broadcasts the lobby to both -- including the joiner's own copy of the update their join caused", async () => {
     const host = client();
-    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false })) as AckResult<CreateRoomResult>;
+    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false, aiDifficulty: "medium" })) as AckResult<CreateRoomResult>;
     if (!created.ok) throw new Error("setup failed");
 
     const hostLobbyUpdates: unknown[] = [];
@@ -127,7 +127,7 @@ describe("wireSocketServer", () => {
 
   it("starts the game and pushes each player their own game:state", async () => {
     const host = client();
-    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false })) as AckResult<CreateRoomResult>;
+    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false, aiDifficulty: "medium" })) as AckResult<CreateRoomResult>;
     if (!created.ok) throw new Error("setup failed");
 
     const statePromise = new Promise((resolve) => host.once("game:state", resolve));
@@ -140,7 +140,7 @@ describe("wireSocketServer", () => {
 
   it("round-trips a real place action through the wire, redacted correctly for each player", async () => {
     const host = client();
-    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false })) as AckResult<CreateRoomResult>;
+    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false, aiDifficulty: "medium" })) as AckResult<CreateRoomResult>;
     if (!created.ok) throw new Error("setup failed");
     const guest = client();
     const joined = (await emit(guest, "room:join", { roomCode: created.roomCode, name: "Bob" })) as AckResult<JoinRoomResult>;
@@ -195,7 +195,7 @@ describe("wireSocketServer", () => {
 
   it("rejects a game:action with a bogus token", async () => {
     const host = client();
-    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false })) as AckResult<CreateRoomResult>;
+    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false, aiDifficulty: "medium" })) as AckResult<CreateRoomResult>;
     if (!created.ok) throw new Error("setup failed");
     await emit(host, "room:start", { roomCode: created.roomCode, token: created.token });
 
@@ -206,7 +206,7 @@ describe("wireSocketServer", () => {
 
   it("rejoin re-attaches a fresh socket to the same seat", async () => {
     const host = client();
-    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 3, centerEffect: "none", asDisplay: false })) as AckResult<CreateRoomResult>;
+    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 3, centerEffect: "none", asDisplay: false, aiDifficulty: "medium" })) as AckResult<CreateRoomResult>;
     if (!created.ok) throw new Error("setup failed");
     const guest = client();
     const joined = (await emit(guest, "room:join", { roomCode: created.roomCode, name: "Bob" })) as AckResult<JoinRoomResult>;
@@ -223,7 +223,7 @@ describe("wireSocketServer", () => {
 
   it("a mid-game rejoin gets its own game:state immediately, not just on the next unrelated change", async () => {
     const host = client();
-    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false })) as AckResult<CreateRoomResult>;
+    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false, aiDifficulty: "medium" })) as AckResult<CreateRoomResult>;
     if (!created.ok) throw new Error("setup failed");
     const guest = client();
     const joined = (await emit(guest, "room:join", { roomCode: created.roomCode, name: "Bob" })) as AckResult<JoinRoomResult>;
@@ -247,7 +247,7 @@ describe("wireSocketServer", () => {
 
   it("rooms:list surfaces a room both before and after it starts, flagging started once it has", async () => {
     const host = client();
-    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false })) as AckResult<CreateRoomResult>;
+    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false, aiDifficulty: "medium" })) as AckResult<CreateRoomResult>;
     if (!created.ok) throw new Error("setup failed");
 
     const listBefore = await new Promise<AckResult<{ rooms: { roomCode: string; started: boolean }[] }>>((resolve) =>
@@ -269,7 +269,7 @@ describe("wireSocketServer", () => {
 
   it("room:end rejects a non-host token and leaves the room intact", async () => {
     const host = client();
-    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false })) as AckResult<CreateRoomResult>;
+    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false, aiDifficulty: "medium" })) as AckResult<CreateRoomResult>;
     if (!created.ok) throw new Error("setup failed");
     const guest = client();
     const joined = (await emit(guest, "room:join", { roomCode: created.roomCode, name: "Bob" })) as AckResult<JoinRoomResult>;
@@ -284,7 +284,7 @@ describe("wireSocketServer", () => {
 
   it("room:end removes the room and notifies everyone still connected, host or guest", async () => {
     const host = client();
-    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false })) as AckResult<CreateRoomResult>;
+    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false, aiDifficulty: "medium" })) as AckResult<CreateRoomResult>;
     if (!created.ok) throw new Error("setup failed");
     const guest = client();
     const joined = (await emit(guest, "room:join", { roomCode: created.roomCode, name: "Bob" })) as AckResult<JoinRoomResult>;
@@ -310,6 +310,7 @@ describe("wireSocketServer", () => {
       playerCount: 2,
       centerEffect: "none",
       asDisplay: true,
+      aiDifficulty: "medium",
     })) as AckResult<CreateRoomResult>;
     if (!created.ok) throw new Error("setup failed");
     expect(created.playerId).not.toBe("p0");

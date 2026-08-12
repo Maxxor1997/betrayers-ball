@@ -3,9 +3,9 @@ import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { dealNewGame, Rng } from "./deck";
 import { computeAiVote, computeGameResult, shouldEndGame } from "./endgame";
 import { applyFlip, applyPass, applyPlace, currentPlayerId, mustPass } from "./turns";
-import { CastVoteAction, CenterEffectId, GameAction, GameConfig, GameState } from "./types";
+import { AiDifficulty, CastVoteAction, CenterEffectId, GameAction, GameConfig, GameState } from "./types";
 
-export function configForPlayerCount(playerCount: number, centerEffect: CenterEffectId = "none"): GameConfig {
+export function configForPlayerCount(playerCount: number, centerEffect: CenterEffectId = "none", aiDifficulty: AiDifficulty = "medium"): GameConfig {
   const baseBounds = BOARD_BOUNDS_BY_PLAYER_COUNT[playerCount];
   if (!baseBounds) throw new Error(`No board sizing configured for ${playerCount} players (supported: 2-6)`);
   // A center effect can override which tiles are ownerless -- baked into boardBounds
@@ -23,6 +23,7 @@ export function configForPlayerCount(playerCount: number, centerEffect: CenterEf
     centerEffect,
     minRoundFloor: 2,
     playerCount,
+    aiDifficulty,
   };
 }
 
@@ -75,15 +76,56 @@ function applyRoundStart(state: GameState, newRound: number, rng: Rng): Pick<Gam
  * triggers a vote (see applyCastVote) instead of continuing automatically.
  *
  * A round boundary is "turnsThisRound reaches player count", not "currentPlayerIndex
- * wraps to 0" -- turn order rotates continuously through indices and does not reset
- * to 0 each round, so with a non-zero starting player (see firstPlayerIndex) the old
+ * wraps to 0" -- turn order rotates continuously through indices, not resetting to 0
+ * each round, so with a non-zero starting player (see firstPlayerIndex) the old
  * index-based check fired after just one turn instead of after everyone had gone.
+ *
+ * `roundRotationShift` is the one deliberate exception to "continuously": at a round
+ * boundary only, for 3+ players, the next round starts one seat further than it
+ * otherwise would have. Without this, the same seat starts every single round for the
+ * whole game (since incrementing by 1 every turn naturally wraps back to the same
+ * start each round) -- measured via the AI Arena tool to give whoever acts latest in
+ * the turn order a real, growing-with-player-count edge (more accumulated board
+ * information to place against by the time it's their turn). A full reversing "snake"
+ * order was considered instead and rejected: it makes one seat go twice in a row at
+ * every round boundary (the last actor of one round is the first actor of the next),
+ * which would let that player chain two placements together with no opponent turn in
+ * between -- exploitable with adjacency-synergy cards, worse than the bias it fixes.
+ * A 1-seat rotation never produces that: the last actor of round r is seat
+ * `(start_r - 1) mod n`, the first actor of round r+1 is `(start_r + 1) mod n`, and
+ * those only coincide when n divides 2 -- i.e. only at n <= 2, which is exactly the
+ * case excluded below (its measured bias was within noise anyway, so there's nothing
+ * to fix there, and rotating would just reintroduce the same back-to-back problem).
+ *
+ * The shift amount is 1 seat for every player count except 8, which uses 3. This came
+ * out of modeling each position's total turn-order "exposure" (early vs late slot)
+ * summed across all `roundCap` (6) rounds: a shift of 1 seat/round only completes a
+ * full rotation cycle back to the start after `playerCount` rounds, so whenever
+ * playerCount doesn't evenly divide roundCap, some positions structurally get
+ * more/less late-turn exposure than others over the course of a single game -- 3p, 6p
+ * divide evenly (spread 0); 4p/5p/7p have a small residual spread that no shift value
+ * can remove (roundCap isn't a multiple of playerCount and never will be for a partial
+ * cycle); 8p has the largest residual (measured via the AI Arena tool: position 8 at
+ * ~20% win rate vs an ~12.5% baseline, position 6 lowest), and is the one case where
+ * changing the shift measurably helps -- shift=3 cuts the modeled exposure spread from
+ * 12 to 8 (roughly a third), and stays clear of the shift=(playerCount-1) collision
+ * that would reintroduce a back-to-back turn. This is a silent tuning knob, not
+ * something surfaced to players -- unlike the 1-seat rotation itself (documented in
+ * InstructionsModal), the exact shift amount isn't something a player needs to know to
+ * play well.
  */
-function advanceTurn(state: GameState, rng: Rng): GameState {
-  const nextIndex = (state.currentPlayerIndex + 1) % state.players.length;
-  const turnsThisRound = state.turnsThisRound + 1;
+function roundRotationShiftFor(playerCount: number): number {
+  if (playerCount < 3) return 0;
+  return playerCount === 8 ? 3 : 1;
+}
 
-  if (turnsThisRound < state.players.length) {
+function advanceTurn(state: GameState, rng: Rng): GameState {
+  const turnsThisRound = state.turnsThisRound + 1;
+  const isRoundBoundary = turnsThisRound >= state.players.length;
+  const roundRotationShift = isRoundBoundary ? roundRotationShiftFor(state.players.length) : 0;
+  const nextIndex = (state.currentPlayerIndex + 1 + roundRotationShift) % state.players.length;
+
+  if (!isRoundBoundary) {
     return { ...state, currentPlayerIndex: nextIndex, hasFlippedThisTurn: false, turnsThisRound };
   }
 

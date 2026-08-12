@@ -12,8 +12,12 @@ const DEFAULT_FLIP_PROBABILITY = 0.8;
  * calls: first (maybe) a flip, then always a place-or-pass -- flip doesn't end the
  * turn, so the caller should call this again after a flip action to get the
  * place/pass action that follows.
+ *
+ * This is the "easy" difficulty's strategy -- see lib/ai/difficulty.ts's
+ * chooseAiActionForDifficulty, the single dispatcher every AI-turn call site should
+ * go through instead of importing a specific strategy module directly.
  */
-export function chooseAiAction(
+export function chooseRandomAiAction(
   state: GameState,
   playerId: string,
   rng: Rng = Math.random,

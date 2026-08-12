@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
+import { chooseAiActionForDifficulty } from "@/lib/ai/difficulty";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { Rng } from "@/lib/engine/deck";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { redactedStateFor } from "@/lib/engine/playerView";
 import { currentPlayerId } from "@/lib/engine/turns";
-import { CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
+import { AiDifficulty, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
 import { DISPLAY_VIEWER_ID, LobbyState, RoomSummary, SeatInfo, toWireState, WireGameState } from "./protocol";
 
 /** Same pacing as the single-player AI turn effect in app/play/page.tsx, so a mixed human/AI room feels consistent regardless of mode. */
@@ -34,6 +34,8 @@ export class GameSession {
   private readonly playerCount: number;
   /** Not readonly -- rematch() can change the location for the next deal, unlike playerCount which is fixed to the room's existing seats. */
   private centerEffect: CenterEffectId;
+  /** Not readonly -- rematch() can change it too, same as centerEffect. */
+  private aiDifficulty: AiDifficulty;
   private readonly serverOrigin: string;
   private readonly rng?: Rng;
   private readonly seats = new Map<string, Seat>();
@@ -56,7 +58,9 @@ export class GameSession {
     },
     rng?: Rng,
     /** Jackbox-style shared screen -- the host takes no seat, and all `playerCount` seats are open for real players/AI. Defaults false so every existing single-device-host call site is unaffected. */
-    displayHosted = false
+    displayHosted = false,
+    /** Trailing optional, defaulting to "medium" -- so every existing call site (including tests) that predates AI difficulty keeps working unchanged. */
+    aiDifficulty: AiDifficulty = "medium"
   ) {
     if (!Number.isInteger(playerCount) || playerCount < MIN_PLAYERS || playerCount > MAX_PLAYERS) {
       throw new Error(`playerCount must be an integer between ${MIN_PLAYERS} and ${MAX_PLAYERS}`);
@@ -64,6 +68,7 @@ export class GameSession {
     this.roomCode = roomCode;
     this.playerCount = playerCount;
     this.centerEffect = centerEffect;
+    this.aiDifficulty = aiDifficulty;
     this.serverOrigin = serverOrigin;
     this.rng = rng;
     this.displayHosted = displayHosted;
@@ -197,13 +202,14 @@ export class GameSession {
    * game has actually ended; there's no sensible "rematch" mid-game. `centerEffect` can
    * change the location for this next game (unlike player count, which is fixed to the
    * seats already at the table) -- already resolved from "random" by the caller, same
-   * as room:create.
+   * as room:create. `aiDifficulty` can change too, same reasoning.
    */
-  rematch(callerToken: string, centerEffect: CenterEffectId): { ok: true } | { error: string } {
+  rematch(callerToken: string, centerEffect: CenterEffectId, aiDifficulty: AiDifficulty): { ok: true } | { error: string } {
     if (!this.isHost(callerToken)) return { error: "Only the host can start a new game." };
     if (!this.state || this.state.phase !== "ended") return { error: "The current game hasn't ended yet." };
 
     this.centerEffect = centerEffect;
+    this.aiDifficulty = aiDifficulty;
     this.dealAndStart();
     this.onLobbyChange(this.getLobbyState());
     return { ok: true };
@@ -213,7 +219,7 @@ export class GameSession {
   private dealAndStart(): void {
     const allIds = [...this.seats.keys()];
     const aiIds = [...this.seats.values()].filter((s) => s.isAI).map((s) => s.playerId);
-    const config = configForPlayerCount(this.playerCount, this.centerEffect);
+    const config = configForPlayerCount(this.playerCount, this.centerEffect, this.aiDifficulty);
     const rand = this.rng ?? Math.random;
     const firstPlayerIndex = Math.floor(rand() * allIds.length);
     this.state = createGame(allIds, config, this.rng, aiIds, firstPlayerIndex);
@@ -276,7 +282,7 @@ export class GameSession {
       if (!this.state || this.state.phase !== "playing") return;
       const activeId = currentPlayerId(this.state);
       if (this.seats.get(activeId)?.isAI !== true) return;
-      const action = chooseGreedyAiAction(this.state, activeId, this.rng);
+      const action = chooseAiActionForDifficulty(this.state, activeId, this.state.config.aiDifficulty, this.rng);
       this.state = applyAction(this.state, action, this.rng);
       this.pushStateToAll();
       this.scheduleAiTurnIfNeeded();

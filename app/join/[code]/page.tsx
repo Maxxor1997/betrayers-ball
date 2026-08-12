@@ -23,7 +23,7 @@ import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffe
 import { playerAccentClass, playerDotColorClass } from "@/lib/config/players";
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
-import { CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
+import { AiDifficulty, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { LobbyState, SeatInfo } from "@/lib/server/protocol";
 
 const DRAG_MIME = "application/x-card-instance-id";
@@ -326,7 +326,7 @@ function GameView({
   lobby: LobbyState;
   myPlayerId: string;
   dispatch: (action: GameAction) => void;
-  rematch: (centerEffect: CenterEffectId) => void;
+  rematch: (centerEffect: CenterEffectId, aiDifficulty: AiDifficulty) => void;
   cardsCollapsed: boolean;
   onCardsCollapsedChange: (collapsed: boolean) => void;
 }) {
@@ -523,7 +523,7 @@ function GameView({
             footer={
               isHost ? (
                 <button
-                  onClick={() => setRematchSetup({ playerCount: lobby.playerCount, centerEffect: "random" })}
+                  onClick={() => setRematchSetup({ playerCount: lobby.playerCount, centerEffect: "random", aiDifficulty: state.config.aiDifficulty })}
                   className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-sm whitespace-nowrap text-white dark:bg-zinc-100 dark:text-black"
                 >
                   Play again (same room)
@@ -544,7 +544,7 @@ function GameView({
             onConfirm={() => {
               const pool = randomCenterEffectPool(rematchSetup.playerCount);
               const centerEffect = rematchSetup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : rematchSetup.centerEffect;
-              rematch(centerEffect);
+              rematch(centerEffect, rematchSetup.aiDifficulty);
               setRematchSetup(null);
             }}
             confirmLabel="Start"

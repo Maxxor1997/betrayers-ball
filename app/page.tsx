@@ -7,6 +7,7 @@ import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { InstructionsModal } from "@/app/components/InstructionsModal";
 import { CardCatalog } from "@/app/components/CardCatalog";
 import { NewGameModal, NewGameSetup } from "@/app/components/NewGameModal";
+import { DEFAULT_AI_DIFFICULTY } from "@/lib/ai/difficulty";
 import { MultiplayerUnavailableBanner, MultiplayerUnavailableModal } from "@/app/components/MultiplayerUnavailableNotice";
 import { createMultiplayerRoom } from "@/app/hooks/createMultiplayerRoom";
 import { listMultiplayerRooms } from "@/app/hooks/listMultiplayerRooms";
@@ -207,26 +208,26 @@ export default function HomePage() {
   function openSoloSetup() {
     setMode("solo");
     setHostError(null);
-    setNewGameSetup({ playerCount: 4, centerEffect: "random" });
+    setNewGameSetup({ playerCount: 4, centerEffect: "random", aiDifficulty: DEFAULT_AI_DIFFICULTY });
   }
 
   function openHostSetup() {
     setMode("host");
     setHostError(null);
-    setNewGameSetup({ playerCount: 4, centerEffect: "random" });
+    setNewGameSetup({ playerCount: 4, centerEffect: "random", aiDifficulty: DEFAULT_AI_DIFFICULTY });
   }
 
   function openDisplaySetup() {
     setMode("display");
     setHostError(null);
-    setNewGameSetup({ playerCount: 4, centerEffect: "random" });
+    setNewGameSetup({ playerCount: 4, centerEffect: "random", aiDifficulty: DEFAULT_AI_DIFFICULTY });
   }
 
   function startSoloGame(setup: NewGameSetup) {
     // "random" passes straight through, unresolved -- /play does its own resolution
     // (see readGameSetupFromQuery's doc comment there) so it can tell "randomly
     // picked" apart from "deliberately fixed" for its own "Play again" rerolling.
-    router.push(`/play?players=${setup.playerCount}&center=${setup.centerEffect}`);
+    router.push(`/play?players=${setup.playerCount}&center=${setup.centerEffect}&difficulty=${setup.aiDifficulty}`);
   }
 
   async function startHostedRoom(setup: NewGameSetup) {
@@ -234,7 +235,7 @@ export default function HomePage() {
     setHostError(null);
     const pool = randomCenterEffectPool(setup.playerCount);
     const centerEffect = setup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : setup.centerEffect;
-    const result = await createMultiplayerRoom(hostName.trim() || "Host", setup.playerCount, centerEffect);
+    const result = await createMultiplayerRoom(hostName.trim() || "Host", setup.playerCount, centerEffect, setup.aiDifficulty);
     setHosting(false);
     if ("error" in result) {
       setNewGameSetup(null);
@@ -250,7 +251,7 @@ export default function HomePage() {
     setHostError(null);
     const pool = randomCenterEffectPool(setup.playerCount);
     const centerEffect = setup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : setup.centerEffect;
-    const result = await createMultiplayerRoom("Host", setup.playerCount, centerEffect, true);
+    const result = await createMultiplayerRoom("Host", setup.playerCount, centerEffect, setup.aiDifficulty, true);
     setHosting(false);
     if ("error" in result) {
       setNewGameSetup(null);

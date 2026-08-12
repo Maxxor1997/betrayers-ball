@@ -11,7 +11,8 @@ import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, randomCenterEffectPool, selectableCenterEffects } from "@/lib/content/centerEffects";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { ResolvedCard, resolveBoard } from "@/lib/engine/resolution";
-import { CardBucket, CardId, CenterEffectId, GameState } from "@/lib/engine/types";
+import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS, DEFAULT_AI_DIFFICULTY } from "@/lib/ai/difficulty";
+import { AiDifficulty, CardBucket, CardId, CenterEffectId, GameState } from "@/lib/engine/types";
 import {
   CardStatsRow,
   createEmptyStats,
@@ -354,6 +355,7 @@ function Playtest() {
   const [playerCount, setPlayerCount] = useState(4);
   const [runAllPlayerCounts, setRunAllPlayerCounts] = useState(false);
   const [centerEffect, setCenterEffect] = useState<CenterEffectId | "random">("random");
+  const [aiDifficulty, setAiDifficulty] = useState<AiDifficulty>(DEFAULT_AI_DIFFICULTY);
   const [gameCount, setGameCount] = useState(500);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -448,7 +450,7 @@ function Playtest() {
           // Steps through the game action-by-action instead of running it in one call,
           // so the board actually visible on screen keeps up with play instead of only
           // ever showing the previous game's finished result.
-          const steps = simulateOneGameSteps(pc, effect, Math.random);
+          const steps = simulateOneGameSteps(pc, effect, Math.random, aiDifficulty);
           let step = steps.next();
           while (!step.done) {
             if (++actionsSinceSample >= LIVE_SAMPLE_EVERY_ACTIONS) {
@@ -467,7 +469,7 @@ function Playtest() {
           finalState = step.value;
           setLiveState(finalState);
         } else {
-          finalState = simulateOneGame(pc, effect, Math.random);
+          finalState = simulateOneGame(pc, effect, Math.random, aiDifficulty);
         }
 
         tallyOneGame(working, finalState);
@@ -645,6 +647,20 @@ function Playtest() {
             {selectableCenterEffects(runAllPlayerCounts ? MAX_PLAYERS : playerCount).map((id) => (
               <option key={id} value={id}>
                 {CENTER_EFFECTS[id].label}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="pt-difficulty">Difficulty</label>
+          <select
+            id="pt-difficulty"
+            value={aiDifficulty}
+            disabled={running}
+            onChange={(e) => setAiDifficulty(e.target.value as AiDifficulty)}
+            className="w-full min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
+          >
+            {AI_DIFFICULTIES.map((d) => (
+              <option key={d} value={d}>
+                {AI_DIFFICULTY_LABELS[d]}
               </option>
             ))}
           </select>
@@ -1054,7 +1070,7 @@ function Playtest() {
             </p>
           )}
         </div>
-        <PlaySelf playerCount={playerCount} centerEffect={centerEffect} onGameEnded={onSelfGameEnded} />
+        <PlaySelf playerCount={playerCount} centerEffect={centerEffect} aiDifficulty={aiDifficulty} onGameEnded={onSelfGameEnded} />
       </div>
     </div>
   );

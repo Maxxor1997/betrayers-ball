@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseAiAction } from "../randomAi";
+import { chooseRandomAiAction } from "../randomAi";
 import { applyAction, createGame, DEFAULT_2P_CONFIG } from "../../engine/game";
 import { currentPlayerId } from "../../engine/turns";
 import { GameConfig, GameState } from "../../engine/types";
@@ -30,7 +30,7 @@ function playFullAiGame(config: GameConfig, seed: number, maxIterations = 500): 
 
   while (state.phase !== "ended" && iterations < maxIterations) {
     const playerId = activePlayerId(state);
-    const action = chooseAiAction(state, playerId, rng);
+    const action = chooseRandomAiAction(state, playerId, rng);
     // applyAction throws on any illegal action -- that's the property under test.
     state = applyAction(state, action, rng);
     iterations++;
@@ -39,7 +39,7 @@ function playFullAiGame(config: GameConfig, seed: number, maxIterations = 500): 
   return state;
 }
 
-describe("chooseAiAction", () => {
+describe("chooseRandomAiAction", () => {
   it("never proposes an illegal action, across many seeded games on the default 2p config", () => {
     for (let seed = 1; seed <= 20; seed++) {
       const finalState = playFullAiGame(DEFAULT_2P_CONFIG, seed);
@@ -57,6 +57,7 @@ describe("chooseAiAction", () => {
       centerEffect: "none",
       minRoundFloor: 1,
       playerCount: 2,
+      aiDifficulty: "medium",
     };
     for (let seed = 1; seed <= 10; seed++) {
       const finalState = playFullAiGame(config, seed);
@@ -66,7 +67,7 @@ describe("chooseAiAction", () => {
 
   it("respects turn ownership: throws if asked to act out of turn", () => {
     const state = createGame(["p1", "p2"], DEFAULT_2P_CONFIG, deterministicRng(1));
-    expect(() => chooseAiAction(state, "p2", deterministicRng(1))).toThrow();
+    expect(() => chooseRandomAiAction(state, "p2", deterministicRng(1))).toThrow();
   });
 
   it("uses at most one flip per turn across a full game", () => {
@@ -76,7 +77,7 @@ describe("chooseAiAction", () => {
     while (state.phase !== "ended" && iterations < 500) {
       const playerId = activePlayerId(state);
       const before = state.hasFlippedThisTurn;
-      const action = chooseAiAction(state, playerId, rng);
+      const action = chooseRandomAiAction(state, playerId, rng);
       if (action.type === "flip") {
         expect(before).toBe(false);
       }
@@ -94,7 +95,7 @@ describe("chooseAiAction", () => {
     while (state.phase !== "ended" && iterations < 500) {
       if (state.phase === "voting") sawAVote = true;
       const playerId = activePlayerId(state);
-      const action = chooseAiAction(state, playerId, rng);
+      const action = chooseRandomAiAction(state, playerId, rng);
       state = applyAction(state, action, rng);
       iterations++;
     }

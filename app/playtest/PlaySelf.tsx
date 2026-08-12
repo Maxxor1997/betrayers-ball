@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { AI_NAMES, playerAccentClass } from "@/lib/config/players";
-import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
+import { chooseAiActionForDifficulty } from "@/lib/ai/difficulty";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { ResolutionResult, resolveBoard, ResolvedCard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
-import { CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
+import { AiDifficulty, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { BoardGrid } from "@/app/components/Board";
 import { Hand } from "@/app/components/Hand";
 import { GameStatusPanel } from "@/app/components/GameStatusPanel";
@@ -24,12 +24,12 @@ function nameFor(state: GameState, ownerId: string): string {
   return AI_NAMES[aiIndex] ?? `AI ${aiIndex + 1}`;
 }
 
-function newGameState(playerCount: number, centerEffect: CenterEffectId | "random"): GameState {
+function newGameState(playerCount: number, centerEffect: CenterEffectId | "random", aiDifficulty: AiDifficulty): GameState {
   const playerIds = [SELF, ...Array.from({ length: playerCount - 1 }, (_, i) => `ai${i}`)];
   const aiPlayerIds = playerIds.filter((id) => id !== SELF);
   const pool = randomCenterEffectPool(playerCount);
   const resolvedEffect = centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : centerEffect;
-  const config = configForPlayerCount(playerCount, resolvedEffect);
+  const config = configForPlayerCount(playerCount, resolvedEffect, aiDifficulty);
   const firstPlayerIndex = Math.floor(Math.random() * playerIds.length);
   return createGame(playerIds, config, undefined, aiPlayerIds, firstPlayerIndex);
 }
@@ -47,10 +47,12 @@ function newGameState(playerCount: number, centerEffect: CenterEffectId | "rando
 export function PlaySelf({
   playerCount,
   centerEffect,
+  aiDifficulty,
   onGameEnded,
 }: {
   playerCount: number;
   centerEffect: CenterEffectId | "random";
+  aiDifficulty: AiDifficulty;
   onGameEnded: (cards: ResolvedCard[], scores: Record<string, number>, roundsPlayed: number, resolvedCenterEffect: CenterEffectId) => void;
 }) {
   const [state, setState] = useState<GameState | null>(null);
@@ -92,7 +94,7 @@ export function PlaySelf({
   useEffect(() => {
     if (!isAiTurn || !state) return;
     const timer = setTimeout(() => {
-      const action = chooseGreedyAiAction(state, currentPlayerId(state));
+      const action = chooseAiActionForDifficulty(state, currentPlayerId(state), state.config.aiDifficulty);
       dispatch(action);
     }, 350);
     return () => clearTimeout(timer);
@@ -118,7 +120,7 @@ export function PlaySelf({
     setSelectedInstanceId(null);
     setDragOverKey(null);
     setPendingFlip(null);
-    setState(newGameState(playerCount, centerEffect));
+    setState(newGameState(playerCount, centerEffect, aiDifficulty));
   }
 
   if (!state) {

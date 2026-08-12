@@ -10,6 +10,7 @@ const CONFIG: GameConfig = {
   centerEffect: "none",
   minRoundFloor: 1,
   playerCount: 2,
+  aiDifficulty: "medium",
 };
 
 let counter = 0;

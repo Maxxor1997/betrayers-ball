@@ -1,13 +1,15 @@
 "use client";
 
+import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS } from "@/lib/ai/difficulty";
 import { CENTER_EFFECTS, isAvailableAtPlayerCount, selectableCenterEffects } from "@/lib/content/centerEffects";
 import { SELECTABLE_LOBBY_SIZES } from "@/lib/config/players";
-import { CenterEffectId } from "@/lib/engine/types";
+import { AiDifficulty, CenterEffectId } from "@/lib/engine/types";
 
-/** Player count and center effect chosen from this popup. */
+/** Player count, center effect, and AI difficulty chosen from this popup. */
 export interface NewGameSetup {
   playerCount: number;
   centerEffect: CenterEffectId | "random";
+  aiDifficulty: AiDifficulty;
 }
 
 /**
@@ -122,6 +124,19 @@ export function NewGameModal({
             {selectableCenterEffects(setup.playerCount).map((id) => (
               <option key={id} value={id}>
                 {CENTER_EFFECTS[id].label}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="ngm-difficulty">Difficulty</label>
+          <select
+            id="ngm-difficulty"
+            value={setup.aiDifficulty}
+            onChange={(e) => onChange({ ...setup, aiDifficulty: e.target.value as AiDifficulty })}
+            className={controlClass}
+          >
+            {AI_DIFFICULTIES.map((d) => (
+              <option key={d} value={d}>
+                {AI_DIFFICULTY_LABELS[d]}
               </option>
             ))}
           </select>

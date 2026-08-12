@@ -1,6 +1,8 @@
 "use client";
 
 import { CARD_DEFS } from "@/lib/content/cards";
+import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
+import { PLAYER_DOT_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 
 function StepBadge({ n }: { n: number }) {
   return (
@@ -57,6 +59,51 @@ function MiniCard() {
   );
 }
 
+/**
+ * Mirrors the real header panel's TurnOrderTracker (GameStatusPanel.tsx): the "Round
+ * starts with X" caption in that player's color, plus a short player list with the
+ * active turn highlighted -- same structure and classes, just fixed example names/seats
+ * instead of live GameState, since this only needs to teach what the real widget means.
+ */
+function MiniTurnOrder() {
+  const names = ["Alex", "Sam", "Jo"];
+  const activeIdx = 1;
+  const roundStartIdx = 0;
+  return (
+    <div className="flex w-36 shrink-0 flex-col gap-1 rounded-md border border-zinc-300 p-2 dark:border-zinc-700">
+      <span className="text-[10px] font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">Turn order</span>
+      <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+        Round starts with <span className={`font-semibold ${PLAYER_TEXT_COLOR_CLASSES[roundStartIdx]}`}>{names[roundStartIdx]}</span>
+      </span>
+      <div className="flex flex-col gap-0.5">
+        {names.map((name, i) => (
+          <div
+            key={name}
+            className={`flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs ${
+              i === activeIdx
+                ? "border-emerald-500 bg-emerald-50 font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                : "border-transparent text-zinc-600 dark:text-zinc-400"
+            }`}
+          >
+            <span className={`h-2 w-2 shrink-0 rounded-full ${PLAYER_DOT_COLOR_CLASSES[i]}`} />
+            <span className="min-w-0 flex-1 truncate">{name}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Real center-effect data (label/description), not hardcoded copy -- "reckoning" is Hall of Fortunes. Mirrors Board.tsx's ownerless-tile rendering (dashed box with the label inside). */
+function MiniCenterTile() {
+  const effect = CENTER_EFFECTS.reckoning;
+  return (
+    <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400">
+      {effect.label}
+    </div>
+  );
+}
+
 export function InstructionsModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -105,10 +152,23 @@ export function InstructionsModal({ onClose }: { onClose: () => void }) {
           </section>
 
           <section>
+            <h3 className="mb-1 font-semibold">Turn order</h3>
+            <div className="flex flex-wrap items-center gap-4">
+              <MiniTurnOrder />
+              <p className="min-w-[16rem] flex-1 text-zinc-600 dark:text-zinc-400">
+                Within a round, turns go in the same fixed order every time. If the game has 3+ players, the round
+                leader (the first player to go each round) rotates by one seat each round. The right-hand panel&rsquo;s
+                turn order list — shown here as an example — always shows who starts the current round, and
+                highlights whoever&rsquo;s turn it is now.
+              </p>
+            </div>
+          </section>
+
+          <section>
             <h3 className="mb-1 font-semibold">The board</h3>
             <div className="flex flex-wrap items-center gap-4">
               <MiniBoard />
-              <p className="max-w-xs text-zinc-600 dark:text-zinc-400">
+              <p className="min-w-[16rem] flex-1 text-zinc-600 dark:text-zinc-400">
                 Faint green cells are empty and legal to place on right now. A placement must be adjacent to an
                 existing card or the center tile. Nothing goes on the center itself, but it always counts as a
                 neighbor.
@@ -131,7 +191,7 @@ export function InstructionsModal({ onClose }: { onClose: () => void }) {
             <h3 className="mb-1 font-semibold">Cards</h3>
             <div className="flex flex-wrap items-center gap-4">
               <MiniCard />
-              <ul className="max-w-xs list-disc space-y-1 pl-4 text-zinc-600 dark:text-zinc-400">
+              <ul className="min-w-[16rem] flex-1 list-disc space-y-1 pl-4 text-zinc-600 dark:text-zinc-400">
                 <li>Name and base value, shown in your hand and once revealed.</li>
                 <li>A short effect summary — hover any card (hand or board) for the full rules text.</li>
                 <li>You can always see your own hand and any face-up card; opponents&rsquo; face-down cards stay hidden.</li>
@@ -160,10 +220,14 @@ export function InstructionsModal({ onClose }: { onClose: () => void }) {
 
           <section>
             <h3 className="mb-1 font-semibold">Center effects</h3>
-            <p className="text-zinc-600 dark:text-zinc-400">
-              Each game picks one special rule for the center tile (or none) — shown in the header and on the
-              center tile itself. Hover the center tile any time to see what it does.
-            </p>
+            <div className="flex flex-wrap items-center gap-4">
+              <MiniCenterTile />
+              <p className="min-w-[16rem] flex-1 text-zinc-600 dark:text-zinc-400">
+                Each game picks one special rule for the center tile (or none) — shown in the header and on the
+                center tile itself. For example, the Hall of Fortunes location shown here makes every player discard
+                and redraw their hand at the start of round 4. Hover the center tile any time to see what it does.
+              </p>
+            </div>
           </section>
         </div>
       </div>

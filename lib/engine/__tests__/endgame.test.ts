@@ -18,6 +18,7 @@ const MARGIN_CONFIG: GameConfig = {
   centerEffect: "none",
   minRoundFloor: 3,
   playerCount: 2,
+  aiDifficulty: "medium",
 };
 
 function makeState(overrides: Partial<GameState> = {}): GameState {

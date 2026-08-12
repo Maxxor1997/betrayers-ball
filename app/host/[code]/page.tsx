@@ -20,7 +20,7 @@ import { nameFor, SeatRow } from "@/app/join/[code]/page";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, isFlipUnlocked } from "@/lib/engine/turns";
-import { CenterEffectId, GameState } from "@/lib/engine/types";
+import { AiDifficulty, CenterEffectId, GameState } from "@/lib/engine/types";
 import { DISPLAY_VIEWER_ID, LobbyState } from "@/lib/server/protocol";
 
 /** BoardGrid/legalCellKeys and flipTargetIds are always empty here -- the display never places or flips cards, only shows the board. */
@@ -269,7 +269,7 @@ function DisplayGameView({
   header: React.ReactNode;
   state: GameState;
   lobby: LobbyState;
-  rematch: (centerEffect: CenterEffectId) => void;
+  rematch: (centerEffect: CenterEffectId, aiDifficulty: AiDifficulty) => void;
   rematchSetup: NewGameSetup | null;
   setRematchSetup: (setup: NewGameSetup | null) => void;
   cardsCollapsed: boolean;
@@ -325,7 +325,7 @@ function DisplayGameView({
             nameFor={(id) => nameFor(lobby, id)}
             footer={
               <button
-                onClick={() => setRematchSetup({ playerCount: lobby.playerCount, centerEffect: "random" })}
+                onClick={() => setRematchSetup({ playerCount: lobby.playerCount, centerEffect: "random", aiDifficulty: state.config.aiDifficulty })}
                 className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-sm whitespace-nowrap text-white dark:bg-zinc-100 dark:text-black"
               >
                 Play again (same room)
@@ -343,7 +343,7 @@ function DisplayGameView({
             onConfirm={() => {
               const pool = randomCenterEffectPool(rematchSetup.playerCount);
               const centerEffect = rematchSetup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : rematchSetup.centerEffect;
-              rematch(centerEffect);
+              rematch(centerEffect, rematchSetup.aiDifficulty);
               setRematchSetup(null);
             }}
             confirmLabel="Start"

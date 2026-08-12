@@ -41,7 +41,7 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
   }
 
   io.on("connection", (socket: IOSocket) => {
-    socket.on("room:create", ({ hostName, playerCount, centerEffect, asDisplay }, ack) => {
+    socket.on("room:create", ({ hostName, playerCount, centerEffect, asDisplay, aiDifficulty }, ack) => {
       try {
         const session = registry.create(
           (roomCode) =>
@@ -56,7 +56,8 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
                 onPlayerState: (playerId, state) => io.to(`${roomCode}:${playerId}`).emit("game:state", { state, myPlayerId: playerId }),
               },
               undefined,
-              asDisplay
+              asDisplay,
+              aiDifficulty
             )
         );
         attach(socket, session.roomCode, session.hostPlayerId);
@@ -110,10 +111,10 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
       ack("error" in result ? { ok: false, error: result.error } : { ok: true });
     });
 
-    socket.on("room:rematch", ({ roomCode, token, centerEffect }, ack) => {
+    socket.on("room:rematch", ({ roomCode, token, centerEffect, aiDifficulty }, ack) => {
       const session = registry.get(roomCode);
       if (!session) return ack({ ok: false, error: "No game found at that room code." });
-      const result = session.rematch(token, centerEffect);
+      const result = session.rematch(token, centerEffect, aiDifficulty);
       ack("error" in result ? { ok: false, error: result.error } : { ok: true });
     });
 

@@ -174,10 +174,26 @@ function TurnOrderTracker({ state, viewerId, nameFor }: { state: GameState; view
   const activeTooltipId = useActiveTooltipId();
   const [activeRect, setActiveRect] = useState<DOMRect | null>(null);
   const lastVoteRound = state.voteHistory[state.voteHistory.length - 1];
+  const playerCount = state.players.length;
+  // Who this round started with -- a pure derivation from fields already on
+  // GameState, valid even mid-round (the only seat skip happens *between* rounds,
+  // never within one -- see advanceTurn's roundRotationShift). Only shown for 3+
+  // players: that's the only case where it can ever differ from the previous round's,
+  // since 2p never rotates. Without this caption, a player mentally tracking "next row
+  // down" in the list below would be off by one seat right after a round rolls over,
+  // since that's exactly when a seat gets skipped.
+  const roundStartIndex = ((state.currentPlayerIndex - state.turnsThisRound) % playerCount + playerCount) % playerCount;
+  const roundStartId = state.players[roundStartIndex].id;
 
   return (
     <div className="flex w-full flex-col gap-1">
       <span className="text-[10px] font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">Turn order</span>
+      {playerCount >= 3 && (
+        <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+          Round starts with <span className={`font-semibold ${ownerTextColorClass(state, roundStartId)}`}>{nameFor(roundStartId)}</span>
+          {roundStartId === viewerId ? " (you)" : ""}
+        </span>
+      )}
       <div className="flex flex-col gap-0.5">
         {state.players.map((p) => {
           const active = p.id === activeId;

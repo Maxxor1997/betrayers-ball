@@ -21,6 +21,7 @@ describe("createGame", () => {
       centerEffect: "none",
       minRoundFloor: 1,
       playerCount: 2,
+      aiDifficulty: "medium",
     };
     const state = createGame(["p1", "p2"], config, deterministicRng(1));
     expect(state.players[0].hand).toHaveLength(7);
@@ -39,6 +40,7 @@ describe("createGame", () => {
       centerEffect: "none",
       minRoundFloor: 1,
       playerCount: 3,
+      aiDifficulty: "medium",
     };
     const defaultState = createGame(["p1", "p2", "p3"], config, deterministicRng(1));
     expect(defaultState.currentPlayerIndex).toBe(0);
@@ -57,6 +59,7 @@ describe("applyAction — round-boundary-only endgame (cap)", () => {
     centerEffect: "none",
     minRoundFloor: 1,
     playerCount: 2,
+    aiDifficulty: "medium",
   };
 
   it("does not end mid-round even though the cap is already met", () => {
@@ -96,6 +99,7 @@ describe("applyAction — board-fill endgame trigger", () => {
     centerEffect: "none",
     minRoundFloor: 10, // above where the board fills (round 4), so voting doesn't interfere here
     playerCount: 2,
+    aiDifficulty: "medium",
   };
 
   it("ends when the board fills, before the (much higher) round cap", () => {
@@ -136,6 +140,7 @@ describe("applyAction — turn ownership", () => {
     centerEffect: "none",
     minRoundFloor: 1,
     playerCount: 2,
+    aiDifficulty: "medium",
   };
 
   it("rejects an action from a player who is not current", () => {
@@ -166,6 +171,7 @@ describe("applyAction — voting", () => {
     centerEffect: "none",
     minRoundFloor: 1,
     playerCount: 2,
+    aiDifficulty: "medium",
   };
 
   function playRound1(rngForBoundary: () => number) {
@@ -282,6 +288,7 @@ describe("applyAction — centerEffect threads through to a real end-of-game res
       centerEffect: "shadowlands",
       minRoundFloor: 10, // keep voting out of the way
       playerCount: 2,
+      aiDifficulty: "medium",
     };
     const board: Board = new Map();
     board.set(posKey({ x: 3, y: 2 }), { instanceId: "c1", cardId: "Footman", ownerId: "p1", faceUp: false });
@@ -324,6 +331,7 @@ describe("advanceTurn — round boundary respects a non-zero starting player", (
     centerEffect: "none",
     minRoundFloor: 10, // keep voting out of the way
     playerCount: 3,
+    aiDifficulty: "medium",
   };
 
   it("does not advance the round (or unlock flipping) until every player, not just the first mover, has acted", () => {
@@ -347,7 +355,97 @@ describe("advanceTurn — round boundary respects a non-zero starting player", (
     cell = getLegalPlacementCells(state)[0];
     state = applyAction(state, { type: "place", playerId: "p1", instanceId: state.players[0].hand[0].instanceId, position: cell });
     expect(state.round).toBe(2); // now every player has gone -- round advances
-    expect(state.currentPlayerIndex).toBe(1); // rotation continues from where it started
+    expect(state.currentPlayerIndex).toBe(2); // round 2 starts one seat further than round 1 did (see roundRotationShift)
+  });
+});
+
+describe("advanceTurn — round-start seat rotation", () => {
+  it("starts each round one seat further than the previous round, for 3+ players", () => {
+    const config: GameConfig = {
+      boardBounds: { width: 7, height: 7, center: { x: 3, y: 3 } },
+      handSize: 4,
+      roundCap: 10,
+      flipUnlockRound: 2,
+      centerEffect: "none",
+      minRoundFloor: 10, // keep voting out of the way
+      playerCount: 4,
+      aiDifficulty: "medium",
+    };
+    let state = createGame(["p1", "p2", "p3", "p4"], config, deterministicRng(1), [], 0);
+    expect(state.currentPlayerIndex).toBe(0); // round 1 starts at seat 0
+
+    for (let i = 0; i < 4; i++) {
+      const player = state.players[state.currentPlayerIndex];
+      const cell = getLegalPlacementCells(state)[0];
+      state = applyAction(state, { type: "place", playerId: player.id, instanceId: player.hand[0].instanceId, position: cell });
+    }
+    expect(state.round).toBe(2);
+    expect(state.currentPlayerIndex).toBe(1); // round 2 starts one seat further
+
+    for (let i = 0; i < 4; i++) {
+      const player = state.players[state.currentPlayerIndex];
+      const cell = getLegalPlacementCells(state)[0];
+      state = applyAction(state, { type: "place", playerId: player.id, instanceId: player.hand[0].instanceId, position: cell });
+    }
+    expect(state.round).toBe(3);
+    expect(state.currentPlayerIndex).toBe(2); // round 3 starts one seat further still
+
+    // No seat ever acts twice in a row across either round boundary crossed above.
+  });
+
+  it("never shifts the round-start seat at 2p -- rotating there would always repeat the last actor immediately", () => {
+    const config: GameConfig = {
+      boardBounds: { width: 7, height: 7, center: { x: 3, y: 3 } },
+      handSize: 4,
+      roundCap: 10,
+      flipUnlockRound: 2,
+      centerEffect: "none",
+      minRoundFloor: 10,
+      playerCount: 2,
+      aiDifficulty: "medium",
+    };
+    let state = createGame(["p1", "p2"], config, deterministicRng(1), [], 0);
+    expect(state.currentPlayerIndex).toBe(0);
+
+    for (let i = 0; i < 2; i++) {
+      const player = state.players[state.currentPlayerIndex];
+      const cell = getLegalPlacementCells(state)[0];
+      state = applyAction(state, { type: "place", playerId: player.id, instanceId: player.hand[0].instanceId, position: cell });
+    }
+    expect(state.round).toBe(2);
+    expect(state.currentPlayerIndex).toBe(0); // unchanged: round 2 still starts at seat 0, exactly as before this feature existed
+  });
+
+  it("shifts the round-start seat by 3 (not 1) at 8p, to reduce the residual turn-order exposure imbalance roundCap=6 leaves behind", () => {
+    const playerIds = Array.from({ length: 8 }, (_, i) => `p${i}`);
+    const config: GameConfig = {
+      boardBounds: { width: 9, height: 9, center: { x: 4, y: 4 } },
+      handSize: 4,
+      roundCap: 10,
+      flipUnlockRound: 2,
+      centerEffect: "none",
+      minRoundFloor: 10, // keep voting out of the way
+      playerCount: 8,
+      aiDifficulty: "medium",
+    };
+    let state = createGame(playerIds, config, deterministicRng(1), [], 0);
+    expect(state.currentPlayerIndex).toBe(0); // round 1 starts at seat 0
+
+    for (let i = 0; i < 8; i++) {
+      const player = state.players[state.currentPlayerIndex];
+      const cell = getLegalPlacementCells(state)[0];
+      state = applyAction(state, { type: "place", playerId: player.id, instanceId: player.hand[0].instanceId, position: cell });
+    }
+    expect(state.round).toBe(2);
+    expect(state.currentPlayerIndex).toBe(3); // round 2 starts 3 seats further, not 1
+
+    for (let i = 0; i < 8; i++) {
+      const player = state.players[state.currentPlayerIndex];
+      const cell = getLegalPlacementCells(state)[0];
+      state = applyAction(state, { type: "place", playerId: player.id, instanceId: player.hand[0].instanceId, position: cell });
+    }
+    expect(state.round).toBe(3);
+    expect(state.currentPlayerIndex).toBe(6); // round 3 starts 3 seats further still (0 -> 3 -> 6)
   });
 });
 
@@ -360,6 +458,7 @@ describe("Reckoning center effect — discard & redraw hands at round 4", () => 
     centerEffect: "reckoning",
     minRoundFloor: 3,
     playerCount: 2,
+    aiDifficulty: "medium",
   };
 
   function placeCurrentPlayersFirstCard(state: GameState): GameState {

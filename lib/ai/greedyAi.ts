@@ -428,10 +428,12 @@ function nonLeaderDisruptionBonus(preState: GameState, playerId: string, postSta
  * on how the game unfolds on *later* turns, which a one-ply greedy evaluation can't
  * see at all. Each branch targets one specific card identified from playtesting data;
  * see each one's own comment for the reasoning. This never touches the engine's real
- * (fair) scoring -- it's purely a decision-making nudge for this module, same spirit
- * as SPECULATIVE_CARD_IDS/BLUFF_FLIP_CARD_IDS above.
+ * (fair) scoring -- it's purely a decision-making nudge, same spirit as
+ * SPECULATIVE_CARD_IDS/BLUFF_FLIP_CARD_IDS above. Exported so mcts.ts can reuse the
+ * same calibrated corrections when ranking/pruning its own search candidates, instead
+ * of re-deriving a weaker approximation from scratch.
  */
-function placementHeuristicAdjustment(
+export function placementHeuristicAdjustment(
   preState: GameState,
   playerId: string,
   action: { instanceId: string; position: Position },

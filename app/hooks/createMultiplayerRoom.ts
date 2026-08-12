@@ -1,6 +1,6 @@
 import { io, Socket } from "socket.io-client";
 import { ClientToServerEvents, ServerToClientEvents } from "@/lib/server/protocol";
-import { CenterEffectId } from "@/lib/engine/types";
+import { AiDifficulty, CenterEffectId } from "@/lib/engine/types";
 import { saveCredentials } from "./multiplayerCredentials";
 import { MULTIPLAYER_UNAVAILABLE_MESSAGE } from "./multiplayerUnavailable";
 import { CONNECT_TIMEOUT_MS } from "./socketConnectTimeout";
@@ -15,6 +15,7 @@ export function createMultiplayerRoom(
   hostName: string,
   playerCount: number,
   centerEffect: CenterEffectId,
+  aiDifficulty: AiDifficulty,
   /** Jackbox-style shared screen -- the caller takes no seat, just hosts. Defaults false (the normal "host also plays" room). */
   asDisplay = false
 ): Promise<{ roomCode: string } | { error: string }> {
@@ -29,7 +30,7 @@ export function createMultiplayerRoom(
     };
 
     socket.on("connect", () => {
-      socket.emit("room:create", { hostName, playerCount, centerEffect, asDisplay }, (ack) => {
+      socket.emit("room:create", { hostName, playerCount, centerEffect, asDisplay, aiDifficulty }, (ack) => {
         if (ack.ok) {
           saveCredentials(ack.roomCode, { playerId: ack.playerId, token: ack.token });
           finish({ roomCode: ack.roomCode });

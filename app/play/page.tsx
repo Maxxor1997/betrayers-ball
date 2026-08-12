@@ -8,8 +8,8 @@ import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffe
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
-import { CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
-import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
+import { AiDifficulty, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
+import { AI_DIFFICULTIES, chooseAiActionForDifficulty, DEFAULT_AI_DIFFICULTY } from "@/lib/ai/difficulty";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, playerAccentClass, playerDotColorClass } from "@/lib/config/players";
 import { NewGameSetup, PendingFlip } from "./types";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
@@ -65,12 +65,16 @@ function buildPlayerIds(playerCount: number): string[] {
  * executes, so it could see the *previous* page's (param-less) URL and wrongly fall
  * back to the prompt -- a real double-setup bug, not just a theoretical one.
  */
-function readGameSetupFromQuery(params: { get(name: string): string | null }): { playerCount: number; centerEffect: CenterEffectId | "random" } | null {
+function readGameSetupFromQuery(
+  params: { get(name: string): string | null }
+): { playerCount: number; centerEffect: CenterEffectId | "random"; aiDifficulty: AiDifficulty } | null {
   const playerCount = Number(params.get("players"));
   const centerEffect = params.get("center");
+  const aiDifficultyParam = params.get("difficulty");
   if (!Number.isInteger(playerCount) || playerCount < MIN_PLAYERS || playerCount > MAX_PLAYERS) return null;
   if (!centerEffect || (centerEffect !== "random" && !(centerEffect in CENTER_EFFECTS))) return null;
-  return { playerCount, centerEffect: centerEffect as CenterEffectId | "random" };
+  const aiDifficulty = (aiDifficultyParam && (AI_DIFFICULTIES as string[]).includes(aiDifficultyParam) ? aiDifficultyParam : DEFAULT_AI_DIFFICULTY) as AiDifficulty;
+  return { playerCount, centerEffect: centerEffect as CenterEffectId | "random", aiDifficulty };
 }
 
 function pickRandomCenterEffect(playerCount: number): CenterEffectId {
@@ -78,10 +82,10 @@ function pickRandomCenterEffect(playerCount: number): CenterEffectId {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function newGameState(playerCount: number, centerEffect: CenterEffectId): GameState {
+function newGameState(playerCount: number, centerEffect: CenterEffectId, aiDifficulty: AiDifficulty): GameState {
   const playerIds = buildPlayerIds(playerCount);
   const aiPlayerIds = playerIds.filter((id) => id !== HUMAN);
-  const config = configForPlayerCount(playerCount, centerEffect);
+  const config = configForPlayerCount(playerCount, centerEffect, aiDifficulty);
   const firstPlayerIndex = Math.floor(Math.random() * playerIds.length);
   return createGame(playerIds, config, undefined, aiPlayerIds, firstPlayerIndex);
 }
@@ -238,7 +242,7 @@ function Game() {
     const playerCount = initialSetup?.playerCount ?? 2;
     const centerEffect =
       initialSetup?.centerEffect === "random" ? pickRandomCenterEffect(playerCount) : (initialSetup?.centerEffect ?? "none");
-    return newGameState(playerCount, centerEffect);
+    return newGameState(playerCount, centerEffect, initialSetup?.aiDifficulty ?? DEFAULT_AI_DIFFICULTY);
   });
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
@@ -258,7 +262,9 @@ function Game() {
   // fallback (a direct, param-less visit to /play) -- arriving from the home screen's
   // own setup popup already carries a real choice via the query params above, so there's
   // nothing left to prompt for.
-  const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(initialSetup ? null : { playerCount: 4, centerEffect: "random" });
+  const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(
+    initialSetup ? null : { playerCount: 4, centerEffect: "random", aiDifficulty: DEFAULT_AI_DIFFICULTY }
+  );
   // Whether the most recent setup that actually started a game picked "random" rather
   // than a fixed location -- state.config.centerEffect only ever holds the resolved
   // concrete id (random gets rolled into a real CenterEffectId before newGameState is
@@ -310,7 +316,7 @@ function Game() {
   useEffect(() => {
     if (!isAiTurn) return;
     const timer = setTimeout(() => {
-      const action = chooseGreedyAiAction(state, currentPlayerId(state));
+      const action = chooseAiActionForDifficulty(state, currentPlayerId(state), state.config.aiDifficulty);
       dispatch(action);
     }, 550);
     return () => clearTimeout(timer);
@@ -406,7 +412,7 @@ function Game() {
   }
 
   function openNewGameSetup() {
-    setNewGameSetup({ playerCount, centerEffect: "random" });
+    setNewGameSetup({ playerCount, centerEffect: "random", aiDifficulty: state.config.aiDifficulty });
   }
 
   function confirmNewGame() {
@@ -414,7 +420,7 @@ function Game() {
     const centerEffect: CenterEffectId =
       newGameSetup.centerEffect === "random" ? pickRandomCenterEffect(newGameSetup.playerCount) : newGameSetup.centerEffect;
     setPlayerCount(newGameSetup.playerCount);
-    setState(newGameState(newGameSetup.playerCount, centerEffect));
+    setState(newGameState(newGameSetup.playerCount, centerEffect, newGameSetup.aiDifficulty));
     setSelectedInstanceId(null);
     setPendingFlip(null);
     setNewGameSetup(null);
@@ -422,10 +428,10 @@ function Game() {
     talliedRef.current = false;
   }
 
-  /** One-click rematch, same player count as the game that just ended -- no setup modal. Rerolls a fresh random location if that's how the last one was picked, otherwise reuses the same fixed one. */
+  /** One-click rematch, same player count and difficulty as the game that just ended -- no setup modal. Rerolls a fresh random location if that's how the last one was picked, otherwise reuses the same fixed one. */
   function playAgain() {
     const centerEffect = lastCenterEffectWasRandom ? pickRandomCenterEffect(playerCount) : state.config.centerEffect;
-    setState(newGameState(playerCount, centerEffect));
+    setState(newGameState(playerCount, centerEffect, state.config.aiDifficulty));
     setSelectedInstanceId(null);
     setPendingFlip(null);
     talliedRef.current = false;
