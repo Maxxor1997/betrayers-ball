@@ -84,13 +84,13 @@ describe("resolveBoard — Footman row/column bonus", () => {
 });
 
 describe("resolveBoard — Warlord", () => {
-  it("penalizes -3 per unique enemy player with a Warlord on the board", () => {
+  it("penalizes -2 per unique enemy player with a Warlord on the board", () => {
     const board: Board = new Map();
     const w1 = place(board, 0, 0, "Warlord", "p1");
     place(board, 1, 0, "Warlord", "p2");
     place(board, 2, 0, "Warlord", "p3");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 3 * 2);
+    expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 2 * 2);
   });
 
   it("is unaffected with no other Warlords", () => {
@@ -116,7 +116,7 @@ describe("resolveBoard — Warlord", () => {
     place(board, 2, 0, "Warlord", "p2");
     place(board, 3, 0, "Warlord", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 3 * 1);
+    expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 2 * 1);
   });
 
   it("floors at 0 once enough unique enemy owners are in play", () => {
@@ -125,8 +125,10 @@ describe("resolveBoard — Warlord", () => {
     place(board, 1, 0, "Warlord", "p2");
     place(board, 2, 0, "Warlord", "p3");
     place(board, 3, 0, "Warlord", "p4");
+    place(board, 4, 0, "Warlord", "p5");
+    place(board, 5, 0, "Warlord", "p6");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    // 3 unique enemy owners -> base - 9, which floors to 0
+    // 5 unique enemy owners -> base - 10, which floors to 0
     expect(find(cards, w1.instanceId).finalValue).toBe(0);
   });
 });
@@ -150,6 +152,8 @@ describe("resolveBoard — scoring breakdown", () => {
     place(board, 1, 0, "Warlord", "p2");
     place(board, 2, 0, "Warlord", "p3");
     place(board, 3, 0, "Warlord", "p4");
+    place(board, 4, 0, "Warlord", "p5");
+    place(board, 5, 0, "Warlord", "p6");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolved = find(cards, w1.instanceId);
     expect(resolved.finalValue).toBe(0);
@@ -347,11 +351,11 @@ describe("resolveBoard — Beacon", () => {
 });
 
 describe("resolveBoard — Gloryseeker", () => {
-  it("gains +4 if face-up", () => {
+  it("gains +3 if face-up", () => {
     const board: Board = new Map();
     const c = place(board, 0, 0, "Gloryseeker", "p1", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, c.instanceId).finalValue).toBe(CARD_DEFS.Gloryseeker.base + 4);
+    expect(find(cards, c.instanceId).finalValue).toBe(CARD_DEFS.Gloryseeker.base + 3);
   });
 
   it("no bonus if face-down", () => {
@@ -742,7 +746,7 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
   it("attributes a negated card's own denied bonus back to the negator, without changing the negated card's real value", () => {
     const board: Board = new Map();
     const suppressor = place(board, 2, 2, "Suppressor", "p1");
-    const glory = place(board, 3, 2, "Gloryseeker", "p2", true); // face-up -- would normally score +4
+    const glory = place(board, 3, 2, "Gloryseeker", "p2", true); // face-up -- would normally score +3
     place(board, 1, 2, "Giant", "p1");
     place(board, 2, 1, "Giant", "p1");
     place(board, 2, 3, "Giant", "p1");
@@ -754,7 +758,7 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
 
     const negationLine = gloryResolved.breakdown.find((d) => d.sourceInstanceId === suppressor.instanceId);
     expect(negationLine).toBeDefined();
-    expect(negationLine!.amount).toBe(-4); // the +4 it would have scored, denied
+    expect(negationLine!.amount).toBe(-3); // the +3 it would have scored, denied
     expect(negationLine!.informational).toBe(true); // explains the denial, doesn't double-count into finalValue
   });
 
@@ -796,8 +800,8 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     expect(gloryResolved.finalValue).toBe(CARD_DEFS.Gloryseeker.base);
     const fromS1 = gloryResolved.breakdown.find((d) => d.sourceInstanceId === s1.instanceId);
     const fromS2 = gloryResolved.breakdown.find((d) => d.sourceInstanceId === s2.instanceId);
-    expect(fromS1!.amount).toBe(-2); // -4 total, split evenly across both negators
-    expect(fromS2!.amount).toBe(-2);
+    expect(fromS1!.amount).toBe(-1.5); // -3 total, split evenly across both negators
+    expect(fromS2!.amount).toBe(-1.5);
   });
 });
 

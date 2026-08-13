@@ -177,13 +177,13 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     base: 8,
     bucket: "Slam",
     get text() {
-      return `−3 per unique enemy ${CARD_DEFS.Warlord.name} owner`;
+      return `−2 per unique enemy ${CARD_DEFS.Warlord.name} owner`;
     },
     get fullText() {
       const name = CARD_DEFS.Warlord.name;
-      return `−3 for each distinct opposing player with a ${name} anywhere on the board -- multiple ${name}s from the same rival only count once.`;
+      return `−2 for each distinct opposing player with a ${name} anywhere on the board -- multiple ${name}s from the same rival only count once.`;
     },
-    count: [5, 5, 5, 6, 6, 6, 6],
+    count: [6, 6, 6, 6, 8, 8, 8],
     valueModifier: ({ board, self, addDelta }) => {
       const uniqueEnemyWarlordOwners = new Set(
         [...board.values()].filter((c) => c.cardId === "Warlord" && c.ownerId !== self.ownerId).map((c) => c.ownerId)
@@ -191,7 +191,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       if (uniqueEnemyWarlordOwners > 0) {
         addDelta(
           self.instanceId,
-          -3 * uniqueEnemyWarlordOwners,
+          -2 * uniqueEnemyWarlordOwners,
           `${CARD_DEFS.Warlord.name} (${uniqueEnemyWarlordOwners} unique enemy ${CARD_DEFS.Warlord.name} owner${uniqueEnemyWarlordOwners > 1 ? "s" : ""})`
         );
       }
@@ -222,7 +222,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     get fullText() {
       return `+2 for each distinct opposing player with a ${CARD_DEFS.Berserker.name} anywhere on the board -- multiple ${CARD_DEFS.Berserker.name}s from the same rival only count once (same shape as Warlord).`;
     },
-    count: [0, 0, 0, 7, 7, 7, 7],
+    count: [0, 0, 0, 7, 7, 7, 8],
     valueModifier: ({ board, self, addDelta }) => {
       const uniqueEnemyOwners = new Set([...board.values()].filter((c) => c.cardId === "Berserker" && c.ownerId !== self.ownerId).map((c) => c.ownerId)).size;
       if (uniqueEnemyOwners > 0) {
@@ -255,14 +255,14 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Gloryseeker: {
     id: "Gloryseeker",
     name: "Pyre-Bird",
-    base: 3,
+    base: 4,
     bucket: "Engine",
-    text: "+4 if face-up, can't be self flipped",
-    fullText: "+4 if this card is face-up at scoring. Its own owner can't flip it -- only an opponent can.",
+    text: "+3 if face-up, can't be self flipped",
+    fullText: "+3 if this card is face-up at scoring. Its own owner can't flip it -- only an opponent can.",
     count: [4, 4, 4, 4, 5, 6, 8],
     opponentOnlyFlip: true,
     valueModifier: ({ self, addDelta }) => {
-      if (self.faceUp) addDelta(self.instanceId, 4, `${CARD_DEFS.Gloryseeker.name} (face-up)`);
+      if (self.faceUp) addDelta(self.instanceId, 3, `${CARD_DEFS.Gloryseeker.name} (face-up)`);
     },
   },
   Chronicler: {
@@ -385,7 +385,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Suppressor: {
     id: "Suppressor",
     name: "Lictor",
-    base: 3,
+    base: 2,
     bucket: "Control",
     text: "if 3+ adj.: negates adj. cards",
     get fullText() {
