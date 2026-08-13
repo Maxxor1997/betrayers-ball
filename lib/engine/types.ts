@@ -87,9 +87,11 @@ export type CenterEffectId =
  * lib/ai/difficulty.ts's chooseAiActionForDifficulty, the single dispatcher every
  * AI-turn call site should go through instead of importing a specific strategy module
  * directly. "easy" is uniform-random, "medium" is a 1-ply greedy evaluator with
- * per-card heuristic patches (see lib/ai/greedyAi.ts), "hard" is a determinized,
- * depth-capped Monte Carlo tree search (see lib/ai/mcts.ts) that simulates ahead
- * using cheap random rollouts rather than "medium"'s own (more expensive) evaluation.
+ * per-card heuristic patches (see lib/ai/greedyAi.ts), "hard" (see lib/ai/twoPly.ts)
+ * extends "medium"'s placement decision one real ply further -- for each of a pruned
+ * set of candidate placements, it simulates a full round of every opponent's actual
+ * response (via "medium"'s own decision function) against a determinized guess at
+ * hidden cards, and picks whichever candidate's simulated outcome averages best.
  */
 export type AiDifficulty = "easy" | "medium" | "hard";
 

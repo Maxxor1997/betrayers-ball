@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS } from "@/lib/ai/difficulty";
-import { DEFAULT_MCTS_OPTIONS } from "@/lib/ai/mcts";
+import { DEFAULT_TWO_PLY_OPTIONS } from "@/lib/ai/twoPly";
 import { CENTER_EFFECTS, randomCenterEffectPool, selectableCenterEffects } from "@/lib/content/centerEffects";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { AiDifficulty, CenterEffectId } from "@/lib/engine/types";
@@ -28,7 +28,7 @@ const ALL_PLAYER_COUNTS = Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, 
 const YIELD_INTERVAL_MS = 50;
 
 /**
- * Deliberately well above DEFAULT_MCTS_OPTIONS.timeBudgetMs (the real-game default) --
+ * Deliberately well above DEFAULT_TWO_PLY_OPTIONS.timeBudgetMs (the real-game default) --
  * unlike the lower bound (which only exists to run big batches faster), the upper
  * bound isn't capped at what a real game uses, since testing whether extra search
  * budget beyond that actually buys a bigger edge over Medium is exactly the kind of
@@ -85,7 +85,7 @@ export default function ArenaPage() {
   const [centerEffect, setCenterEffect] = useState<CenterEffectId | "random">("random");
   const [selectedDifficulties, setSelectedDifficulties] = useState<AiDifficulty[]>(["easy", "medium"]);
   const [gameCount, setGameCount] = useState(500);
-  // Hard's real per-decision budget (DEFAULT_MCTS_OPTIONS.timeBudgetMs, 250ms) is
+  // Hard's real per-decision budget (DEFAULT_TWO_PLY_OPTIONS.timeBudgetMs, 250ms) is
   // calibrated for a single real game's pacing, not for running hundreds of games back
   // to back in a batch -- this lets a batch trade search strength for throughput while
   // testing, independent of the real default every actual game entrypoint still uses.
@@ -133,13 +133,13 @@ export default function ArenaPage() {
     // once per game, so a large run doesn't trigger thousands of re-renders.
     const working = stats;
     const randomPool = centerEffect === "random" ? randomCenterEffectPool(playerCount) : null;
-    const hardMctsOptions = { ...DEFAULT_MCTS_OPTIONS, timeBudgetMs: clampedHardBudgetMs };
+    const hardOptions = { ...DEFAULT_TWO_PLY_OPTIONS, timeBudgetMs: clampedHardBudgetMs };
     let completed = 0;
     let lastYieldAt = performance.now();
 
     for (let i = 0; i < clampedGameCount; i++) {
       const effect = centerEffect === "random" ? randomPool![Math.floor(Math.random() * randomPool!.length)] : centerEffect;
-      simulateArenaGame(playerCount, effect, selectedDifficulties, working, Math.random, hardMctsOptions);
+      simulateArenaGame(playerCount, effect, selectedDifficulties, working, Math.random, hardOptions);
       completed++;
 
       if (completed === gameCount || performance.now() - lastYieldAt >= YIELD_INTERVAL_MS) {
@@ -240,7 +240,7 @@ export default function ArenaPage() {
           <div className="mt-2 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
             <label
               htmlFor="arena-hard-budget"
-              title={`Real games use ${DEFAULT_MCTS_OPTIONS.timeBudgetMs}ms. Lower this for faster/bigger batches while testing (strength drops with it); raise it above ${DEFAULT_MCTS_OPTIONS.timeBudgetMs}ms to see whether more search budget than a real game gets actually buys a bigger edge over Medium.`}
+              title={`Real games use ${DEFAULT_TWO_PLY_OPTIONS.timeBudgetMs}ms. Lower this for faster/bigger batches while testing (strength drops with it); raise it above ${DEFAULT_TWO_PLY_OPTIONS.timeBudgetMs}ms to see whether more search budget than a real game gets actually buys a bigger edge over Medium.`}
             >
               Hard search budget (ms)
             </label>
@@ -256,7 +256,7 @@ export default function ArenaPage() {
               onBlur={() => setHardBudgetMs((v) => Math.max(5, Math.min(ARENA_HARD_BUDGET_MAX_MS, v || 5)))}
               className="w-20 min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
             />
-            <span className="text-xs">(real games use {DEFAULT_MCTS_OPTIONS.timeBudgetMs}ms)</span>
+            <span className="text-xs">(real games use {DEFAULT_TWO_PLY_OPTIONS.timeBudgetMs}ms)</span>
           </div>
         )}
 

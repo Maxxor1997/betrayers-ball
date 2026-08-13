@@ -1,5 +1,5 @@
 import { chooseAiActionForDifficulty } from "@/lib/ai/difficulty";
-import { MctsOptions } from "@/lib/ai/mcts";
+import { TwoPlyOptions } from "@/lib/ai/twoPly";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { currentPlayerId } from "@/lib/engine/turns";
 import { AiDifficulty, CenterEffectId } from "@/lib/engine/types";
@@ -107,8 +107,8 @@ export function assignSeatDifficulties(playerCount: number, difficulties: AiDiff
  * "working copy accumulated across a whole run" pattern cardStats.ts's tallyGame uses.
  * `config.aiDifficulty` from configForPlayerCount is left at its default and never
  * read for turn decisions here; each seat's real difficulty comes from the per-player
- * map built below instead. `hardMctsOptions` overrides "hard" seats' search budget
- * for this game only (defaults to the real DEFAULT_MCTS_OPTIONS) -- see the Arena
+ * map built below instead. `hardOptions` overrides "hard" seats' search budget for
+ * this game only (defaults to the real DEFAULT_TWO_PLY_OPTIONS) -- see the Arena
  * page's own "Hard search budget" control for why a batch might want a smaller one:
  * hard's default 250ms/decision is calibrated for a real single game's pacing, not
  * for running hundreds of games back to back.
@@ -119,7 +119,7 @@ export function simulateArenaGame(
   difficulties: AiDifficulty[],
   stats: ArenaStats,
   rng: () => number,
-  hardMctsOptions?: MctsOptions
+  hardOptions?: TwoPlyOptions
 ): void {
   const playerIds = Array.from({ length: playerCount }, (_, i) => `arena${i}`);
   const seatDifficulties = assignSeatDifficulties(playerCount, difficulties, rng);
@@ -130,8 +130,8 @@ export function simulateArenaGame(
 
   while (state.phase === "playing") {
     const activeId = currentPlayerId(state);
-    const action = hardMctsOptions
-      ? chooseAiActionForDifficulty(state, activeId, difficultyByPlayerId.get(activeId)!, rng, hardMctsOptions)
+    const action = hardOptions
+      ? chooseAiActionForDifficulty(state, activeId, difficultyByPlayerId.get(activeId)!, rng, hardOptions)
       : chooseAiActionForDifficulty(state, activeId, difficultyByPlayerId.get(activeId)!, rng);
     state = applyAction(state, action, rng);
   }

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { assignSeatDifficulties, createEmptyArenaStats, simulateArenaGame, summarizeArenaStats } from "../aiArena";
-import { MctsOptions } from "@/lib/ai/mcts";
+import { TwoPlyOptions } from "@/lib/ai/twoPly";
 import { AiDifficulty } from "@/lib/engine/types";
 
-/** A tiny time/iteration budget so tests exercising "hard" seats stay fast -- play strength isn't under test here. */
-const FAST_HARD_OPTIONS: MctsOptions = { timeBudgetMs: 15, maxSimulationDepth: 6, explorationConstant: 1.4, maxIterations: 20 };
+/** A tiny time/round budget so tests exercising "hard" seats stay fast -- play strength isn't under test here. */
+const FAST_HARD_OPTIONS: TwoPlyOptions = { timeBudgetMs: 15, maxCandidates: 6, roundsAhead: 1, maxPasses: 1 };
 
 function deterministicRng(seed: number) {
   let s = seed;
@@ -101,7 +101,7 @@ describe("simulateArenaGame", () => {
     const elapsed = performance.now() - start;
 
     expect(stats.byDifficulty.hard.gamesPlayed).toBe(2);
-    // A full game is several decisions; at DEFAULT_MCTS_OPTIONS' real 250ms/decision
+    // A full game is several decisions; at DEFAULT_TWO_PLY_OPTIONS' real 250ms/decision
     // this would take seconds. Under the fast override it should be near-instant --
     // generous upper bound so this stays robust on a slow CI runner.
     expect(elapsed).toBeLessThan(2000);

@@ -1,20 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS, chooseAiActionForDifficulty, DEFAULT_AI_DIFFICULTY } from "../difficulty";
 import { chooseGreedyAiAction } from "../greedyAi";
-import { chooseMctsAction, MctsOptions } from "../mcts";
 import { chooseRandomAiAction } from "../randomAi";
+import { chooseTwoPlyAction, TwoPlyOptions } from "../twoPly";
 import { applyAction, createGame, DEFAULT_2P_CONFIG } from "../../engine/game";
 import { currentPlayerId } from "../../engine/turns";
 import { GameState } from "../../engine/types";
 
 /**
  * A tiny, deterministic budget so difficulty-dispatch tests stay fast -- play strength
- * isn't under test here. maxIterations (not just timeBudgetMs) matters for the
- * "identical output with the same seed" test below: iteration count under a
+ * isn't under test here. maxRounds (not just timeBudgetMs) matters for the "identical
+ * output with the same seed" test below: how many samples get evaluated under a
  * wall-clock-only budget varies run to run with real timing, which would make two
  * "same seed" calls consume `rng` a different number of times and diverge.
  */
-const FAST_MCTS_OPTIONS: MctsOptions = { timeBudgetMs: 50, maxSimulationDepth: 6, explorationConstant: 1.4, maxIterations: 20 };
+const FAST_TWO_PLY_OPTIONS: TwoPlyOptions = { timeBudgetMs: 50, maxCandidates: 6, roundsAhead: 1, maxPasses: 2 };
 
 function deterministicRng(seed: number) {
   let s = seed;
@@ -49,10 +49,10 @@ describe("chooseAiActionForDifficulty", () => {
     expect(viaDispatcher).toEqual(viaDirect);
   });
 
-  it("routes 'hard' to the MCTS strategy -- identical output to calling chooseMctsAction directly with the same seed and options", () => {
+  it("routes 'hard' to the two-ply strategy -- identical output to calling chooseTwoPlyAction directly with the same seed and options", () => {
     const state = createGame(["p1", "p2"], DEFAULT_2P_CONFIG, deterministicRng(1));
-    const viaDispatcher = chooseAiActionForDifficulty(state, "p1", "hard", deterministicRng(5), FAST_MCTS_OPTIONS);
-    const viaDirect = chooseMctsAction(state, "p1", FAST_MCTS_OPTIONS, deterministicRng(5));
+    const viaDispatcher = chooseAiActionForDifficulty(state, "p1", "hard", deterministicRng(5), FAST_TWO_PLY_OPTIONS);
+    const viaDirect = chooseTwoPlyAction(state, "p1", FAST_TWO_PLY_OPTIONS, deterministicRng(5));
     expect(viaDispatcher).toEqual(viaDirect);
   });
 
@@ -77,7 +77,7 @@ describe("chooseAiActionForDifficulty", () => {
       let iterations = 0;
       while (state.phase !== "ended" && iterations < 500) {
         const playerId = activePlayerId(state);
-        const action = chooseAiActionForDifficulty(state, playerId, difficulty, rng, FAST_MCTS_OPTIONS);
+        const action = chooseAiActionForDifficulty(state, playerId, difficulty, rng, FAST_TWO_PLY_OPTIONS);
         state = applyAction(state, action, rng);
         iterations++;
       }
