@@ -4,7 +4,7 @@ import { computeAiVote, estimateMargin } from "../engine/endgame";
 import { redactedBoardFor } from "../engine/playerView";
 import { resolveBoard } from "../engine/resolution";
 import { applyPlace, currentPlayerId, getLegalFlipTargets, getLegalPlacementCells } from "../engine/turns";
-import { Board, BoardBounds, CardInstance, GameAction, GameConfig, GameState, Position } from "../engine/types";
+import { Board, BoardBounds, CardId, CardInstance, GameAction, GameConfig, GameState, Position } from "../engine/types";
 
 export type Rng = () => number;
 
@@ -189,21 +189,145 @@ const INFILTRATOR_EXPLORATION_DISCOUNT = 0.15;
 const DOOMHERALD_DECK_PRESENCE_EXPLORATION_DISCOUNT = 0.1;
 
 /**
- * Cards whose own printed effect doesn't care about their own face state at all --
- * Berserker's and Warlord's `valueModifier`s count matching cardIds straight off
- * `board.values()` with no `faceUp` check, so flipping either face-up changes nothing
- * about the owner's own margin (hypotheticalFlipMargin always comes back equal to
- * baseline for these, so the margin-ranked branch above never picks them). The only
- * reason a human flips one is the social move this models: showing it off to bait
- * opponents into playing/revealing a matching card of their own, which *does* help --
- * once it's visible, Berserker/Warlord's real bonus/penalty starts applying. Pure
- * bluffing, so it isn't margin-driven; it's a flat chance instead, same shape as
- * SPECULATIVE_CARD_IDS below.
+ * Rough expected round the game actually ends on. game.ts's config keeps roundCap and
+ * minRoundFloor flat regardless of player count (6 and 2 respectively, see
+ * configForPlayerCount), so the midpoint doesn't need to vary by player count either
+ * -- it's not meant to be precise, just a stand-in "how much game is probably left"
+ * for heuristics below that need to reason about rounds that haven't happened yet.
  */
-const BLUFF_FLIP_CARD_IDS = new Set(["Berserker", "Warlord"]);
+function expectedFinalRound(config: GameConfig): number {
+  return (config.minRoundFloor + config.roundCap) / 2;
+}
 
-/** Chance, each time the AI has an eligible face-down bluff card of its own, that it reveals one instead of doing the usual margin/exploration flip. */
-const BLUFF_FLIP_PROBABILITY = 0.25;
+/**
+ * Expected number of *additional distinct rival players* who will have played
+ * `cardId` by game's end, given only what's actually knowable. Shared by both
+ * Berserker ("Hydra", +2 per unique enemy owner) and Warlord (−3 per unique enemy
+ * owner) -- both count matching cardIds straight off `board.values()` with no
+ * `faceUp` check (see cards.ts), so flipping either changes nothing about the owner's
+ * own margin (hypotheticalFlipMargin always comes back equal to baseline for them).
+ * The two cards' *use* of this estimate is opposite (see berserkerFlipBaitBonus /
+ * warlordFlipDeterrenceBonus and their placementHeuristicAdjustment cases): Berserker
+ * starts weak and wants rivals to match it (a reason to bait), Warlord starts strong
+ * and wants rivals *not* to match it (a reason to deter, and a reason to discount its
+ * own placement value for the risk that they will anyway) -- but "how many new unique
+ * rival owners should I expect" is the identical question underneath either way.
+ *
+ * "Additional" and "distinct" both matter here, matching the unique-owner rule:
+ * - Opponents who already have a *known* (face-up) copy of `cardId` on the board are
+ *   excluded from this estimate entirely -- they're already correctly counted by the
+ *   real valueModifier/estimateMargin, so adding speculative credit for them again
+ *   would double-count. (A rival's still-face-down copy already secretly placed is
+ *   invisible to this honest-info estimate either way, same general limitation
+ *   estimateMargin's redaction already has everywhere else -- not specific to this.)
+ * - Multiple copies from the *same* remaining opponent shouldn't each add credit,
+ *   since only the first one from any given player matters under the unique-owner
+ *   rule -- see the per-opponent "at least one" probability below, not a raw count.
+ *
+ * The model, assuming opponents place cards from their hand in a uniformly random
+ * order (deliberately not assuming they're especially likely or unlikely to
+ * prioritize this particular card -- that's a separate, unmodeled skill signal):
+ * - `hidden` = copies of `cardId` not yet visible anywhere (deck composition is public
+ *   via copiesForPlayerCount, so this is exact: total copies minus every copy already
+ *   on the board, any owner, minus any still in `playerId`'s own hand).
+ * - `perDrawRate` = hidden / (combined hand size of opponents who don't already have a
+ *   known copy) -- the chance any single random card drawn from that pool is a hidden
+ *   copy of `cardId`. Distributing `hidden` proportionally to hand size and dividing
+ *   back out by that same hand size cancels neatly, so every such opponent shares this
+ *   one rate regardless of their individual hand size -- only how many of their own
+ *   remaining turns (`k`, capped by both roundsRemaining and their own hand size)
+ *   changes per opponent.
+ * - For each such opponent, `1 - (1 - perDrawRate)^k` is the chance at least one of
+ *   their own random plays turns out to be `cardId` (same saturating "at least one of
+ *   k independent attempts" shape as saturatingFlipChance below, applied per opponent
+ *   here instead of pooled, since only the *first* one from each matters). Summing
+ *   across opponents gives the expected number of *newly matching* players by game's
+ *   end (linearity of expectation holds regardless of the events' independence).
+ * - `rateMultiplier` scales `perDrawRate` -- see berserkerFlipBaitBonus (>1, a boost)
+ *   and warlordFlipDeterrenceBonus (<1, a suppression), the two places this isn't left
+ *   at 1: flipping your own copy face-up is modeled as moving how eagerly opponents
+ *   match it going forward, in whichever direction that card actually wants.
+ */
+function expectedNewRivalOwners(state: GameState, playerId: string, cardId: CardId, rateMultiplier = 1): number {
+  const alreadyKnownOwnerIds = new Set(
+    [...state.board.values()].filter((c) => c.cardId === cardId && c.faceUp && c.ownerId !== playerId).map((c) => c.ownerId)
+  );
+  const opponents = state.players.filter((p) => p.id !== playerId && !alreadyKnownOwnerIds.has(p.id));
+  const opponentHandSize = opponents.reduce((sum, p) => sum + p.hand.length, 0);
+  if (opponentHandSize === 0) return 0;
+
+  const totalCopies = copiesForPlayerCount(CARD_DEFS[cardId], state.config.playerCount);
+  const visibleOnBoard = [...state.board.values()].filter((c) => c.cardId === cardId).length;
+  const ownHandCopies = state.players.find((p) => p.id === playerId)!.hand.filter((c) => c.cardId === cardId).length;
+  const hidden = Math.max(0, totalCopies - visibleOnBoard - ownHandCopies);
+  if (hidden === 0) return 0;
+
+  const perDrawRate = Math.min(1, (hidden / opponentHandSize) * rateMultiplier);
+  const roundsRemaining = Math.max(0, expectedFinalRound(state.config) - state.round);
+
+  let expectedNewOwners = 0;
+  for (const opponent of opponents) {
+    const k = Math.min(roundsRemaining, opponent.hand.length);
+    if (k <= 0) continue;
+    expectedNewOwners += 1 - (1 - perDrawRate) ** k;
+  }
+  return expectedNewOwners;
+}
+
+/**
+ * Modeled bump to how eagerly opponents match a Berserker once it's visible -- not a
+ * proven/calibrated number (no real playtest signal on this specific number yet, same
+ * caveat as several other fresh constants in this file), just a reasonable prior that
+ * seeing a live rival Berserker meaningfully raises the odds someone matches it,
+ * versus it staying a private, unconfirmed rumor while face-down.
+ */
+const BERSERKER_FACEUP_BAIT_MULTIPLIER = 1.5;
+
+/**
+ * The real reason to flip your own Berserker: not its own margin (flipping doesn't
+ * change its value at all -- see expectedNewRivalOwners' doc comment), but the future
+ * value of baiting opponents into matching it sooner. Computed as the *incremental*
+ * expected-new-rival-owners from assuming a boosted opponent-match rate once visible
+ * versus the baseline (still-hidden) rate, each worth +2 once realized. Folded
+ * directly into chooseFlip's own-target margin-ranked loop (not a flat-chance
+ * fallback), so it can win the flip decision on its own principled merit -- competing
+ * fairly against, say, a Gloryseeker that's a clearly better flip this particular
+ * turn -- rather than only ever firing via an unconditional dice roll.
+ */
+function berserkerFlipBaitBonus(state: GameState, playerId: string, target: { cardId: CardId }): number {
+  if (target.cardId !== "Berserker") return 0;
+  const baseline = expectedNewRivalOwners(state, playerId, "Berserker", 1);
+  const boosted = expectedNewRivalOwners(state, playerId, "Berserker", BERSERKER_FACEUP_BAIT_MULTIPLIER);
+  return 2 * (boosted - baseline);
+}
+
+/**
+ * Modeled dip in how eagerly opponents match a Warlord once yours is visible -- the
+ * mirror image of BERSERKER_FACEUP_BAIT_MULTIPLIER, and just as unproven/uncalibrated.
+ * Unlike Berserker, an opponent placing a matching Warlord always costs *them* too
+ * (symmetric −3 penalty, same real rule applying to their own valueModifier once
+ * yours is visible) -- so revealing yours isn't bait, it's closer to a public
+ * "there's no upside for you either" signal. Kept below 1 (a suppression), not above.
+ */
+const WARLORD_FACEUP_DETERRENCE_MULTIPLIER = 0.5;
+
+/**
+ * The real reason to flip your own Warlord: not its own margin (flipping doesn't
+ * change it -- same no-faceUp-check shape as Berserker), but the future value of
+ * *deterring* opponents from matching it, since every unique rival owner costs you −3.
+ * Computed as the incremental expected-new-rival-owners from assuming a suppressed
+ * opponent-match rate once visible versus the baseline (still-hidden) rate -- each
+ * *avoided* owner is worth +3 (the penalty you don't take), so this is positive
+ * exactly when revealing plausibly reduces how many rivals end up matching it. Same
+ * "fold into the real margin-ranked loop, not a flat-chance fallback" treatment as
+ * Berserker's bait bonus.
+ */
+function warlordFlipDeterrenceBonus(state: GameState, playerId: string, target: { cardId: CardId }): number {
+  if (target.cardId !== "Warlord") return 0;
+  const baseline = expectedNewRivalOwners(state, playerId, "Warlord", 1);
+  const deterred = expectedNewRivalOwners(state, playerId, "Warlord", WARLORD_FACEUP_DETERRENCE_MULTIPLIER);
+  return 3 * (baseline - deterred);
+}
 
 /**
  * Flips the target that improves the (fair) margin the most -- but only among the
@@ -232,7 +356,8 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
   let bestOwnScore = baseline;
 
   for (const target of ownTargets) {
-    const score = hypotheticalFlipMargin(state, playerId, target);
+    const score =
+      hypotheticalFlipMargin(state, playerId, target) + berserkerFlipBaitBonus(state, playerId, target) + warlordFlipDeterrenceBonus(state, playerId, target);
     if (score > bestOwnScore) {
       bestOwnScore = score;
       bestOwnTargets = [target.instanceId];
@@ -243,11 +368,6 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
 
   if (bestOwnTargets.length > 0) {
     return bestOwnTargets[Math.floor(rng() * bestOwnTargets.length)];
-  }
-
-  const bluffTargets = ownTargets.filter((t) => BLUFF_FLIP_CARD_IDS.has(t.cardId));
-  if (bluffTargets.length > 0 && rng() < BLUFF_FLIP_PROBABILITY) {
-    return bluffTargets[Math.floor(rng() * bluffTargets.length)].instanceId;
   }
 
   if (opponentTargets.length > 0) {
@@ -279,30 +399,6 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
   }
 
   return null;
-}
-
-/**
- * Cards worth playing speculatively, ahead of what pure margin math justifies --
- * effects whose payoff depends on other players following suit, so nobody's ever the
- * first to play one on merit alone (a real human will gamble on it anyway, hoping to
- * bait others; the 1-ply greedy AI can't see that far ahead, so it needs a nudge).
- * Currently just Berserker (+2 per opposing Berserker) -- extend this set if other
- * cards get the same "worthless until someone else follows" shape.
- */
-const SPECULATIVE_CARD_IDS = new Set(["Berserker"]);
-
-/** Chance, each time the AI has a speculative card in hand, that it plays that card instead of the margin-best one. */
-const SPECULATIVE_PLAY_PROBABILITY = 0.15;
-
-/**
- * Rough expected round the game actually ends on. game.ts's config keeps roundCap and
- * minRoundFloor flat regardless of player count (6 and 2 respectively, see
- * configForPlayerCount), so the midpoint doesn't need to vary by player count either
- * -- it's not meant to be precise, just a stand-in "how much game is probably left"
- * for heuristics below that need to reason about rounds that haven't happened yet.
- */
-function expectedFinalRound(config: GameConfig): number {
-  return (config.minRoundFloor + config.roundCap) / 2;
 }
 
 /** Empty (unoccupied, non-ownerless) cells orthogonally adjacent to `pos` -- candidate spots a future placement could still fill in before scoring. */
@@ -429,7 +525,7 @@ function nonLeaderDisruptionBonus(preState: GameState, playerId: string, postSta
  * see at all. Each branch targets one specific card identified from playtesting data;
  * see each one's own comment for the reasoning. This never touches the engine's real
  * (fair) scoring -- it's purely a decision-making nudge, same spirit as
- * SPECULATIVE_CARD_IDS/BLUFF_FLIP_CARD_IDS above. Exported so twoPly.ts can reuse the
+ * berserkerFlipBaitBonus/warlordFlipDeterrenceBonus above. Exported so twoPly.ts can reuse the
  * same calibrated corrections when ranking/pruning its own search candidates, instead
  * of re-deriving a weaker approximation from scratch.
  */
@@ -508,6 +604,24 @@ export function placementHeuristicAdjustment(
         return netNeighborDamage * flipChance;
       }
 
+      case "Berserker": {
+        // +2 per unique enemy owner -- worthless by the fair margin until an
+        // opponent actually plays a matching one, so on pure margin math this
+        // always ranks near the bottom. See expectedNewRivalOwners for the
+        // derivation (already correctly returns 0 once every opponent already
+        // has a known Berserker -- nothing left to speculate about).
+        return 2 * expectedNewRivalOwners(postState, playerId, "Berserker");
+      }
+
+      case "Warlord": {
+        // -3 per unique enemy owner -- the opposite problem from Berserker: base 8
+        // means the fair margin already looks great the instant it's placed (nobody's
+        // matched it yet), but that snapshot doesn't discount for the real risk that a
+        // rival plays their own later. Docks the same expected-new-rival-owners
+        // estimate as a risk discount instead of a credit.
+        return -3 * expectedNewRivalOwners(postState, playerId, "Warlord");
+      }
+
       case "DyingGod": {
         // -1 per round elapsed *when the game ends* -- the fair margin's
         // postState.round snapshot is systematically *overvalued* the earlier it's
@@ -533,14 +647,8 @@ function choosePlacement(state: GameState, playerId: string, rng: Rng): GameActi
     return { type: "pass", playerId };
   }
 
-  let handForCandidates = player.hand;
-  const speculativeCards = player.hand.filter((c) => SPECULATIVE_CARD_IDS.has(c.cardId));
-  if (speculativeCards.length > 0 && rng() < SPECULATIVE_PLAY_PROBABILITY) {
-    handForCandidates = speculativeCards;
-  }
-
   const candidates: { instanceId: string; position: Position }[] = [];
-  for (const card of handForCandidates) {
+  for (const card of player.hand) {
     for (const position of legalCells) {
       candidates.push({ instanceId: card.instanceId, position });
     }

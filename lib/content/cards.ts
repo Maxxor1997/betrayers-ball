@@ -191,22 +191,19 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     base: 2,
     bucket: "Engine",
     get text() {
-      return `+2 per opposing ${CARD_DEFS.Berserker.name}`;
+      return `+2 per unique enemy ${CARD_DEFS.Berserker.name} owner`;
     },
     get fullText() {
-      return `+2 for each ${CARD_DEFS.Berserker.name} owned by a different player, anywhere on the board.`;
+      return `+2 for each distinct opposing player with a ${CARD_DEFS.Berserker.name} anywhere on the board -- multiple ${CARD_DEFS.Berserker.name}s from the same rival only count once (same shape as Warlord).`;
     },
     count: [0, 0, 0, 7, 7, 7, 7],
     valueModifier: ({ board, self, addDelta }) => {
-      let otherOwnerBerserkers = 0;
-      for (const other of board.values()) {
-        if (other.cardId === "Berserker" && other.ownerId !== self.ownerId) otherOwnerBerserkers++;
-      }
-      if (otherOwnerBerserkers > 0) {
+      const uniqueEnemyOwners = new Set([...board.values()].filter((c) => c.cardId === "Berserker" && c.ownerId !== self.ownerId).map((c) => c.ownerId)).size;
+      if (uniqueEnemyOwners > 0) {
         addDelta(
           self.instanceId,
-          2 * otherOwnerBerserkers,
-          `${CARD_DEFS.Berserker.name} (${otherOwnerBerserkers} rival ${CARD_DEFS.Berserker.name}${otherOwnerBerserkers > 1 ? "s" : ""})`
+          2 * uniqueEnemyOwners,
+          `${CARD_DEFS.Berserker.name} (${uniqueEnemyOwners} unique enemy ${CARD_DEFS.Berserker.name} owner${uniqueEnemyOwners > 1 ? "s" : ""})`
         );
       }
     },

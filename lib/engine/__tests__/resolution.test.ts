@@ -243,13 +243,29 @@ describe("resolveBoard — Pretender", () => {
 });
 
 describe("resolveBoard — Berserker", () => {
-  it("gains +2 per opposing-owner Berserker anywhere on the board", () => {
+  it("gains +2 per unique enemy player with a Berserker anywhere on the board", () => {
+    const board: Board = new Map();
+    const mine = place(board, 0, 0, "Berserker", "p1");
+    place(board, 1, 0, "Berserker", "p2");
+    place(board, 2, 0, "Berserker", "p3");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, mine.instanceId).finalValue).toBe(CARD_DEFS.Berserker.base + 2 * 2);
+  });
+
+  it("is unaffected with no other Berserkers", () => {
+    const board: Board = new Map();
+    const mine = place(board, 0, 0, "Berserker", "p1");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, mine.instanceId).finalValue).toBe(CARD_DEFS.Berserker.base);
+  });
+
+  it("does not double-count multiple Berserkers from the same rival (same shape as Warlord)", () => {
     const board: Board = new Map();
     const mine = place(board, 0, 0, "Berserker", "p1");
     place(board, 5, 5, "Berserker", "p2");
     place(board, 6, 6, "Berserker", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, mine.instanceId).finalValue).toBe(CARD_DEFS.Berserker.base + 2 * 2);
+    expect(find(cards, mine.instanceId).finalValue).toBe(CARD_DEFS.Berserker.base + 2);
   });
 
   it("does not count same-owner copies", () => {

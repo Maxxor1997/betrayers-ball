@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CARD_DEFS, copiesForPlayerCount } from "../../content/cards";
-import { chooseGreedyAiAction } from "../greedyAi";
+import { chooseGreedyAiAction, placementHeuristicAdjustment } from "../greedyAi";
 import { applyAction, createGame, DEFAULT_2P_CONFIG } from "../../engine/game";
 import { currentPlayerId } from "../../engine/turns";
 import { Board, CardId, CardInstance, GameConfig, GameState, posKey } from "../../engine/types";
@@ -756,5 +756,109 @@ describe("chooseGreedyAiAction — placement heuristics correct for what a one-p
     // effect to lose -- a real tie on paper (all candidates score margin 9).
     const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
     expect(action).toEqual({ type: "place", playerId: "p1", instanceId: suppressor.instanceId, position: { x: 3, y: 2 } });
+  });
+});
+
+describe("placementHeuristicAdjustment — Berserker EV credit (derived from public info, not a flat guess)", () => {
+  // Berserker is worthless by pure margin math until an opponent plays a matching one
+  // -- this credit is what keeps it from being pruned out of twoPly.ts's top-K
+  // candidates almost every game (measured at ~1% Hard playrate before any credit
+  // existed here). Berserker only has copies in the deck at 5+ players (count:
+  // [0,0,0,7,7,7,7], indexed from MIN_PLAYERS=2 -- see copiesForPlayerCount), so
+  // these tests need a 5p config, not the file's shared 2p CONFIG.
+  const CONFIG_5P: GameConfig = { ...CONFIG, playerCount: 5, minRoundFloor: 2, roundCap: 6 };
+
+  it("credits 2x the expected number of NEW rival owners, derived from opponent hand sizes and rounds remaining", () => {
+    const position = { x: 3, y: 3 };
+    const berserker = card("Berserker", "p1");
+    const board: Board = new Map([[posKey(position), berserker]]); // just this placement -- no other Berserkers on the board yet
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [card("Footman", "p2")], isAI: true }, // the only opponent with any cards left at all
+      { id: "p3", hand: [], isAI: true },
+      { id: "p4", hand: [], isAI: true },
+      { id: "p5", hand: [], isAI: true },
+    ];
+    const preState = makeState({ config: CONFIG_5P, round: 1, players });
+    const postState = makeState({ config: CONFIG_5P, round: 1, players, board });
+
+    // 7 total Berserker copies at 5p (see count: [0,0,0,7,7,7,7]), 1 already placed
+    // (this one) -> 6 hidden copies, all necessarily somewhere in p2's hand-pool since
+    // p2 is the only opponent holding any cards -- so the per-draw rate saturates at 1
+    // (capped, since 6 hidden > p2's 1-card pool). expectedFinalRound = (2+6)/2 = 4,
+    // round 1 -> 3 rounds remaining, but p2 only has 1 card left, so k = min(3,1) = 1:
+    // p2 is certain to play their one remaining card, and it's certain (rate=1) to be
+    // a Berserker -- exactly 1 expected new rival owner, worth +2.
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: berserker.instanceId, position }, postState);
+    expect(adjustment).toBe(2);
+  });
+
+  it("credits nothing once the only opponent with cards left already has a known (face-up) Berserker", () => {
+    const position = { x: 3, y: 3 };
+    const berserker = card("Berserker", "p1");
+    const board: Board = new Map([
+      [posKey(position), berserker],
+      [posKey({ x: 0, y: 0 }), card("Berserker", "p2", true)], // already face-up -- a known, already-counted rival owner
+    ]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [card("Footman", "p2")], isAI: true },
+      { id: "p3", hand: [], isAI: true },
+      { id: "p4", hand: [], isAI: true },
+      { id: "p5", hand: [], isAI: true },
+    ];
+    const preState = makeState({ config: CONFIG_5P, round: 1, players });
+    const postState = makeState({ config: CONFIG_5P, round: 1, players, board });
+
+    // p2 (the only opponent with cards left) is excluded from the estimate since
+    // they're already a known owner -- p3/p4 have no cards left, so nothing remains
+    // to speculate about.
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: berserker.instanceId, position }, postState);
+    expect(adjustment).toBe(0);
+  });
+});
+
+describe("placementHeuristicAdjustment — Warlord risk discount (mirror image of Berserker's credit)", () => {
+  // Warlord (base 8, -3 per unique enemy owner) has copies even at 2p (count:
+  // [6,6,5,4,4,4,4]), unlike Berserker -- the file's shared 2p CONFIG works fine here.
+  it("docks 3x the expected number of NEW rival owners, as a risk discount rather than a credit", () => {
+    const position = { x: 3, y: 3 };
+    const warlord = card("Warlord", "p1");
+    const board: Board = new Map([[posKey(position), warlord]]); // just this placement -- no other Warlords on the board yet
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [card("Footman", "p2")], isAI: true }, // the only opponent, with 1 card left
+    ];
+    const preState = makeState({ round: 1, players });
+    const postState = makeState({ round: 1, players, board });
+
+    // 6 total Warlord copies at 2p, 1 already placed (this one) -> 5 hidden, all
+    // necessarily in p2's 1-card hand -- per-draw rate saturates at 1 (capped).
+    // expectedFinalRound = (3+6)/2 = 4.5, round 1 -> 3.5 rounds remaining, but p2 only
+    // has 1 card left, so k = min(3.5,1) = 1: p2 is certain to play their one
+    // remaining card, and it's certain to be a Warlord -- exactly 1 expected new
+    // rival owner, docked as -3 (not credited as +3, since this is a penalty card).
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: warlord.instanceId, position }, postState);
+    expect(adjustment).toBe(-3);
+  });
+
+  it("docks nothing once the only opponent already has a known (face-up) Warlord", () => {
+    const position = { x: 3, y: 3 };
+    const warlord = card("Warlord", "p1");
+    const board: Board = new Map([
+      [posKey(position), warlord],
+      [posKey({ x: 0, y: 0 }), card("Warlord", "p2", true)], // already face-up -- a known, already-counted rival owner
+    ]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [card("Footman", "p2")], isAI: true },
+    ];
+    const preState = makeState({ round: 1, players });
+    const postState = makeState({ round: 1, players, board });
+
+    // p2 is the only opponent, and they're already a known owner -- no opponents left
+    // to speculate about.
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: warlord.instanceId, position }, postState);
+    expect(adjustment).toBe(0);
   });
 });
