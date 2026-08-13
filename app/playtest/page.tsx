@@ -368,6 +368,12 @@ function Playtest() {
   const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [heatmapSortKey, setHeatmapSortKey] = useState<HeatmapSortKey>("bucket");
   const [heatmapSortDir, setHeatmapSortDir] = useState<1 | -1>(1);
+  // Independent of heatmapSortKey/heatmapSortDir (which reorder ROWS by one column's
+  // value) -- this reorders COLUMNS by one ROW's values instead, so clicking a card
+  // answers "which location/player-count is best *for this card specifically*"
+  // instead of "which card is best at this location". Click the same card again to
+  // clear it back to the default column order.
+  const [columnSortCardId, setColumnSortCardId] = useState<CardId | null>(null);
   const [chartMode, setChartMode] = useState<"roundLength" | "cardValue" | "flipRate">("roundLength");
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [copyTableFeedback, setCopyTableFeedback] = useState(false);
@@ -547,6 +553,21 @@ function Playtest() {
       : availableCenterEffects.map((id) => [id, new Map(statsSummary(stats.byCenterEffect[id]).map((r) => [r.cardId, r]))])
   );
   const heatmapColumnKeys = new Set(heatmapColumns.map((c) => c.key));
+  // When a card is pinned (see columnSortCardId), reorder columns by THAT card's own
+  // value in each one -- "best for this card first", respecting the metric's polarity
+  // (placement: lower/more-negative is better, so ascending; every other metric:
+  // higher is more notable, so descending) -- same polarity heatColorByRank already
+  // uses for coloring, just applied to column order instead of column color. Falls
+  // back to the plain default column order (playerCount/complexity order) when
+  // nothing's pinned.
+  const orderedHeatmapColumns =
+    columnSortCardId === null
+      ? heatmapColumns
+      : [...heatmapColumns].sort((a, b) => {
+          const va = heatMetricValue(heatmapColumnLookup.get(a.key)?.get(columnSortCardId), heatMetric);
+          const vb = heatMetricValue(heatmapColumnLookup.get(b.key)?.get(columnSortCardId), heatMetric);
+          return compareNullable(va, vb, heatMetricPolarity(heatMetric) === "lowIsGood" ? 1 : -1);
+        });
   const heatmapRows = [...rows].sort((a, b) => {
     if (heatmapSortKey !== "bucket" && heatmapSortKey !== "name" && heatmapColumnKeys.has(heatmapSortKey)) {
       const colLookup = heatmapColumnLookup.get(heatmapSortKey);
@@ -1014,7 +1035,7 @@ function Playtest() {
                       tooltip="Sort alphabetically -- click again to reverse. Doesn't affect the flat table's own sort."
                       tooltipId="playtest-heat:name"
                     />
-                    {heatmapColumns.map((column) => (
+                    {orderedHeatmapColumns.map((column) => (
                       <SortableHeader
                         key={column.key}
                         label={column.label}
@@ -1032,8 +1053,20 @@ function Playtest() {
                 <tbody>
                   {heatmapRows.map((row) => (
                     <tr key={row.cardId} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
-                      <td className="px-3 py-1.5 font-medium whitespace-nowrap">{CARD_DEFS[row.cardId].name}</td>
-                      {heatmapColumns.map((column) => {
+                      <td
+                        className={`px-3 py-1.5 font-medium whitespace-nowrap cursor-pointer select-none ${
+                          columnSortCardId === row.cardId ? "text-emerald-700 dark:text-emerald-400" : "hover:underline"
+                        }`}
+                        title={
+                          columnSortCardId === row.cardId
+                            ? "Columns are sorted best-for-this-card-first -- click again to reset to the default column order."
+                            : "Click to sort columns by this card's own values (best-for-this-card first) instead of the default order."
+                        }
+                        onClick={() => setColumnSortCardId((current) => (current === row.cardId ? null : row.cardId))}
+                      >
+                        {CARD_DEFS[row.cardId].name}
+                      </td>
+                      {orderedHeatmapColumns.map((column) => {
                         const cellRow = heatmapColumnLookup.get(column.key)?.get(row.cardId);
                         const rank = heatRanksByColumn.get(column.key)?.get(row.cardId);
                         const columnSize = heatColumnSizes.get(column.key) ?? 0;

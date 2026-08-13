@@ -1,7 +1,7 @@
 import { getAdjacentCards, parsePosKey } from "./board";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
-import { Board, BoardBounds, CardId, CenterEffectId, Position } from "./types";
+import { Board, BoardBounds, CardId, CardInstance, CenterEffectId, Position } from "./types";
 
 /** One line of a card's scoring breakdown -- `label` names the source, `amount` its contribution. */
 export interface ScoreContribution {
@@ -24,6 +24,16 @@ export interface ScoreContribution {
    * same card exist on the board -- see the playtest simulator's disruption tally.
    */
   sourceInstanceId?: string;
+  /**
+   * True for a line that explains something for the breakdown/disruption tally but
+   * doesn't actually count toward the card's own finalValue -- currently only used for
+   * a negated card's "here's what got cancelled" line (see computeValueModifiers): a
+   * negated card's real total is always exactly its base, but without a visible entry
+   * a stats tool has no way to see that a negator (e.g. Suppressor) caused anything at
+   * all, since negation works by skipping the target's valueModifier entirely rather
+   * than applying a tracked delta. Omitted (falsy) for every normal contribution.
+   */
+  informational?: boolean;
 }
 
 /**
@@ -61,19 +71,57 @@ export interface ResolutionResult {
  * cards whose hook condition is met: their own modifiers and outgoing effects are
  * cancelled (base value only). Cards with the hook are immune to negation themselves
  * (so e.g. two adjacent negating cards never negate each other). See lib/content/cards.ts.
+ *
+ * Returns which negator(s) caused each negated instance -- almost always exactly one,
+ * but a card boxed in by two qualifying negators at once is possible, so this is a
+ * list, not a single id. Used by computeValueModifiers below to attribute what got
+ * cancelled back to whichever negator(s) caused it; computeNegatedInstanceIds (the
+ * plain membership version every other caller wants) is defined in terms of this.
  */
-export function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Set<string> {
-  const negated = new Set<string>();
+function computeNegatorsOf(board: Board, bounds: BoardBounds): Map<string, string[]> {
+  const negatorsOf = new Map<string, string[]>();
   for (const [key, c] of board.entries()) {
     const negatesNeighborsIf = CARD_DEFS[c.cardId].negatesNeighborsIf;
     if (!negatesNeighborsIf) continue;
     const pos = parsePosKey(key);
     if (!negatesNeighborsIf({ board, bounds, pos })) continue;
     for (const neighbor of getAdjacentCards(board, bounds, pos)) {
-      if (!CARD_DEFS[neighbor.cardId].negatesNeighborsIf) negated.add(neighbor.instanceId);
+      if (CARD_DEFS[neighbor.cardId].negatesNeighborsIf) continue; // negation-immune
+      const list = negatorsOf.get(neighbor.instanceId);
+      if (list) list.push(c.instanceId);
+      else negatorsOf.set(neighbor.instanceId, [c.instanceId]);
     }
   }
-  return negated;
+  return negatorsOf;
+}
+
+/** Plain "is this instance negated at all" membership -- what every caller outside this file actually wants (e.g. Board.tsx's rendering, pseudoCardLiveValue). */
+export function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Set<string> {
+  return new Set(computeNegatorsOf(board, bounds).keys());
+}
+
+/**
+ * A card's value from its own printed rule alone -- base plus only the deltas its own
+ * valueModifier applies to itself -- found by running that hook in isolation. Used
+ * below to find what a negated card's own effect *would* have been, so negation's
+ * real impact shows up in the breakdown instead of just silently vanishing. Same
+ * "simultaneous, only ever reads board/identity, never another card's resolved value"
+ * computation every valueModifier already does -- this doesn't add a new kind of read,
+ * it just runs one in isolation to see what it would have produced.
+ */
+function selfContributionOnly(board: Board, bounds: BoardBounds, round: number, pos: Position, card: CardInstance): number {
+  let total = 0;
+  CARD_DEFS[card.cardId].valueModifier?.({
+    board,
+    bounds,
+    round,
+    pos,
+    self: card,
+    addDelta: (instanceId, amount) => {
+      if (instanceId === card.instanceId) total += amount;
+    },
+  });
+  return total;
 }
 
 /**
@@ -95,12 +143,20 @@ function computeValueModifiers(
   bounds: BoardBounds,
   round: number,
   negated: Set<string>,
+  negatorsOf: Map<string, string[]>,
   centerEffect: CenterEffectId
 ): Map<string, ScoreContribution[]> {
   const contributions = new Map<string, ScoreContribution[]>();
-  const push = (instanceId: string, amount: number, label: string, source: ScoreContribution["source"], sourceInstanceId?: string) => {
+  const push = (
+    instanceId: string,
+    amount: number,
+    label: string,
+    source: ScoreContribution["source"],
+    sourceInstanceId?: string,
+    informational?: boolean
+  ) => {
     const list = contributions.get(instanceId);
-    const entry: ScoreContribution = { label, amount, source, sourceInstanceId };
+    const entry: ScoreContribution = { label, amount, source, sourceInstanceId, informational };
     if (list) list.push(entry);
     else contributions.set(instanceId, [entry]);
   };
@@ -116,6 +172,29 @@ function computeValueModifiers(
       push(instanceId, amount, label, isSelf ? "self" : "external", isSelf ? undefined : c.instanceId);
     };
     CARD_DEFS[c.cardId].valueModifier?.({ board, bounds, round, pos, self: c, addDelta });
+  }
+
+  // Negation cancels a target's own valueModifier entirely (see the loop above), so
+  // without this, neither its breakdown nor any stat built on top of it (disruption
+  // tallies) would ever show that a negator did anything at all. This doesn't change
+  // the negated card's real value -- see resolveBoard's `informational` filtering --
+  // it only makes the denial visible/attributable, using exactly the "external,
+  // sourceInstanceId" shape the disruption tally already knows how to read.
+  if (negatorsOf.size > 0) {
+    const byInstanceId = new Map<string, { pos: Position; card: CardInstance }>();
+    for (const [key, c] of board.entries()) byInstanceId.set(c.instanceId, { pos: parsePosKey(key), card: c });
+
+    for (const [instanceId, negatorIds] of negatorsOf) {
+      const target = byInstanceId.get(instanceId);
+      if (!target) continue;
+      const deniedSelfContribution = selfContributionOnly(board, bounds, round, target.pos, target.card);
+      if (deniedSelfContribution === 0) continue; // nothing was actually denied
+      const share = deniedSelfContribution / negatorIds.length;
+      for (const negatorId of negatorIds) {
+        const negatorName = byInstanceId.get(negatorId) ? CARD_DEFS[byInstanceId.get(negatorId)!.card.cardId].name : "negation";
+        push(instanceId, -share, `Negated by ${negatorName}`, "external", negatorId, true);
+      }
+    }
   }
 
   // Center-effect scoring-time passes. These are board rules, not printed card text,
@@ -156,12 +235,17 @@ export function resolveBoard(
   centerEffect: CenterEffectId = "none",
   playerIds?: string[]
 ): ResolutionResult {
-  const negated = computeNegatedInstanceIds(board, bounds);
-  const contributions = computeValueModifiers(board, bounds, round, negated, centerEffect);
+  const negatorsOf = computeNegatorsOf(board, bounds);
+  const negated = new Set(negatorsOf.keys());
+  const contributions = computeValueModifiers(board, bounds, round, negated, negatorsOf, centerEffect);
 
+  // `informational` entries (currently just negation's "here's what got cancelled"
+  // lines -- see computeValueModifiers) explain something in the breakdown/disruption
+  // tally but never count toward the card's own value -- a negated card's real total
+  // is always exactly its base, full stop.
   const values = new Map<string, number>();
   for (const c of board.values()) {
-    const rawTotal = CARD_DEFS[c.cardId].base + (contributions.get(c.instanceId) ?? []).reduce((sum, d) => sum + d.amount, 0);
+    const rawTotal = CARD_DEFS[c.cardId].base + (contributions.get(c.instanceId) ?? []).reduce((sum, d) => sum + (d.informational ? 0 : d.amount), 0);
     values.set(c.instanceId, rawTotal);
   }
 
@@ -177,7 +261,7 @@ export function resolveBoard(
     const finalValue = values.get(c.instanceId) ?? base;
 
     const breakdown: ScoreContribution[] = [{ label: "Base", amount: base, source: "self" }, ...cardContributions];
-    const rawTotal = base + cardContributions.reduce((sum, d) => sum + d.amount, 0);
+    const rawTotal = base + cardContributions.reduce((sum, d) => sum + (d.informational ? 0 : d.amount), 0);
     if (finalValue !== rawTotal) {
       // The card's own printed floor rule, not something a neighbor did.
       breakdown.push({ label: FLOORED_AT_ZERO_LABEL, amount: finalValue - rawTotal, source: "self" });

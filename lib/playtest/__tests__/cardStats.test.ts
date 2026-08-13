@@ -159,6 +159,30 @@ describe("disruptionFor", () => {
     expect(disruptionFor(resolvedE2, cards)).toBe(4);
     expect(disruptionFor(resolvedTarget, cards)).toBe(0); // it has no outgoing effect of its own
   });
+
+  it("is positive for a Suppressor denying an opponent's own bonus -- negation, not just addDelta damage, counts as disruption", () => {
+    const board: Board = new Map();
+    // Suppressor on the left edge (0,1) has only 3 possible neighbors at all --
+    // (0,0), (0,2), (1,1) -- so all 3 need to be occupied to hit its "3+ occupied"
+    // threshold, with no spare slot to accidentally create noise.
+    const suppressor = place(board, 0, 1, "Suppressor", "p1");
+    const glory = place(board, 1, 1, "Gloryseeker", "p2", true); // face-up -- would normally score +4
+    // Padding: Giants on the edge (x=0), so their own -3 "not on the edge" penalty
+    // never applies -- own self-contribution is cleanly 0, unlike Footman (whose line
+    // bonus doesn't care about card *type*, only ownership, and would accidentally
+    // trigger through Suppressor/each other here) or an off-edge Giant (which would
+    // add its own denied-penalty noise to this test's signal).
+    place(board, 0, 0, "Giant", "p1");
+    place(board, 0, 2, "Giant", "p1");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const resolvedSuppressor = cards.find((c) => c.instanceId === suppressor.instanceId)!;
+    const resolvedGlory = cards.find((c) => c.instanceId === glory.instanceId)!;
+    expect(resolvedGlory.finalValue).toBe(CARD_DEFS.Gloryseeker.base); // negated -- no +4 landed
+    // Denying an opponent's +4 reads as 4 disruption -- this used to be invisible
+    // entirely (negation skips the target's valueModifier rather than applying a
+    // tracked delta, so there was nothing for disruptionFor's breakdown scan to find).
+    expect(disruptionFor(resolvedSuppressor, cards)).toBe(4);
+  });
 });
 
 describe("tallyGame", () => {

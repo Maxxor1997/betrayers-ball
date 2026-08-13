@@ -74,6 +74,32 @@ export function copiesForPlayerCount(def: CardDef, playerCount: number): number 
 }
 
 /**
+ * A card's value from its own printed rule alone -- base plus only the deltas its own
+ * valueModifier applies to itself (never a neighbor's), found by running that hook in
+ * isolation. This doesn't violate the "simultaneous, never read another card's
+ * resolved value" resolution rule (see resolution.ts) -- it never reads another card's
+ * *computed* contributions, it just re-runs that card's own hook against the live
+ * board/round, the same simultaneous computation resolution.ts's real pass already
+ * does for every card. Used by Infiltrator below so it inherits what a neighbor's own
+ * rule gives it (e.g. Dying God's round penalty), not whatever its other neighbors
+ * happen to be doing to it.
+ */
+function selfResolvedValue(board: Board, bounds: BoardBounds, round: number, pos: Position, card: CardInstance): number {
+  let total = CARD_DEFS[card.cardId].base;
+  CARD_DEFS[card.cardId].valueModifier?.({
+    board,
+    bounds,
+    round,
+    pos,
+    self: card,
+    addDelta: (instanceId, amount) => {
+      if (instanceId === card.instanceId) total += amount;
+    },
+  });
+  return total;
+}
+
+/**
  * The card set -- the single source of truth for a card's stats, text, deck quantity
  * (per player count), bucket, and effect. Add, remove, disable, or rebalance a card
  * entirely by editing an entry here (and updating `CardId` in types.ts to match); no
@@ -135,14 +161,14 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Giant Bear",
     base: 9,
     bucket: "Slam",
-    text: "−1 per adj. card, −2 if boxed in",
-    fullText: "−1 per neighbor (any owner). If it has no open adjacent tile, it gets an additional −2.",
+    text: "−1 per adj. card, −3 if boxed in",
+    fullText: "−1 per neighbor (any owner). If it has no open adjacent tile, it gets an additional −3.",
     count: [4, 4, 4, 4, 5, 6, 8],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const neighbors = countAdjacentOccupied(board, bounds, pos);
       if (neighbors > 0) addDelta(self.instanceId, -1 * neighbors, `${CARD_DEFS.Exile.name} (${neighbors} neighbor${neighbors > 1 ? "s" : ""})`);
       const hasOpenAdjacent = adjacentPositions(pos, bounds).some((p) => !isOwnerlessPosition(p, bounds) && !board.has(posKey(p)));
-      if (!hasOpenAdjacent) addDelta(self.instanceId, -2, `${CARD_DEFS.Exile.name} (no open adjacent tile)`);
+      if (!hasOpenAdjacent) addDelta(self.instanceId, -3, `${CARD_DEFS.Exile.name} (no open adjacent tile)`);
     },
   },
   Warlord: {
@@ -157,7 +183,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       const name = CARD_DEFS.Warlord.name;
       return `−3 for each distinct opposing player with a ${name} anywhere on the board -- multiple ${name}s from the same rival only count once.`;
     },
-    count: [6, 6, 5, 4, 4, 4, 4],
+    count: [5, 5, 5, 6, 6, 6, 6],
     valueModifier: ({ board, self, addDelta }) => {
       const uniqueEnemyWarlordOwners = new Set(
         [...board.values()].filter((c) => c.cardId === "Warlord" && c.ownerId !== self.ownerId).map((c) => c.ownerId)
@@ -242,7 +268,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Chronicler: {
     id: "Chronicler",
     name: "Doomherald",
-    base: 3,
+    base: 4,
     bucket: "Control",
     text: "If face-up: −3 to all adj., can't self-flip",
     fullText:
@@ -373,23 +399,31 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Facestealer",
     base: 3,
     bucket: "Control",
-    text: "If face-down: swaps base w/ highest face-up adj.",
+    text: "If face-down: swaps w/ highest-value adj.",
     fullText:
-      "While face-down, it swaps base values with the highest-base face-up adjacent card (any owner) -- it becomes that card's base, and that card becomes its old base.",
+      "While face-down, it swaps values with the face-up adjacent card (any owner, never another Infiltrator) worth the most from its own printed rule alone -- ignoring whatever that card's other neighbors are doing to it. It becomes that value, and that card becomes Infiltrator's base.",
     count: [2, 2, 2, 2, 3, 3, 4],
-    valueModifier: ({ board, bounds, pos, self, addDelta }) => {
+    valueModifier: ({ board, bounds, round, pos, self, addDelta }) => {
       if (self.faceUp) return;
-      const neighbors = getAdjacentCards(board, bounds, pos).filter((n) => n.faceUp);
-      if (neighbors.length === 0) return;
-      let target = neighbors[0];
-      for (const n of neighbors) {
-        if (CARD_DEFS[n.cardId].base > CARD_DEFS[target.cardId].base) target = n;
+      const candidates: { card: CardInstance; pos: Position }[] = [];
+      for (const p of adjacentPositions(pos, bounds)) {
+        const c = board.get(posKey(p));
+        if (c && c.faceUp && c.cardId !== "Infiltrator") candidates.push({ card: c, pos: p });
+      }
+      if (candidates.length === 0) return;
+      let target = candidates[0];
+      let targetValue = selfResolvedValue(board, bounds, round, target.pos, target.card);
+      for (const candidate of candidates.slice(1)) {
+        const value = selfResolvedValue(board, bounds, round, candidate.pos, candidate.card);
+        if (value > targetValue) {
+          target = candidate;
+          targetValue = value;
+        }
       }
       const ownBase = CARD_DEFS[self.cardId].base;
-      const targetBase = CARD_DEFS[target.cardId].base;
-      if (targetBase === ownBase) return;
-      addDelta(self.instanceId, targetBase - ownBase, `${CARD_DEFS.Infiltrator.name} (swapped w/ ${CARD_DEFS[target.cardId].name})`);
-      addDelta(target.instanceId, ownBase - targetBase, `${CARD_DEFS.Infiltrator.name} (swapped)`);
+      if (targetValue === ownBase) return;
+      addDelta(self.instanceId, targetValue - ownBase, `${CARD_DEFS.Infiltrator.name} (swapped w/ ${CARD_DEFS[target.card.cardId].name})`);
+      addDelta(target.card.instanceId, ownBase - targetValue, `${CARD_DEFS.Infiltrator.name} (swapped)`);
     },
   },
   Truthseeker: {
@@ -432,7 +466,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Beacon: {
     id: "Beacon",
     name: "Salamander",
-    base: 4,
+    base: 3,
     bucket: "Engine",
     text: "+1 per adj. face-up card",
     fullText: "+1 for each adjacent face-up card (any owner).",

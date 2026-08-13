@@ -37,7 +37,7 @@ Exact base values, effect text, and bucket assignments live in `lib/content/card
 ## Card ideas (in workshop)
 
 - ~~Location: "Three Headed Dragon" 2 additional center blocks with no effect on the sides of the center with a gap, only for larger boards~~ **Implemented** (`lib/content/centerEffects.ts`) — not player-count-gated; the two extra heads sit 2 cells out along the center's row (1-cell gap) and are clipped if that would fall off a small board.
-- ~~Infiltrator: rewards card itself for staying hidden but does some kind of sabotage~~ **Implemented** (`lib/content/cards.ts`, merged with the cut Headsman/Darkspawn) — while face-down, swaps base with the highest-base adjacent card; flipping it face-up is the counter.
+- ~~Infiltrator: rewards card itself for staying hidden but does some kind of sabotage~~ **Implemented** (`lib/content/cards.ts`, merged with the cut Headsman/Darkspawn) — while face-down, swaps with the face-up adjacent card (never another Infiltrator) worth the most from its own printed rule alone, ignoring what its other neighbors are doing to it; flipping it face-up is the counter.
 - Card that immunes neighbors to being flipped?
 - Card that rewards neiboring multiple players (only for larger groups)
 

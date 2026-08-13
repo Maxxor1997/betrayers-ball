@@ -195,14 +195,14 @@ describe("resolveBoard — Exile", () => {
     expect(find(cards, e.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - 1); // 1 neighbor (center)
   });
 
-  it("loses an additional flat -2 once it has no open adjacent tile left", () => {
+  it("loses an additional flat -3 once it has no open adjacent tile left", () => {
     const board: Board = new Map();
     const e = place(board, 0, 0, "Exile", "p1"); // corner -- only 2 possible neighbors
     place(board, 1, 0, "Footman", "p2");
     place(board, 0, 1, "Footman", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    // -1 per neighbor (2) plus the flat -2 for having no open adjacent tile left.
-    expect(find(cards, e.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - 2 - 2);
+    // -1 per neighbor (2) plus the flat -3 for having no open adjacent tile left.
+    expect(find(cards, e.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - 2 - 3);
   });
 
   it("realistic ceiling is 8, never full 9, because placement forces >=1 neighbor", () => {
@@ -540,10 +540,10 @@ describe("resolveBoard — Infiltrator", () => {
     expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
   });
 
-  it("face-down: swaps base with the highest-base face-up adjacent card", () => {
+  it("face-down: swaps with the highest-value face-up adjacent card's own value", () => {
     const board: Board = new Map();
     // Warlord carries no self-modifying effect here (no other Warlords on the board),
-    // so its finalValue is just its base -- a clean comparison.
+    // so its own value is just its base -- a clean comparison.
     const inf = place(board, 1, 1, "Infiltrator", "p1", false);
     const warlord = place(board, 0, 1, "Warlord", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
@@ -551,7 +551,7 @@ describe("resolveBoard — Infiltrator", () => {
     expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
   });
 
-  it("no-op when the highest-base neighbor is face-down -- can only snipe an identity it can see", () => {
+  it("no-op when the highest-value neighbor is face-down -- can only snipe an identity it can see", () => {
     const board: Board = new Map();
     const inf = place(board, 1, 1, "Infiltrator", "p1", false);
     const warlord = place(board, 0, 1, "Warlord", "p2", false);
@@ -560,7 +560,7 @@ describe("resolveBoard — Infiltrator", () => {
     expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
   });
 
-  it("still swaps even when the only face-up neighbor has a lower base -- a real downside, not just upside", () => {
+  it("still swaps even when the only face-up neighbor is worth less -- a real downside, not just upside", () => {
     const board: Board = new Map();
     const inf = place(board, 1, 1, "Infiltrator", "p1", false);
     const commander = place(board, 0, 1, "Commander", "p2", true);
@@ -569,17 +569,17 @@ describe("resolveBoard — Infiltrator", () => {
     expect(find(cards, commander.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
   });
 
-  it("picks only the single highest-base face-up neighbor among several", () => {
+  it("picks only the single highest-value face-up neighbor among several", () => {
     const board: Board = new Map();
     // Warlord carries no self-modifying effect here (no other Warlords on the board),
-    // so its finalValue is just its base -- a clean comparison.
+    // so its own value is just its base -- a clean comparison.
     const inf = place(board, 1, 1, "Infiltrator", "p1", false);
     const warlord = place(board, 0, 1, "Warlord", "p2", true); // base 8, the highest
     const giant = place(board, 2, 1, "Giant", "p2", true); // base 6, not on the edge -> also eats its own -3
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
     expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
-    // The lower-base neighbor is untouched by the swap -- only the highest is swapped with.
+    // The lower-value neighbor is untouched by the swap -- only the highest is swapped with.
     expect(find(cards, giant.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 3);
   });
 
@@ -590,13 +590,57 @@ describe("resolveBoard — Infiltrator", () => {
     expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
   });
 
-  it("no-op when the highest-base face-up neighbor's base equals its own", () => {
+  it("no-op when the highest-value face-up neighbor's value equals its own", () => {
     const board: Board = new Map();
     const a = place(board, 1, 1, "Infiltrator", "p1", false);
-    const b = place(board, 0, 1, "Infiltrator", "p2", true);
+    const b = place(board, 0, 1, "PlagueBearer", "p2", true); // base 3, ties Infiltrator's own base
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+    expect(find(cards, b.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base);
+  });
+
+  it("never targets another Infiltrator, even if it would otherwise be the highest-value neighbor", () => {
+    const board: Board = new Map();
+    const a = place(board, 1, 1, "Infiltrator", "p1", false);
+    const b = place(board, 0, 1, "Infiltrator", "p2", true); // face-up, would normally be a legal swap target
+    const warlord = place(board, 2, 1, "Warlord", "p2", true); // the only actually-eligible neighbor
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    // a swaps with warlord (the only eligible neighbor), completely ignoring b even
+    // though b is face-up and adjacent.
+    expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
     expect(find(cards, b.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+    expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+  });
+
+  it("inherits a neighbor's own printed rule (e.g. Dying God's round penalty), not just its base", () => {
+    const board: Board = new Map();
+    const inf = place(board, 1, 1, "Infiltrator", "p1", false);
+    const dyingGod = place(board, 0, 1, "DyingGod", "p2", true);
+    const round = 4;
+    const { cards } = resolveBoard(board, BOUNDS, round);
+    const dyingGodSelfValue = CARD_DEFS.DyingGod.base - round; // Dying God's own -1/round-elapsed rule
+    expect(find(cards, inf.instanceId).finalValue).toBe(dyingGodSelfValue);
+    // The target's side of the swap works exactly as before this change -- it just
+    // becomes Infiltrator's base, regardless of what value it gave up.
+    expect(find(cards, dyingGod.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+  });
+
+  it("ignores what a neighbor's OTHER neighbors are doing to it -- only that card's own rule counts", () => {
+    const board: Board = new Map();
+    const inf = place(board, 1, 1, "Infiltrator", "p1", false);
+    // Warlord (vertically adjacent, row y=0) has no self-effect of its own here (no
+    // rival Warlords anywhere), so its own value is just its base -- but Earthshaker,
+    // placed in Warlord's row (y=0, NOT Infiltrator's row y=1, so it never touches
+    // Infiltrator directly), hits Warlord with a real, external -2. Infiltrator should
+    // inherit Warlord's own value (base, unaffected by Earthshaker), not the
+    // externally-hit one.
+    const warlord = place(board, 1, 0, "Warlord", "p2", true);
+    place(board, 5, 0, "Earthshaker", "p3", true); // same row (y=0) as Warlord, different row from Infiltrator
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
+    // Warlord's own real final value, meanwhile, does include Earthshaker's external
+    // hit on top of the swap -- the exclusion only applies to what Infiltrator inherits.
+    expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base - 2);
   });
 
   it("flipping it face-up is the counter -- neutralizes an in-progress swap", () => {
@@ -693,6 +737,67 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     // row y=2 has an unbroken p2-owned line of Plague Bearer-f1-Giant.
     expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
     expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+  });
+
+  it("attributes a negated card's own denied bonus back to the negator, without changing the negated card's real value", () => {
+    const board: Board = new Map();
+    const suppressor = place(board, 2, 2, "Suppressor", "p1");
+    const glory = place(board, 3, 2, "Gloryseeker", "p2", true); // face-up -- would normally score +4
+    place(board, 1, 2, "Giant", "p1");
+    place(board, 2, 1, "Giant", "p1");
+    place(board, 2, 3, "Giant", "p1");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const gloryResolved = find(cards, glory.instanceId);
+
+    expect(gloryResolved.negated).toBe(true);
+    expect(gloryResolved.finalValue).toBe(CARD_DEFS.Gloryseeker.base); // negation still just base, unaffected
+
+    const negationLine = gloryResolved.breakdown.find((d) => d.sourceInstanceId === suppressor.instanceId);
+    expect(negationLine).toBeDefined();
+    expect(negationLine!.amount).toBe(-4); // the +4 it would have scored, denied
+    expect(negationLine!.informational).toBe(true); // explains the denial, doesn't double-count into finalValue
+  });
+
+  it("a negated card that would have scored a self-PENALTY shows the denial as a positive (an accidental backfire)", () => {
+    const board: Board = new Map();
+    const suppressor = place(board, 2, 2, "Suppressor", "p1");
+    const dyingGod = place(board, 3, 2, "DyingGod", "p2", true); // own rule is -round, so negating it HELPS its owner
+    place(board, 1, 2, "Giant", "p1");
+    place(board, 2, 1, "Giant", "p1");
+    place(board, 2, 3, "Giant", "p1");
+    const round = 4;
+    const { cards } = resolveBoard(board, BOUNDS, round);
+    const dyingGodResolved = find(cards, dyingGod.instanceId);
+
+    expect(dyingGodResolved.negated).toBe(true);
+    expect(dyingGodResolved.finalValue).toBe(CARD_DEFS.DyingGod.base); // no -round penalty, negation removed it
+
+    const negationLine = dyingGodResolved.breakdown.find((d) => d.sourceInstanceId === suppressor.instanceId);
+    expect(negationLine).toBeDefined();
+    expect(negationLine!.amount).toBe(round); // denying a -4 penalty reads as +4 -- a real backfire for the negator
+  });
+
+  it("splits attribution evenly when two separate negators both negate the same card", () => {
+    const board: Board = new Map();
+    // Two independent Suppressors, each with their own 3+ occupied neighbors, both
+    // adjacent to the same Gloryseeker in the middle.
+    const s1 = place(board, 2, 2, "Suppressor", "p1");
+    const glory = place(board, 3, 2, "Gloryseeker", "p3", true);
+    const s2 = place(board, 4, 2, "Suppressor", "p2");
+    place(board, 1, 2, "Giant", "p1");
+    place(board, 2, 1, "Giant", "p1");
+    place(board, 2, 3, "Giant", "p1");
+    place(board, 5, 2, "Giant", "p2");
+    place(board, 4, 1, "Giant", "p2");
+    place(board, 4, 3, "Giant", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const gloryResolved = find(cards, glory.instanceId);
+
+    expect(gloryResolved.finalValue).toBe(CARD_DEFS.Gloryseeker.base);
+    const fromS1 = gloryResolved.breakdown.find((d) => d.sourceInstanceId === s1.instanceId);
+    const fromS2 = gloryResolved.breakdown.find((d) => d.sourceInstanceId === s2.instanceId);
+    expect(fromS1!.amount).toBe(-2); // -4 total, split evenly across both negators
+    expect(fromS2!.amount).toBe(-2);
   });
 });
 
