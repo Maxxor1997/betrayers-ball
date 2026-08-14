@@ -276,16 +276,28 @@ function heatColorByRank(rank: number, columnSize: number, polarity: "lowIsGood"
   return `rgba(59, 130, 246, ${(0.08 + t * 0.42).toFixed(2)})`;
 }
 
-/** Markdown table of one heatmap metric across every available player count, for the same "copy" workflow the flat table already has. */
-function buildHeatmapMarkdown(rows: CardStatsRow[], playerCounts: number[], lookup: Map<number, Map<CardId, CardStatsRow>>, metric: HeatMetric): string {
+/**
+ * Markdown table of one heatmap metric across a set of columns, for the same "copy"
+ * workflow the flat table already has -- generic over the column dimension (player
+ * count or location) so buildEverythingMarkdown can reuse this for both instead of
+ * duplicating it per dimension the way an earlier version did (which is exactly how
+ * the location breakdown ended up missing from the dump in the first place).
+ */
+function buildHeatmapMarkdown(
+  rows: CardStatsRow[],
+  columns: { key: string; label: string }[],
+  lookup: Map<string, Map<CardId, CardStatsRow>>,
+  metric: HeatMetric,
+  dimensionLabel: string
+): string {
   const lines = [
-    `${HEAT_METRIC_LABELS[metric]} by player count`,
+    `${HEAT_METRIC_LABELS[metric]} by ${dimensionLabel}`,
     "",
-    `| Card | ${playerCounts.map((pc) => `${pc}p`).join(" | ")} |`,
-    `|---|${playerCounts.map(() => "---").join("|")}|`,
+    `| Card | ${columns.map((c) => c.label).join(" | ")} |`,
+    `|---|${columns.map(() => "---").join("|")}|`,
   ];
   for (const row of rows) {
-    const cells = playerCounts.map((pc) => heatMetricFormat(lookup.get(pc)?.get(row.cardId), metric));
+    const cells = columns.map((c) => heatMetricFormat(lookup.get(c.key)?.get(row.cardId), metric));
     lines.push(`| ${CARD_DEFS[row.cardId].name} | ${cells.join(" | ")} |`);
   }
   return lines.join("\n") + "\n";
@@ -294,9 +306,14 @@ function buildHeatmapMarkdown(rows: CardStatsRow[], playerCounts: number[], look
 /**
  * The comprehensive export -- everything on the page in one paste, regardless of
  * which view happens to be showing: the flat all-player-counts table, the average
- * round length by player count breakdown, and every heatmap metric's own
- * player-count table. Separate from buildStatsMarkdown (the flat table alone) and
- * buildHeatmapMarkdown (one metric alone), which stay available as focused exports.
+ * round length/flip rate breakdowns, and every heatmap metric's own table, for BOTH
+ * dimensions (player count and location) -- not just whichever one the interactive
+ * heatmap happens to be toggled to at the moment (that's what buildHeatmapMarkdown's
+ * genericized column param is for: one function, called once per dimension, instead
+ * of a second copy that's easy to forget to keep in sync -- see git history for the
+ * bug this fixes, where the location breakdown was missing from this dump entirely).
+ * Separate from buildStatsMarkdown (the flat table alone) and buildHeatmapMarkdown
+ * (one metric, one dimension, alone), which stay available as focused exports.
  */
 function buildEverythingMarkdown(
   rows: CardStatsRow[],
@@ -305,7 +322,9 @@ function buildEverythingMarkdown(
   stats: PlaytestStats,
   heatmapRows: CardStatsRow[],
   availablePlayerCounts: number[],
-  heatmapLookup: Map<number, Map<CardId, CardStatsRow>>
+  heatmapLookup: Map<number, Map<CardId, CardStatsRow>>,
+  availableCenterEffects: CenterEffectId[],
+  locationLookup: Map<string, Map<CardId, CardStatsRow>>
 ): string {
   const sections = [buildStatsMarkdown(rows, overallRoundLength, overallFlipRate)];
 
@@ -328,8 +347,35 @@ function buildEverythingMarkdown(
     ];
     sections.push(flipRateLines.join("\n") + "\n");
 
+    const playerCountColumns = availablePlayerCounts.map((pc) => ({ key: String(pc), label: `${pc}p` }));
+    const playerCountLookup = new Map([...heatmapLookup.entries()].map(([pc, lookup]) => [String(pc), lookup] as const));
     for (const metric of Object.keys(HEAT_METRIC_LABELS) as HeatMetric[]) {
-      sections.push(buildHeatmapMarkdown(heatmapRows, availablePlayerCounts, heatmapLookup, metric));
+      sections.push(buildHeatmapMarkdown(heatmapRows, playerCountColumns, playerCountLookup, metric, "player count"));
+    }
+  }
+
+  if (availableCenterEffects.length > 0) {
+    const roundLengthLines = [
+      "Average round length by location",
+      "",
+      "| Location | Avg round length |",
+      "|---|---|",
+      ...availableCenterEffects.map((id) => `| ${CENTER_EFFECTS[id].label} | ${fmt(overallAvgRoundLength(stats.byCenterEffect[id]), 2)} |`),
+    ];
+    sections.push(roundLengthLines.join("\n") + "\n");
+
+    const flipRateLines = [
+      "Average flip rate by location",
+      "",
+      "| Location | Avg flip rate |",
+      "|---|---|",
+      ...availableCenterEffects.map((id) => `| ${CENTER_EFFECTS[id].label} | ${fmtPercent(overallAvgFlipRate(stats.byCenterEffect[id]))} |`),
+    ];
+    sections.push(flipRateLines.join("\n") + "\n");
+
+    const locationColumns = availableCenterEffects.map((id) => ({ key: id, label: CENTER_EFFECTS[id].label }));
+    for (const metric of Object.keys(HEAT_METRIC_LABELS) as HeatMetric[]) {
+      sections.push(buildHeatmapMarkdown(heatmapRows, locationColumns, locationLookup, metric, "location"));
     }
   }
 
@@ -543,15 +589,21 @@ function Playtest() {
   // columns are ordered the same way the catalog's Locations sidebar is (see
   // LOCATION_COMPLEXITY_ORDER), not insertion/tally order.
   const availableCenterEffects = LOCATION_COMPLEXITY_ORDER.filter((id) => (stats.byCenterEffect[id]?.overall.gamesTallied ?? 0) > 0);
+  // Computed unconditionally (not gated by heatmapDimension) -- copyEverything needs
+  // both dimensions' data regardless of which one the interactive heatmap currently
+  // happens to be toggled to (see buildEverythingMarkdown's doc comment for the bug
+  // this fixes).
+  const locationLookup = new Map<string, Map<CardId, CardStatsRow>>(
+    availableCenterEffects.map((id) => [id, new Map(statsSummary(stats.byCenterEffect[id]).map((r) => [r.cardId, r]))])
+  );
   const heatmapColumns: { key: string; label: string; title: string }[] =
     heatmapDimension === "playerCount"
       ? availablePlayerCounts.map((pc) => ({ key: String(pc), label: `${pc}p`, title: `${pc} players` }))
       : availableCenterEffects.map((id) => ({ key: id, label: CENTER_EFFECTS[id].label, title: CENTER_EFFECTS[id].label }));
-  const heatmapColumnLookup = new Map<string, Map<CardId, CardStatsRow>>(
+  const heatmapColumnLookup =
     heatmapDimension === "playerCount"
-      ? [...heatmapLookup.entries()].map(([pc, lookup]) => [String(pc), lookup])
-      : availableCenterEffects.map((id) => [id, new Map(statsSummary(stats.byCenterEffect[id]).map((r) => [r.cardId, r]))])
-  );
+      ? new Map<string, Map<CardId, CardStatsRow>>([...heatmapLookup.entries()].map(([pc, lookup]) => [String(pc), lookup]))
+      : locationLookup;
   const heatmapColumnKeys = new Set(heatmapColumns.map((c) => c.key));
   // When a card is pinned (see columnSortCardId), reorder columns by THAT card's own
   // value in each one -- "best for this card first", respecting the metric's polarity
@@ -596,7 +648,17 @@ function Playtest() {
 
   /** The top button -- everything on the page, regardless of which view is active. */
   function copyEverything() {
-    const text = buildEverythingMarkdown(rows, overallRoundLength, overallFlipRate, stats, heatmapRows, availablePlayerCounts, heatmapLookup);
+    const text = buildEverythingMarkdown(
+      rows,
+      overallRoundLength,
+      overallFlipRate,
+      stats,
+      heatmapRows,
+      availablePlayerCounts,
+      heatmapLookup,
+      availableCenterEffects,
+      locationLookup
+    );
     navigator.clipboard.writeText(text).then(() => {
       setCopyFeedback(true);
       setTimeout(() => setCopyFeedback(false), 1500);
