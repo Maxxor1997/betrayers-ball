@@ -6,10 +6,17 @@ import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game
 import { redactedStateFor } from "@/lib/engine/playerView";
 import { currentPlayerId } from "@/lib/engine/turns";
 import { AiDifficulty, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
-import { DISPLAY_VIEWER_ID, LobbyState, RoomSummary, SeatInfo, toWireState, WireGameState } from "./protocol";
+import { computeRanks, placementBaseline, placementMaxDeviation } from "@/lib/playtest/cardStats";
+import { DISPLAY_VIEWER_ID, LobbyState, RoomStatsEntry, RoomSummary, SeatInfo, toWireState, WireGameState } from "./protocol";
 
 /** Same pacing as the single-player AI turn effect in app/play/page.tsx, so a mixed human/AI room feels consistent regardless of mode. */
 const AI_TURN_DELAY_MS = 550;
+
+/** How long an unstarted lobby can sit with nobody touching it before RoomRegistry reaps it. */
+export const UNSTARTED_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
+
+/** How long a finished game can sit un-rematched and un-closed before RoomRegistry reaps it -- longer than the unstarted timeout since a finished table of players is more likely to just be chatting/deciding on a rematch than an abandoned lobby is. */
+export const ENDED_IDLE_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 
 interface Seat extends SeatInfo {
   /** Undefined for AI seats -- never dealt a token since nothing ever authenticates as them. */
@@ -42,6 +49,15 @@ export class GameSession {
   private state: GameState | null = null;
   private aiTimer: ReturnType<typeof setTimeout> | null = null;
   private nextSeatIndex = 0;
+  /**
+   * Cumulative per-seat record across every game this room has played -- see
+   * RoomStatsEntry. Lives here (not on GameState) specifically so rematch()'s fresh
+   * GameState doesn't wipe it: this is a room-level running total, not a single game's
+   * result. Never reset by rematch, only implicitly by the room itself going away.
+   */
+  private readonly roomStats = new Map<string, { games: number; wins: number; placementDeltaSum: number }>();
+  /** Last time anyone actually did something in this room -- see touch()/isReapable(). Starts at creation time, since a freshly-created lobby is itself a form of activity. */
+  private lastActivityAt = Date.now();
 
   private onLobbyChange: (lobby: LobbyState) => void;
   private onPlayerState: (playerId: string, state: WireGameState) => void;
@@ -125,6 +141,7 @@ export class GameSession {
       seats: [...this.seats.values()].map(({ playerId, name, isAI, connected }) => ({ playerId, name, isAI, connected })),
       started: this.started,
       serverOrigin: this.serverOrigin,
+      roomStats: [...this.roomStats.entries()].map(([playerId, s]): RoomStatsEntry => ({ playerId, ...s })),
     };
   }
 
@@ -136,6 +153,7 @@ export class GameSession {
 
     const seat = this.newSeat(name, false);
     this.seats.set(seat.playerId, seat);
+    this.touch();
     this.onLobbyChange(this.getLobbyState());
     return { playerId: seat.playerId, token: seat.token! };
   }
@@ -143,6 +161,7 @@ export class GameSession {
   /** Re-attaches a fresh connection (e.g. a page refresh) to an already-claimed seat -- or, for a display-hosted room, back to the host's seatless pseudo-identity. */
   rejoin(token: string): { playerId: string } | { error: string } {
     if (this.displayHosted && token === this.hostTokenValue) {
+      this.touch();
       this.onLobbyChange(this.getLobbyState());
       if (this.state) this.pushStateTo(DISPLAY_VIEWER_ID);
       return { playerId: DISPLAY_VIEWER_ID };
@@ -150,6 +169,7 @@ export class GameSession {
     const seat = [...this.seats.values()].find((s) => s.token === token);
     if (!seat) return { error: "That session isn't valid for this room anymore." };
     seat.connected = true;
+    this.touch();
     this.onLobbyChange(this.getLobbyState());
     if (this.state) this.pushStateTo(seat.playerId);
     return { playerId: seat.playerId };
@@ -222,10 +242,66 @@ export class GameSession {
     const config = configForPlayerCount(this.playerCount, this.centerEffect, this.aiDifficulty);
     const rand = this.rng ?? Math.random;
     const firstPlayerIndex = Math.floor(rand() * allIds.length);
-    this.state = createGame(allIds, config, this.rng, aiIds, firstPlayerIndex);
-
-    this.pushStateToAll();
+    this.setState(createGame(allIds, config, this.rng, aiIds, firstPlayerIndex));
     this.scheduleAiTurnIfNeeded();
+  }
+
+  /**
+   * Every place `this.state` gets replaced with a new GameState routes through here --
+   * catches the exact moment a game's phase flips to "ended" (never mid-game, never
+   * more than once per game) to fold its result into roomStats before pushing the new
+   * state out to every client.
+   */
+  private setState(newState: GameState): void {
+    const wasEnded = this.state?.phase === "ended";
+    this.state = newState;
+    this.touch();
+    if (!wasEnded && newState.phase === "ended") this.tallyRoomStats(newState);
+    this.pushStateToAll();
+  }
+
+  private touch(): void {
+    this.lastActivityAt = Date.now();
+  }
+
+  /**
+   * True once this room has sat idle long enough for RoomRegistry's periodic sweep to
+   * close it out -- see UNSTARTED_IDLE_TIMEOUT_MS/ENDED_IDLE_TIMEOUT_MS. Deliberately
+   * narrow: an unstarted lobby times out (nobody ever hit Start), and a finished game
+   * left un-rematched/un-closed times out (longer window -- more likely still being
+   * looked at than an abandoned lobby is), but a game that's actually still
+   * `"playing"` never auto-closes here no matter how long it's been idle -- that's a
+   * live, in-progress table, not an abandoned one, and disconnected players can still
+   * rejoin it.
+   */
+  isReapable(now: number = Date.now()): boolean {
+    const idleMs = now - this.lastActivityAt;
+    if (!this.started) return idleMs >= UNSTARTED_IDLE_TIMEOUT_MS;
+    if (this.state?.phase === "ended") return idleMs >= ENDED_IDLE_TIMEOUT_MS;
+    return false;
+  }
+
+  /**
+   * Folds one just-finished game's result into every seat's cumulative roomStats
+   * record (see RoomStatsEntry) -- both human and AI seats, since "who's actually
+   * winning this room" includes the AI opponents too. Same rank/placement-delta math
+   * as lib/playtest/humanStats.ts's tallyPlacementBucket, just per-seat instead of
+   * per-human and fed by the room's one fixed playerCount instead of a per-game one.
+   * Broadcasts the updated lobby afterward -- roomStats changed even though no seat
+   * joined/left, so clients watching a room-stats panel see it update live.
+   */
+  private tallyRoomStats(state: GameState): void {
+    if (!state.result) return;
+    const ranks = computeRanks(state.result.scores);
+    for (const player of state.players) {
+      const bucket = this.roomStats.get(player.id) ?? { games: 0, wins: 0, placementDeltaSum: 0 };
+      const rank = ranks.get(player.id)!;
+      bucket.games += 1;
+      if (rank === 1) bucket.wins += 1;
+      bucket.placementDeltaSum += (rank - placementBaseline(this.playerCount)) / placementMaxDeviation(this.playerCount);
+      this.roomStats.set(player.id, bucket);
+    }
+    this.onLobbyChange(this.getLobbyState());
   }
 
   dispatch(callerToken: string, action: GameAction): { ok: true } | { error: string } {
@@ -234,13 +310,14 @@ export class GameSession {
     if (!this.state) return { error: "This game hasn't started yet." };
     if (action.playerId !== caller.playerId) return { error: "You can't act on another player's behalf." };
 
+    let next: GameState;
     try {
-      this.state = applyAction(this.state, action, this.rng);
+      next = applyAction(this.state, action, this.rng);
     } catch (err) {
       return { error: err instanceof Error ? err.message : "Illegal action." };
     }
 
-    this.pushStateToAll();
+    this.setState(next);
     this.scheduleAiTurnIfNeeded();
     return { ok: true };
   }
@@ -283,8 +360,7 @@ export class GameSession {
       const activeId = currentPlayerId(this.state);
       if (this.seats.get(activeId)?.isAI !== true) return;
       const action = chooseAiActionForDifficulty(this.state, activeId, this.state.config.aiDifficulty, this.rng);
-      this.state = applyAction(this.state, action, this.rng);
-      this.pushStateToAll();
+      this.setState(applyAction(this.state, action, this.rng));
       this.scheduleAiTurnIfNeeded();
     }, AI_TURN_DELAY_MS);
   }

@@ -21,6 +21,23 @@ export interface SeatInfo {
   connected: boolean;
 }
 
+/**
+ * One seat's cumulative record across every game played in this room so far
+ * (including past rematches -- never reset by rematch, only by the room itself
+ * ending). Raw sums, not pre-computed rates, matching OwnPlacementBucket's shape in
+ * lib/playtest/humanStats.ts -- a UI derives winRate = wins/games and
+ * placementDeltaSum/games itself via the same placementBaseline/placementMaxDeviation
+ * scale (lib/playtest/cardStats.ts), which stays comparable across rooms even though
+ * this feature (unlike single-player's "My Stats") never spans more than one fixed
+ * player count, since a room's seats -- and so its playerCount -- can't change.
+ */
+export interface RoomStatsEntry {
+  playerId: string;
+  games: number;
+  wins: number;
+  placementDeltaSum: number;
+}
+
 /** Public lobby/room state -- identical for every viewer (no hidden info here), unlike game:state. */
 export interface LobbyState {
   roomCode: string;
@@ -37,6 +54,8 @@ export interface LobbyState {
    * own `window.location.origin`. Used to build the shareable join link.
    */
   serverOrigin: string;
+  /** Every seat that's finished at least one game in this room -- see RoomStatsEntry. Empty until the first game in the room ends. */
+  roomStats: RoomStatsEntry[];
 }
 
 /**

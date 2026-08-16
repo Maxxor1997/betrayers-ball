@@ -16,6 +16,7 @@ import { CardCatalog } from "@/app/components/CardCatalog";
 import { InstructionsModal } from "@/app/components/InstructionsModal";
 import { LocationTitle } from "@/app/components/LocationTitle";
 import { NewGameModal, NewGameSetup } from "@/app/components/NewGameModal";
+import { RoomStatsModal } from "@/app/components/RoomStatsModal";
 import { nameFor, SeatRow } from "@/app/join/[code]/page";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
@@ -49,6 +50,7 @@ function Display() {
   const roomCode = (Array.isArray(params.code) ? params.code[0] : params.code || "").toUpperCase();
   const session = useMultiplayerSession(roomCode);
   const [showInstructions, setShowInstructions] = useState(false);
+  const [showRoomStats, setShowRoomStats] = useState(false);
   const [confirmingEnd, setConfirmingEnd] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => setIsMobile(isMobileViewport()), []);
@@ -91,14 +93,24 @@ function Display() {
             How to play
           </button>
         </div>
-        {!session.roomClosed && session.connected && !session.needsName && (
-          <button
-            onClick={() => setConfirmingEnd(true)}
-            className="rounded-full border border-red-300 px-2.5 py-0 text-xs whitespace-nowrap text-red-600 hover:bg-red-50 sm:px-4 sm:py-0.5 sm:text-sm dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
-          >
-            End room
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {session.lobby && (
+            <button
+              onClick={() => setShowRoomStats(true)}
+              className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              Room Stats
+            </button>
+          )}
+          {!session.roomClosed && session.connected && !session.needsName && (
+            <button
+              onClick={() => setConfirmingEnd(true)}
+              className="rounded-full border border-red-300 px-2.5 py-0 text-xs whitespace-nowrap text-red-600 hover:bg-red-50 sm:px-4 sm:py-0.5 sm:text-sm dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+            >
+              End room
+            </button>
+          )}
+        </div>
       </div>
     </header>
   );
@@ -106,6 +118,7 @@ function Display() {
   const popups = (
     <>
       {showInstructions && <InstructionsModal onClose={() => setShowInstructions(false)} />}
+      {showRoomStats && session.lobby && <RoomStatsModal lobby={session.lobby} onClose={() => setShowRoomStats(false)} />}
 
       {confirmingEnd && (
         <div className="fixed top-20 left-1/2 z-50 w-[min(90vw,20rem)] -translate-x-1/2 rounded-lg border border-zinc-300 bg-white p-3 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900">

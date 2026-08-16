@@ -35,6 +35,27 @@ export class RoomRegistry {
   }
 
   /**
+   * Closes out every room that's sat idle past its own timeout -- see
+   * GameSession.isReapable/UNSTARTED_IDLE_TIMEOUT_MS/ENDED_IDLE_TIMEOUT_MS. Since this
+   * one process's Map is shared by every visitor (no per-user isolation -- see this
+   * class's own doc comment), an abandoned lobby or an ended-but-never-closed game
+   * would otherwise sit here, and in everyone's rooms:list, until the process itself
+   * restarts. A plain method, not a self-scheduled timer -- server.ts is the one place
+   * that actually knows the real process's lifecycle, so it owns the setInterval that
+   * calls this periodically; keeping the timer out of this class keeps it trivially
+   * testable (call this directly with a controlled `now`, no fake-timer juggling).
+   * Returns the codes it closed, for logging/tests.
+   */
+  reapIdleRooms(now: number = Date.now()): string[] {
+    const reaped: string[] = [];
+    for (const [code, session] of this.rooms) {
+      if (session.isReapable(now)) reaped.push(code);
+    }
+    for (const code of reaped) this.delete(code);
+    return reaped;
+  }
+
+  /**
    * Every room that still exists, lobby or in-progress, for the home screen's "active
    * sessions" list -- includes started games on purpose, so a player who navigated
    * back to home mid-game can find their way back to it. See RoomSummary's doc

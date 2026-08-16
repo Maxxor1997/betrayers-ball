@@ -1,7 +1,8 @@
-import { getLegalPlacementPositions } from "./board";
+import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "../content/cards";
+import { getLegalPlacementPositions, parsePosKey } from "./board";
 import { redactedBoardFor } from "./playerView";
 import { resolveBoard, ResolutionResult } from "./resolution";
-import { Board, BoardBounds, CenterEffectId, GameResult, GameState } from "./types";
+import { Board, BoardBounds, CardId, CardInstance, CenterEffectId, GameResult, GameState } from "./types";
 
 export function isBoardFull(board: Board, bounds: BoardBounds): boolean {
   return getLegalPlacementPositions(board, bounds).length === 0;
@@ -64,14 +65,110 @@ export function estimatedResolutionFor(state: GameState, viewerId: string): Reso
 }
 
 /**
+ * Deck-wide odds that a still-hidden card (from `viewerId`'s own honest point of view)
+ * turns out to be each identity, as a share of the total hidden pool -- "hidden" means
+ * not yet identity-known to `viewerId`: not face-up anywhere, not in their own hand
+ * (they know their own cards regardless of face state). Deck composition
+ * (copiesForPlayerCount) is public, so this needs no information `viewerId` doesn't
+ * actually have. Cards with no valueModifier (nothing to contribute to a neighbor) are
+ * skipped outright.
+ */
+function hiddenIdentityWeights(state: GameState, viewerId: string): Map<CardId, number> {
+  const viewer = state.players.find((p) => p.id === viewerId)!;
+  const weights = new Map<CardId, number>();
+  let total = 0;
+  for (const cardId of ALL_CARD_IDS) {
+    const def = CARD_DEFS[cardId];
+    if (def.disabled || !def.valueModifier) continue;
+    const totalCopies = copiesForPlayerCount(def, state.config.playerCount);
+    if (totalCopies === 0) continue;
+    const identityKnown = [...state.board.values()].filter((c) => c.cardId === cardId && (c.faceUp || c.ownerId === viewerId)).length;
+    const ownHandCopies = viewer.hand.filter((c) => c.cardId === cardId).length;
+    const hidden = Math.max(0, totalCopies - identityKnown - ownHandCopies);
+    if (hidden === 0) continue;
+    weights.set(cardId, hidden);
+    total += hidden;
+  }
+  if (total > 0) for (const [cardId, hidden] of weights) weights.set(cardId, hidden / total);
+  return weights;
+}
+
+/**
+ * The fair estimate's real blind spot: a still-hidden opposing card's `valueModifier`
+ * never runs at all (see redactedBoardFor -- it becomes the inert "Unknown"
+ * pseudo-card), so any effect it would eventually land on a *known* neighbor -- a
+ * Skysplitter's -3, an Earthshaker's row-wide -2, a Bannerman's +1/+2, etc -- is
+ * invisible to estimateMargin, even though the neighbor's owner is public information.
+ * That silently favors whoever's known cards happen to sit next to the most hidden
+ * cards, worst on boards where a lot stays face-down for a long time (e.g. Pit of
+ * Erebus's delayed flip gate).
+ *
+ * Fixed the same way Infiltrator/negation's dry-run helpers work elsewhere in this
+ * codebase: for every still-hidden position, temporarily swap in each candidate
+ * identity (weighted by hiddenIdentityWeights) and run its *real* valueModifier hook
+ * against the real (redacted) board, keeping only the deltas it lands on other,
+ * already-known cards -- never the hidden card's own value, which isn't part of
+ * anyone's known total yet. This needs no hand-tuned per-card magnitude table: it
+ * reuses each card's actual printed rule, so it automatically respects every
+ * condition that rule already checks (Earthshaker's real row, Truthseeker's real
+ * face-down check, Suppressor's real neighbor count, ...) and nets out positive for
+ * cards like Bannerman just as correctly as it nets out negative for the Control
+ * bucket's penalty cards -- no assumption here that hidden cards skew harmful, only
+ * that they skew *unaccounted for*.
+ *
+ * Returns the total expected adjustment per owner (added to totalsByOwner), not a
+ * per-card breakdown -- this stays purely an estimateMargin input, deliberately not
+ * plumbed into estimatedResolutionFor/its UI, since that surface promises its shown
+ * total exactly matches the sum of its shown per-card breakdown.
+ */
+function expectedHiddenNeighborAdjustments(state: GameState, viewerId: string): Map<string, number> {
+  const adjustments = new Map<string, number>();
+  const weights = hiddenIdentityWeights(state, viewerId);
+  if (weights.size === 0) return adjustments;
+
+  const bounds = state.config.boardBounds;
+  const board = redactedBoardFor(state.board, viewerId);
+  const ownerByInstanceId = new Map<string, string>();
+  for (const c of board.values()) ownerByInstanceId.set(c.instanceId, c.ownerId);
+
+  for (const [key, card] of board.entries()) {
+    if (card.cardId !== "Unknown") continue;
+    const pos = parsePosKey(key);
+    for (const [cardId, weight] of weights) {
+      const patchedSelf: CardInstance = { ...card, cardId };
+      const patchedBoard: Board = new Map(board);
+      patchedBoard.set(key, patchedSelf);
+      CARD_DEFS[cardId].valueModifier?.({
+        board: patchedBoard,
+        bounds,
+        round: state.round,
+        pos,
+        self: patchedSelf,
+        addDelta: (instanceId, amount) => {
+          if (instanceId === patchedSelf.instanceId) return;
+          const ownerId = ownerByInstanceId.get(instanceId);
+          if (!ownerId) return;
+          adjustments.set(ownerId, (adjustments.get(ownerId) ?? 0) + weight * amount);
+        },
+      });
+    }
+  }
+  return adjustments;
+}
+
+/**
  * A player's own honest estimate of standing: "my total minus the best opponent's
  * total", using only what they could actually know. Shared by the engine's automatic
  * AI vote-fill and by AI turn-decision modules that want a fair evaluation function.
+ * Both totals get expectedHiddenNeighborAdjustments folded in, so a card sitting next
+ * to a lot of still-hidden opposing cards doesn't read as safer than it really is.
  */
 export function estimateMargin(state: GameState, viewerId: string): number {
   const { totalsByOwner } = estimatedResolutionFor(state, viewerId);
-  const myScore = totalsByOwner[viewerId] ?? 0;
-  const bestOther = Math.max(0, ...state.players.filter((p) => p.id !== viewerId).map((p) => totalsByOwner[p.id] ?? 0));
+  const adjustments = expectedHiddenNeighborAdjustments(state, viewerId);
+  const totalFor = (playerId: string) => (totalsByOwner[playerId] ?? 0) + (adjustments.get(playerId) ?? 0);
+  const myScore = totalFor(viewerId);
+  const bestOther = Math.max(0, ...state.players.filter((p) => p.id !== viewerId).map((p) => totalFor(p.id)));
   return myScore - bestOther;
 }
 

@@ -23,11 +23,18 @@ const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
+/** How often to sweep for idle rooms -- see RoomRegistry.reapIdleRooms. Doesn't need to be frequent; the shortest timeout it's checking against (UNSTARTED_IDLE_TIMEOUT_MS) is an hour. */
+const REAP_INTERVAL_MS = 10 * 60 * 1000;
+
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => handle(req, res));
   const io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents>(httpServer);
   const serverOrigin = getLanOrigin(port);
-  wireSocketServer(io, new RoomRegistry(), serverOrigin);
+  const registry = new RoomRegistry();
+  wireSocketServer(io, registry, serverOrigin);
+
+  // unref -- this periodic sweep should never be the thing keeping the process alive.
+  setInterval(() => registry.reapIdleRooms(), REAP_INTERVAL_MS).unref();
 
   httpServer.listen(port, "0.0.0.0", () => {
     console.log(`> Ready on http://localhost:${port} (${dev ? "development" : process.env.NODE_ENV})`);

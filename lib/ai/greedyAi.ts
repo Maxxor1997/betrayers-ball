@@ -330,6 +330,23 @@ function warlordFlipDeterrenceBonus(state: GameState, playerId: string, target: 
 }
 
 /**
+ * Own-flip candidates only preempt the blind opponent-flip search below when their
+ * edge over baseline is a clean, decisive one -- not just noise. Every self-flippable
+ * card (Gloryseeker/Chronicler, the only two cards whose own value depends on
+ * self.faceUp, are both opponentOnlyFlip and so never appear as an own target at all)
+ * has zero *direct* self-value dependency, so before expectedHiddenNeighborAdjustments
+ * existed, an own target's hypotheticalFlipMargin delta was always exactly 0 and this
+ * branch never fired. Now every own flip gets a small secondary "defensive" delta too
+ * (revealing a card removes its exposure to a hypothetical hidden face-down-only
+ * threat like Truthseeker -- see estimateMargin) -- real, but small, and it shouldn't
+ * be enough on its own to skip a potentially much more valuable blind opponent flip.
+ * 1 matches the smallest single printed-effect magnitude in the deck (e.g. Footman's
+ * own +1, Beacon's +1/neighbor), so a gain at or above it reads as a genuine, decisive
+ * edge rather than this secondary noise.
+ */
+const OWN_FLIP_MIN_EDGE = 1;
+
+/**
  * Flips the target that improves the (fair) margin the most -- but only among the
  * player's own face-down cards, which they already know the identity of, so ranking
  * them by true post-flip value is fair. An opponent's face-down cards can't be ranked
@@ -366,7 +383,7 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
     }
   }
 
-  if (bestOwnTargets.length > 0) {
+  if (bestOwnTargets.length > 0 && bestOwnScore - baseline >= OWN_FLIP_MIN_EDGE) {
     return bestOwnTargets[Math.floor(rng() * bestOwnTargets.length)];
   }
 

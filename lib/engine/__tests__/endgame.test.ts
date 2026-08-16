@@ -166,8 +166,13 @@ describe("estimateMargin — fair, per-viewer evaluation", () => {
     // The placeholder has no printed effect of its own, but it's still a normal
     // neighbor for Bannerman's own effect to land on: p2's Unknown gets +1 from p1's
     // Bannerman, while Bannerman's own value is untouched (its effect only targets
-    // neighbors, not itself).
-    expect(estimateMargin(makeState({ board }), "p1")).toBe(CARD_DEFS.Bannerman.base - (CARD_DEFS.Unknown.base + 1));
+    // neighbors, not itself). On top of that, expectedHiddenNeighborAdjustments now
+    // also credits/discounts p1's own Bannerman for whatever that same hidden card
+    // might turn out to be once revealed (e.g. a hidden Skysplitter/Earthshaker would
+    // hit it, a hidden Bannerman would help it) -- see estimateMargin's doc comment.
+    // Not a round number since it's a deck-composition-weighted average, not a single
+    // card's printed rule.
+    expect(estimateMargin(makeState({ board }), "p1")).toBeCloseTo(-2.4523809523809526);
   });
 });
 

@@ -351,6 +351,72 @@ describe("GameSession rematch", () => {
   });
 });
 
+describe("GameSession roomStats", () => {
+  it("is empty until the first game in the room ends", () => {
+    const { session, hostToken } = harness(2);
+    expect(session.getLobbyState().roomStats).toEqual([]);
+    session.start(hostToken);
+    expect(session.getLobbyState().roomStats).toEqual([]);
+  });
+
+  it("tallies every seat once the game ends, winner included", async () => {
+    vi.useFakeTimers();
+    const { session, hostToken, statePushes } = harness(2);
+    session.start(hostToken);
+    const ended = await playUntilEnded(session, hostToken, statePushes);
+
+    const stats = session.getLobbyState().roomStats;
+    expect(stats).toHaveLength(2);
+    for (const entry of stats) {
+      expect(entry.games).toBe(1);
+      const isWinner = ended.result!.winnerIds.includes(entry.playerId);
+      expect(entry.wins).toBe(isWinner ? 1 : 0);
+      // 2p: placementDeltaSum is exactly -1 for the winner, +1 for the loser (see
+      // placementBaseline/placementMaxDeviation at playerCount=2) -- a tie would give
+      // both seats rank 1 and so both a -1, but the deterministic seed/roundCap combo
+      // here reliably produces a clean win, matching every other rematch test above.
+      expect(entry.placementDeltaSum).toBe(isWinner ? -1 : 1);
+    }
+
+    vi.useRealTimers();
+  });
+
+  it("keeps accumulating across rematches instead of resetting -- same lobby, running total", async () => {
+    vi.useFakeTimers();
+    const { session, hostToken, statePushes } = harness(2);
+    session.start(hostToken);
+    await playUntilEnded(session, hostToken, statePushes);
+
+    const afterFirstGame = session.getLobbyState().roomStats;
+    expect(afterFirstGame.every((e) => e.games === 1)).toBe(true);
+
+    session.rematch(hostToken, "none", "medium");
+    await playUntilEnded(session, hostToken, statePushes);
+
+    const afterSecondGame = session.getLobbyState().roomStats;
+    expect(afterSecondGame).toHaveLength(2);
+    expect(afterSecondGame.every((e) => e.games === 2)).toBe(true);
+    // Total wins across both seats always equals the number of games played (2) --
+    // every game has exactly one winner at this seed (no ties), win or loss.
+    expect(afterSecondGame.reduce((sum, e) => sum + e.wins, 0)).toBe(2);
+
+    vi.useRealTimers();
+  });
+
+  it("broadcasts a fresh lobby the moment the game ends, even though no seat changed", async () => {
+    vi.useFakeTimers();
+    const { session, hostToken, statePushes, lobbyPushes } = harness(2);
+    session.start(hostToken);
+    const pushCountBefore = lobbyPushes.length;
+    await playUntilEnded(session, hostToken, statePushes);
+
+    expect(lobbyPushes.length).toBeGreaterThan(pushCountBefore);
+    expect(lobbyPushes.at(-1)!.roomStats.every((e) => e.games === 1)).toBe(true);
+
+    vi.useRealTimers();
+  });
+});
+
 describe("GameSession AI turns", () => {
   it("plays out AI turns on its own once it becomes an AI seat's turn", async () => {
     vi.useFakeTimers();
