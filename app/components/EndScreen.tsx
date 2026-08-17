@@ -7,7 +7,7 @@ import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { PLAYER_BORDER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 import { ResolutionResult, ResolvedCard } from "@/lib/engine/resolution";
 import { GameState } from "@/lib/engine/types";
-import { breakdownWithBase } from "./scoreBreakdown";
+import { visibleBreakdown } from "./scoreBreakdown";
 
 /** Index-based, not identity-based -- same reasoning as Board.tsx's ownerColorClass. */
 function ownerTextColorClass(state: GameState, ownerId: string): string {
@@ -122,7 +122,7 @@ function PlayerTable({
                   </button>
                   {activeTooltipId === tooltipId && (
                     <div className="pointer-events-none absolute top-full left-0 z-20 mt-1 w-max min-w-[9rem] max-w-[16rem] rounded bg-zinc-900 px-2 py-1.5 text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
-                      {breakdownWithBase(c.breakdown, c.baseValue).map((d, j) => (
+                      {visibleBreakdown(c.breakdown).map((d, j) => (
                         <div key={j} className="flex justify-between gap-3 whitespace-nowrap">
                           <span>{d.label}</span>
                           <span>

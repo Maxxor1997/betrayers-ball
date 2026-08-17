@@ -339,7 +339,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   },
   PlagueBearer: {
     id: "PlagueBearer",
-    name: "Leatherwing",
+    name: "Noctule",
     base: 3,
     bucket: "Control",
     text: "Steals 3 from matching adj. pairs",
@@ -388,11 +388,13 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       "While face-down, it swaps base and printed rule (not which card it actually is) with the adjacent face-up card with the highest printed base -- that card scores using Facestealer's own (inert while face-up) rule in return. Multiple Facestealers can each independently borrow the same target's rule.",
     count: [2, 2, 2, 2, 3, 3, 4],
     // No valueModifier -- the swap itself is computed once, pre-resolution, by
-    // resolution.ts's computeIdentitySwaps/effectiveCardId (not a per-card scoring
-    // delta like every other card here). It never rewrites either card's actual
-    // cardId -- only which base/valueModifier each one *scores with* -- so a swapped
-    // Facestealer is still genuinely "Facestealer" for the board, its art, and stats
-    // tracking; only its score reflects the borrowed rule.
+    // resolution.ts's computeIdentitySwaps/applyIdentitySwaps (not a per-card scoring
+    // delta like every other card here). Resolution then runs entirely against the
+    // swapped board -- every card's own rule, including a swapped card's neighbors'
+    // rules, sees the swap as having genuinely happened -- but the *displayed*
+    // cardId (board art, name, stats tracking) is restored from the original,
+    // unswapped board afterward, so a swapped Facestealer is still genuinely
+    // "Facestealer" to look at; only its score reflects the borrowed rule.
   },
   Truthseeker: {
     id: "Truthseeker",

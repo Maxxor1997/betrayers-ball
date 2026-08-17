@@ -9,7 +9,7 @@ import { computeNegatedInstanceIds, ResolvedCard } from "@/lib/engine/resolution
 import { GameState, Position, posKey } from "@/lib/engine/types";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useHasHover } from "@/app/hooks/useHasHover";
-import { breakdownWithBase } from "./scoreBreakdown";
+import { visibleBreakdown } from "./scoreBreakdown";
 
 /** Index-based, not identity-based -- same seat position always gets the same color regardless of who (human or AI, single- or multiplayer) sits there. */
 function ownerColorClass(state: GameState, ownerId: string): string {
@@ -257,7 +257,7 @@ export function BoardGrid({
                     <div className="text-[10px] leading-tight">{tooltipDetail}</div>
                     {resolvedCard && (
                       <div className="mt-1 border-t border-white/20 pt-1 text-left dark:border-black/20">
-                        {breakdownWithBase(resolvedCard.breakdown, resolvedCard.baseValue).map((d, j) => (
+                        {visibleBreakdown(resolvedCard.breakdown).map((d, j) => (
                           <div key={j} className="flex justify-between gap-3 text-[10px] whitespace-nowrap">
                             <span>{d.label}</span>
                             <span>

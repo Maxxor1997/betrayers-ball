@@ -633,11 +633,10 @@ describe("resolveBoard — Infiltrator (Facestealer)", () => {
     const giant = place(board, 2, 1, "Giant", "p2", true); // base 6, lower than Warlord's 8
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, inf.instanceId).cardId).toBe("Infiltrator");
-    // Warlord's own real rule scans the *actual* board for enemy Warlords -- and the
-    // real target is still genuinely labeled Warlord (owned by p2, an enemy to p1), so
-    // the borrower finds exactly one real enemy Warlord (the target itself) and takes
-    // its own -2, on top of the borrowed base.
-    expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 2);
+    // Resolution runs entirely against the swapped board (see applyIdentitySwaps), so
+    // Warlord's own rule -- scanning for *other* real Warlords -- finds the swap
+    // target now reading as Infiltrator there, not Warlord: no rival to see, flat base.
+    expect(find(cards, inf.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
     expect(find(cards, warlord.instanceId).cardId).toBe("Warlord");
     expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
     // The lower-base neighbor is untouched by the swap -- only the highest is targeted.
@@ -673,9 +672,7 @@ describe("resolveBoard — Infiltrator (Facestealer)", () => {
     // a swaps with warlord (the only eligible neighbor), completely ignoring b even
     // though b is face-up and adjacent. cardId never changes for any of the three.
     expect(find(cards, a.instanceId).cardId).toBe("Infiltrator");
-    // Same real-Warlord-vs-Warlord interaction as the "picks only the highest-base"
-    // test above -- the real target counts as a's one enemy Warlord.
-    expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 2);
+    expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
     expect(find(cards, b.instanceId).cardId).toBe("Infiltrator"); // untouched, no swap at all
     expect(find(cards, b.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
     expect(find(cards, warlord.instanceId).cardId).toBe("Warlord");
@@ -703,10 +700,9 @@ describe("resolveBoard — Infiltrator (Facestealer)", () => {
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const infResolved = find(cards, inf.instanceId);
     expect(infResolved.cardId).toBe("Infiltrator");
-    // Warlord's base (8) minus its own real Warlord-vs-Warlord -2 (see the "picks only
-    // the highest-base" test above) minus Earthshaker's real -2 hit on the position it
-    // now occupies -- it's genuinely sitting there, not just borrowing a computed value.
-    expect(infResolved.finalValue).toBe(CARD_DEFS.Warlord.base - 2 - 2);
+    // Warlord's base (8) minus Earthshaker's real -2 hit on the position it now
+    // occupies -- it's genuinely sitting there, not just borrowing a computed value.
+    expect(infResolved.finalValue).toBe(CARD_DEFS.Warlord.base - 2);
   });
 
   it("multiple Facestealers can each independently borrow the same popular target's rule -- not a strict 1-for-1 exchange", () => {
@@ -720,15 +716,60 @@ describe("resolveBoard — Infiltrator (Facestealer)", () => {
     expect(find(cards, a.instanceId).cardId).toBe("Infiltrator");
     expect(find(cards, b.instanceId).cardId).toBe("Infiltrator");
     expect(find(cards, target.instanceId).cardId).toBe("Warlord");
-    // Each independently runs Warlord's own real rule (scanning the *actual* board for
-    // enemy Warlords) -- since the real target is still genuinely labeled Warlord and
-    // owned by p3, an enemy to both p1 and p2, each of a/b finds exactly one real
-    // enemy Warlord (the target) and takes its -2, even though a and b never see each
-    // other as Warlords (their own real cardId never changed).
+    // Resolution runs against the swapped board (see applyIdentitySwaps): a and b are
+    // now genuinely both Warlord there (different owners, p1/p2), so Warlord's own
+    // rule has each of them find the *other* as a real rival Warlord and take -2 --
+    // the original target no longer reads as Warlord to anyone at all, since its own
+    // position was swapped too.
     expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 2);
     expect(find(cards, b.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 2);
     // The target borrows Facestealer's (inert, face-up) rule -- just its flat base.
     expect(find(cards, target.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+  });
+
+  it("a borrowed rule's own neighbor checks see the swapped board too -- a Facestealer that borrows Usurper's rule isn't punished by a threat only the ORIGINAL Usurper was next to", () => {
+    // Warlord(8) - Usurper/Pretender(7) - Facestealer(3), in a row. Usurper's own real
+    // rule is "-4 if adjacent to a face-up card with base >= its own" -- Usurper itself
+    // qualifies for that penalty (it's next to Warlord's 8), but Facestealer is only
+    // ever adjacent to Usurper, never to Warlord directly.
+    const board: Board = new Map();
+    const warlord = place(board, 0, 1, "Warlord", "p2", true);
+    const usurper = place(board, 1, 1, "Pretender", "p3", true);
+    const facestealer = place(board, 2, 1, "Infiltrator", "p1", false);
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    // Facestealer borrows Usurper's rule (base 7, the only eligible neighbor) and runs
+    // it from its OWN position -- its only neighbor is the ex-Usurper, which now reads
+    // as a bare Infiltrator (base 3) on the swapped board, not a base-7 threat, so the
+    // borrowed -4 never fires. It's never actually adjacent to Warlord at all.
+    expect(find(cards, facestealer.instanceId).cardId).toBe("Infiltrator");
+    expect(find(cards, facestealer.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base);
+    // The original Usurper position now borrows Facestealer's (inert) rule -- flat
+    // base only, regardless of Warlord sitting right next to it.
+    expect(find(cards, usurper.instanceId).cardId).toBe("Pretender");
+    expect(find(cards, usurper.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
+    // Warlord itself is untouched by any of this.
+    expect(find(cards, warlord.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
+  });
+
+  it("the swap fools third parties too -- a card checking a swapped neighbor's identity sees the borrowed rule, not the real one", () => {
+    // Bannerman gives +2 to an adjacent Footman, +1 to everything else. A face-down
+    // Facestealer that successfully borrows a Footman's rule should read as a Footman
+    // to Bannerman's own neighbor check too, even though the board still displays it
+    // as Facestealer. The real Footman it borrowed from sits one cell further out --
+    // adjacent to the Facestealer (so it's the swap target) but not to Bannerman
+    // itself, so it can't also independently trigger Bannerman's Footman bonus.
+    const board: Board = new Map();
+    const bannerman = place(board, 0, 1, "Bannerman", "p2", true);
+    const facestealer = place(board, 1, 1, "Infiltrator", "p1", false);
+    const footman = place(board, 2, 1, "Footman", "p3", true); // base 5, Facestealer's only eligible (and highest-base) neighbor
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, facestealer.instanceId).cardId).toBe("Infiltrator");
+    // +2 (fooled Bannerman, reads it as a Footman) on top of the borrowed base of 5.
+    expect(find(cards, facestealer.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 2);
+    expect(find(cards, bannerman.instanceId).finalValue).toBe(CARD_DEFS.Bannerman.base);
+    // The real Footman, now borrowing Facestealer's inert rule, isn't adjacent to
+    // Bannerman at all (two cells away) -- flat borrowed base only.
+    expect(find(cards, footman.instanceId).finalValue).toBe(CARD_DEFS.Infiltrator.base);
   });
 
   it("flipping it face-up is the counter -- neutralizes an in-progress swap", () => {
