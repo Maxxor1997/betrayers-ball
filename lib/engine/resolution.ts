@@ -3,6 +3,54 @@ import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { Board, BoardBounds, CardId, CardInstance, CenterEffectId, Position } from "./types";
 
+/** One Infiltrator/target pair's identity swap -- see computeIdentitySwaps. */
+interface IdentitySwap {
+  originalCardId: CardId;
+  newCardId: CardId;
+}
+
+/**
+ * Step 0 — Facestealer's identity swap, computed once off the original board before
+ * anything else runs (suppression, value-modifiers, negation all operate on cardId, so
+ * this has to land first). Every face-down Infiltrator independently swaps cardId --
+ * base, text, and effect -- with whichever adjacent face-up card (any owner, never
+ * another Infiltrator) has the highest *printed* base; resolved value doesn't exist
+ * yet at this point, so printed base is the only thing there is to compare. This isn't
+ * a strict 1-for-1 exchange: multiple Facestealers can each independently swap with the
+ * same popular target (the target still just becomes a single Infiltrator; each
+ * Facestealer becomes its own independent copy of the target), so there's no ordering
+ * or tie-break to resolve -- ties among a single Facestealer's own candidates break by
+ * board/placement order (board.entries() iteration order), same as everywhere else in
+ * this engine that needs a deterministic first-among-equals.
+ */
+function computeIdentitySwaps(board: Board, bounds: BoardBounds): Map<string, IdentitySwap> {
+  const swaps = new Map<string, IdentitySwap>();
+  for (const [key, c] of board.entries()) {
+    if (c.faceUp || c.cardId !== "Infiltrator") continue;
+    const pos = parsePosKey(key);
+    const candidates = getAdjacentCards(board, bounds, pos).filter((n) => n.faceUp && n.cardId !== "Infiltrator");
+    if (candidates.length === 0) continue;
+    let target = candidates[0];
+    for (const candidate of candidates.slice(1)) {
+      if (CARD_DEFS[candidate.cardId].base > CARD_DEFS[target.cardId].base) target = candidate;
+    }
+    swaps.set(c.instanceId, { originalCardId: "Infiltrator", newCardId: target.cardId });
+    swaps.set(target.instanceId, { originalCardId: target.cardId, newCardId: "Infiltrator" });
+  }
+  return swaps;
+}
+
+/** Applies computeIdentitySwaps' result to a board -- same positions/owners/instanceIds/faceUp, swapped-in cardIds. */
+function applyIdentitySwaps(board: Board, swaps: Map<string, IdentitySwap>): Board {
+  if (swaps.size === 0) return board;
+  const swapped = new Map(board);
+  for (const [key, c] of board.entries()) {
+    const swap = swaps.get(c.instanceId);
+    if (swap) swapped.set(key, { ...c, cardId: swap.newCardId });
+  }
+  return swapped;
+}
+
 /** One line of a card's scoring breakdown -- `label` names the source, `amount` its contribution. */
 export interface ScoreContribution {
   label: string;
@@ -229,12 +277,15 @@ function applyFloors(board: Board, values: Map<string, number>): Set<string> {
  * with zero cards can still be the unique last place.
  */
 export function resolveBoard(
-  board: Board,
+  originalBoard: Board,
   bounds: BoardBounds,
   round: number,
   centerEffect: CenterEffectId = "none",
   playerIds?: string[]
 ): ResolutionResult {
+  const swaps = computeIdentitySwaps(originalBoard, bounds);
+  const board = applyIdentitySwaps(originalBoard, swaps);
+
   const negatorsOf = computeNegatorsOf(board, bounds);
   const negated = new Set(negatorsOf.keys());
   const contributions = computeValueModifiers(board, bounds, round, negated, negatorsOf, centerEffect);
@@ -260,7 +311,20 @@ export function resolveBoard(
     const cardContributions = contributions.get(c.instanceId) ?? [];
     const finalValue = values.get(c.instanceId) ?? base;
 
-    const breakdown: ScoreContribution[] = [{ label: "Base", amount: base, source: "self" }, ...cardContributions];
+    const breakdown: ScoreContribution[] = [{ label: "Base", amount: base, source: "self" }];
+    const swap = swaps.get(c.instanceId);
+    if (swap) {
+      // Legible post-game annotation for what this card actually is now -- see
+      // computeIdentitySwaps. Zero-amount: the swap's real effect is already baked
+      // into `base` and `cardContributions` above (this card *is* its new identity by
+      // this point), this line just explains why.
+      const label =
+        swap.originalCardId === "Infiltrator"
+          ? `${CARD_DEFS.Infiltrator.name} (became ${CARD_DEFS[swap.newCardId].name})`
+          : `${CARD_DEFS.Infiltrator.name} (this was ${CARD_DEFS[swap.originalCardId].name})`;
+      breakdown.push({ label, amount: 0, source: "self" });
+    }
+    breakdown.push(...cardContributions);
     const rawTotal = base + cardContributions.reduce((sum, d) => sum + (d.informational ? 0 : d.amount), 0);
     if (finalValue !== rawTotal) {
       // The card's own printed floor rule, not something a neighbor did.

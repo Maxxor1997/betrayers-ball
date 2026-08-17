@@ -133,7 +133,7 @@ describe("disruptionFor", () => {
     const board: Board = new Map();
     const e = place(board, 1, 1, "Earthshaker", "p1");
     place(board, 0, 1, "Footman", "p2"); // opponent, same row
-    place(board, 3, 1, "Footman", "p1"); // own side, same row -- also takes the -2
+    place(board, 2, 1, "Footman", "p1"); // own side, same row, contiguous with the opponent -- also takes the -2
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolved = cards.find((c) => c.instanceId === e.instanceId)!;
     // -2 (own) - (-2) (opponent) = 0 -- hurting your own side as much as the opponent
@@ -167,11 +167,10 @@ describe("disruptionFor", () => {
     // threshold, with no spare slot to accidentally create noise.
     const suppressor = place(board, 0, 1, "Suppressor", "p1");
     const glory = place(board, 1, 1, "Gloryseeker", "p2", true); // face-up -- would normally score +3
-    // Padding: Giants on the edge (x=0), so their own -3 "not on the edge" penalty
-    // never applies -- own self-contribution is cleanly 0, unlike Footman (whose line
-    // bonus doesn't care about card *type*, only ownership, and would accidentally
-    // trigger through Suppressor/each other here) or an off-edge Giant (which would
-    // add its own denied-penalty noise to this test's signal).
+    // Padding: Giants, which have no self-contribution at all (own contribution
+    // cleanly 0), unlike Footman (whose line bonus doesn't care about card *type*,
+    // only ownership, and would accidentally trigger through Suppressor/each other
+    // here) which would add its own denied-bonus noise to this test's signal.
     place(board, 0, 0, "Giant", "p1");
     place(board, 0, 2, "Giant", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);

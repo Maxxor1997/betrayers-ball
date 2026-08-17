@@ -172,7 +172,7 @@ describe("estimateMargin — fair, per-viewer evaluation", () => {
     // hit it, a hidden Bannerman would help it) -- see estimateMargin's doc comment.
     // Not a round number since it's a deck-composition-weighted average, not a single
     // card's printed rule.
-    expect(estimateMargin(makeState({ board }), "p1")).toBeCloseTo(-2.4523809523809526);
+    expect(estimateMargin(makeState({ board }), "p1")).toBeCloseTo(-2.517543859649123);
   });
 });
 

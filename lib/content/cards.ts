@@ -1,4 +1,4 @@
-import { adjacentPositions, countAdjacentOccupied, getAdjacentCards, isOwnerlessPosition, parsePosKey, posKey } from "@/lib/engine/board";
+import { adjacentPositions, countAdjacentOccupied, getAdjacentCards, isOwnerlessPosition, isPositionFaceUp, posKey } from "@/lib/engine/board";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { Board, BoardBounds, CardBucket, CardId, CardInstance, Position } from "@/lib/engine/types";
 
@@ -53,6 +53,8 @@ export interface CardDef {
   forceFaceUp?: boolean;
   /** While face-down, only an opponent can flip it -- its own owner can't cash in a self-triggered flip. */
   opponentOnlyFlip?: boolean;
+  /** A face-down card adjacent to this one (any owner) can't be flipped by anyone, including its own owner. */
+  blocksAdjacentFlips?: boolean;
 
   /** Value-modifying effect during resolution -- most cards with printed scoring text. */
   valueModifier?: (ctx: CardEffectContext) => void;
@@ -71,32 +73,6 @@ function flatCount(n: number): number[] {
 export function copiesForPlayerCount(def: CardDef, playerCount: number): number {
   if (def.disabled) return 0;
   return def.count[playerCount - MIN_PLAYERS] ?? 0;
-}
-
-/**
- * A card's value from its own printed rule alone -- base plus only the deltas its own
- * valueModifier applies to itself (never a neighbor's), found by running that hook in
- * isolation. This doesn't violate the "simultaneous, never read another card's
- * resolved value" resolution rule (see resolution.ts) -- it never reads another card's
- * *computed* contributions, it just re-runs that card's own hook against the live
- * board/round, the same simultaneous computation resolution.ts's real pass already
- * does for every card. Used by Infiltrator below so it inherits what a neighbor's own
- * rule gives it (e.g. Dying God's round penalty), not whatever its other neighbors
- * happen to be doing to it.
- */
-function selfResolvedValue(board: Board, bounds: BoardBounds, round: number, pos: Position, card: CardInstance): number {
-  let total = CARD_DEFS[card.cardId].base;
-  CARD_DEFS[card.cardId].valueModifier?.({
-    board,
-    bounds,
-    round,
-    pos,
-    self: card,
-    addDelta: (instanceId, amount) => {
-      if (instanceId === card.instanceId) total += amount;
-    },
-  });
-  return total;
 }
 
 /**
@@ -290,32 +266,41 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Cyclops",
     base: 6,
     bucket: "Slam",
-    text: "Always face-up. −3 if not on the edge",
-    fullText: "Always face-up — can't be played or stay face-down. −3 if it isn't placed on the edge of the board.",
+    text: "Always face-up. Adj. cards can't be flipped",
+    fullText:
+      "Always face-up — can't be played face-down. No adjacent card (any owner) can be flipped by anyone.",
     // 6p-8p bumped up from the flat 4 (and every other active card scaled the same
     // way) -- at handSize 8, 6p-8p games were drawing 76-100% of the deck straight
     // into hands, leaving almost no unseen pool. Scaled proportionally so each card's
     // relative weight in the deck is unchanged, just the deck itself is bigger.
     count: [2, 2, 4, 4, 6, 6, 8],
     forceFaceUp: true,
-    valueModifier: ({ bounds, pos, self, addDelta }) => {
-      const onEdge = pos.x === 0 || pos.x === bounds.width - 1 || pos.y === 0 || pos.y === bounds.height - 1;
-      if (!onEdge) addDelta(self.instanceId, -3, `${CARD_DEFS.Giant.name} (not on the edge)`);
-    },
+    blocksAdjacentFlips: true,
   },
   Earthshaker: {
     id: "Earthshaker",
     name: "Earthshaker",
     base: 4,
     bucket: "Control",
-    text: "−2 to row",
-    fullText: "−2 to every other card in its row (any owner, not itself).",
-    count: [0, 0, 0, 4, 5, 5, 6],
+    text: "−2 to connected row & col",
+    fullText: "−2 to every card (any owner, not itself) in the unbroken run of occupied cells extending from it along its row and its column.",
+    count: [2, 2, 2, 4, 5, 5, 6],
     valueModifier: ({ board, pos, self, addDelta }) => {
-      for (const [otherKey, other] of board.entries()) {
-        if (other.instanceId === self.instanceId) continue;
-        if (parsePosKey(otherKey).y === pos.y) addDelta(other.instanceId, -2, `${CARD_DEFS.Earthshaker.name} (same row)`);
+      function walk(dx: number, dy: number) {
+        let x = pos.x + dx;
+        let y = pos.y + dy;
+        while (true) {
+          const c = board.get(posKey({ x, y }));
+          if (!c) break;
+          addDelta(c.instanceId, -2, `${CARD_DEFS.Earthshaker.name} (connected row/col)`);
+          x += dx;
+          y += dy;
+        }
       }
+      walk(-1, 0);
+      walk(1, 0);
+      walk(0, -1);
+      walk(0, 1);
     },
   },
   Skysplitter: {
@@ -326,6 +311,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     text: "−3 above and below",
     fullText: "−3 to the card directly above and directly below.",
     count: [4, 4, 4, 4, 0, 0, 0],
+    disabled: true,
     valueModifier: ({ board, pos, addDelta }) => {
       const above = board.get(posKey({ x: pos.x, y: pos.y - 1 }));
       const below = board.get(posKey({ x: pos.x, y: pos.y + 1 }));
@@ -353,15 +339,13 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   },
   PlagueBearer: {
     id: "PlagueBearer",
-    name: "Plague Rat",
-    base: 3,
+    name: "Leatherwing",
+    base: 2,
     bucket: "Control",
-    text: "Steals 2 from matching adj. pairs",
+    text: "Steals 3 from matching adj. pairs",
     get fullText() {
       const self = CARD_DEFS.PlagueBearer.name;
-      const footman = CARD_DEFS.Footman.name;
-      const warlord = CARD_DEFS.Warlord.name;
-      return `If 2 or more of its neighbors are the same card type (any owner) -- say, two ${footman}s -- ${self} steals 2 points from each of them. This can happen for more than one matching type at once (e.g. two ${footman}s and two ${warlord}s both qualify), and each group pays out on its own.`;
+      return `If 2 or more of its neighbors are the same card type (any owner) ${self} steals 3 points from each of them. This can happen for more than one matching type at once, and each group pays out on its own.`;
     },
     count: [2, 2, 2, 2, 3, 3, 4],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
@@ -375,8 +359,8 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       for (const group of neighborsByType.values()) {
         if (group.length < 2) continue;
         for (const n of group) {
-          addDelta(n.instanceId, -2, `${CARD_DEFS.PlagueBearer.name} (stolen)`);
-          stolen += 2;
+          addDelta(n.instanceId, -3, `${CARD_DEFS.PlagueBearer.name} (stolen)`);
+          stolen += 3;
         }
       }
       if (stolen > 0) addDelta(self.instanceId, stolen, `${CARD_DEFS.PlagueBearer.name} (stole ${stolen})`);
@@ -399,44 +383,26 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Facestealer",
     base: 3,
     bucket: "Control",
-    text: "If face-down: swaps w/ highest-value adj.",
+    text: "If face-down: swaps identity w/ highest-base adj. face-up card",
     fullText:
-      "While face-down, it swaps values with the face-up adjacent card (any owner, never another Infiltrator) worth the most from its own printed rule alone -- ignoring whatever that card's other neighbors are doing to it. It becomes that value, and that card becomes Infiltrator's base.",
+      "While face-down, it swaps identities entirely -- base, text, and effect -- with the adjacent face-up card with the highest printed base. Multiple Facestealers can each independently swap with the same target.",
     count: [2, 2, 2, 2, 3, 3, 4],
-    valueModifier: ({ board, bounds, round, pos, self, addDelta }) => {
-      if (self.faceUp) return;
-      const candidates: { card: CardInstance; pos: Position }[] = [];
-      for (const p of adjacentPositions(pos, bounds)) {
-        const c = board.get(posKey(p));
-        if (c && c.faceUp && c.cardId !== "Infiltrator") candidates.push({ card: c, pos: p });
-      }
-      if (candidates.length === 0) return;
-      let target = candidates[0];
-      let targetValue = selfResolvedValue(board, bounds, round, target.pos, target.card);
-      for (const candidate of candidates.slice(1)) {
-        const value = selfResolvedValue(board, bounds, round, candidate.pos, candidate.card);
-        if (value > targetValue) {
-          target = candidate;
-          targetValue = value;
-        }
-      }
-      const ownBase = CARD_DEFS[self.cardId].base;
-      if (targetValue === ownBase) return;
-      addDelta(self.instanceId, targetValue - ownBase, `${CARD_DEFS.Infiltrator.name} (swapped w/ ${CARD_DEFS[target.card.cardId].name})`);
-      addDelta(target.card.instanceId, ownBase - targetValue, `${CARD_DEFS.Infiltrator.name} (swapped)`);
-    },
+    // No valueModifier -- the identity swap itself is computed once, pre-resolution,
+    // by resolution.ts's computeIdentitySwaps (not a per-card scoring delta like every
+    // other card here). By the time valueModifier hooks run, a swapped Infiltrator is
+    // simply whatever card it became.
   },
   Truthseeker: {
     id: "Truthseeker",
     name: "Inquisitor",
-    base: 4,
+    base: 5,
     bucket: "Control",
-    text: "−3 to each adj. face-down card",
-    fullText: "−3 to each adjacent face-down card (any owner).",
-    count: [4, 4, 4, 4, 5, 6, 6],
+    text: "−2 to each adj. face-down card",
+    fullText: "−2 to each adjacent face-down card (any owner).",
+    count: [2, 2, 2, 4, 5, 6, 6],
     valueModifier: ({ board, bounds, pos, addDelta }) => {
       for (const n of getAdjacentCards(board, bounds, pos)) {
-        if (!n.faceUp) addDelta(n.instanceId, -3, `${CARD_DEFS.Truthseeker.name} (face-down neighbor)`);
+        if (!n.faceUp) addDelta(n.instanceId, -2, `${CARD_DEFS.Truthseeker.name} (face-down neighbor)`);
       }
     },
   },
@@ -465,15 +431,52 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   },
   Beacon: {
     id: "Beacon",
-    name: "Salamander",
-    base: 3,
+    name: "Nightjar",
+    base: 4,
     bucket: "Engine",
-    text: "+1 per adj. face-up card",
-    fullText: "+1 for each adjacent face-up card (any owner).",
+    text: "+1 per adj. card matching own face state",
+    fullText:
+      "+1 for each adjacent card (any owner) whose face-up/face-down state matches this card's own.",
     count: [4, 4, 4, 4, 5, 6, 8],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
-      const faceUpNeighbors = getAdjacentCards(board, bounds, pos).filter((n) => n.faceUp).length;
-      if (faceUpNeighbors > 0) addDelta(self.instanceId, 1 * faceUpNeighbors, `${CARD_DEFS.Beacon.name} (${faceUpNeighbors} adj. face-up)`);
+      let matching = 0;
+      for (const p of adjacentPositions(pos, bounds)) {
+        const occupied = isOwnerlessPosition(p, bounds) || board.has(posKey(p));
+        if (occupied && isPositionFaceUp(board, bounds, p) === self.faceUp) matching++;
+      }
+      if (matching > 0) addDelta(self.instanceId, matching, `${CARD_DEFS.Beacon.name} (${matching} adj. matching face state)`);
+    },
+  },
+  PlagueRat: {
+    id: "PlagueRat",
+    name: "Plague Rat",
+    base: 3,
+    bucket: "Control",
+    text: "Afflicts adj. cards with Plague",
+    get fullText() {
+      return `Applies Plague to each adjacent card (any owner). Plague: −1 to every afflicted card, and spreads from each afflicted card to every card of the same owner connected to it (however far that chain of ownership runs). Each card can only be afflicted once by the same ${CARD_DEFS.PlagueRat.name}.`
+    },
+    count: [2, 2, 2, 2, 3, 3, 4],
+    valueModifier: ({ board, bounds, pos, addDelta }) => {
+      const afflicted = new Set<string>();
+      for (const seedPos of adjacentPositions(pos, bounds)) {
+        const seed = board.get(posKey(seedPos));
+        if (!seed || afflicted.has(seed.instanceId)) continue;
+        const stack: Position[] = [seedPos];
+        const visited = new Set<string>();
+        while (stack.length > 0) {
+          const curPos = stack.pop()!;
+          const cur = board.get(posKey(curPos));
+          if (!cur || visited.has(cur.instanceId)) continue;
+          visited.add(cur.instanceId);
+          afflicted.add(cur.instanceId);
+          for (const nPos of adjacentPositions(curPos, bounds)) {
+            const n = board.get(posKey(nPos));
+            if (n && n.ownerId === seed.ownerId && !visited.has(n.instanceId)) stack.push(nPos);
+          }
+        }
+      }
+      for (const instanceId of afflicted) addDelta(instanceId, -1, `${CARD_DEFS.PlagueRat.name} (plague)`);
     },
   },
   Unknown: {

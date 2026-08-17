@@ -202,33 +202,40 @@ describe("chooseGreedyAiAction — placement actually looks ahead", () => {
     }
   });
 
-  it("does NOT exploit the same Bannerman while it's still face-down (hidden info stays hidden)", () => {
-    const board: Board = new Map();
-    board.set(posKey({ x: 3, y: 2 }), card("Bannerman", "p2", false)); // face-down -- unknown to p1
-    const handCard = card("Footman", "p1");
-    const state = makeState({
-      board,
-      players: [
-        { id: "p1", hand: [handCard], isAI: true },
-        { id: "p2", hand: [], isAI: true },
-      ],
-    });
-
-    // Every legal cell now scores identically from p1's point of view (the hidden
-    // Bannerman is redacted to a neutral placeholder), so run it across many seeds and
-    // confirm the "exploit" cells are never favored more than any other legal cell --
-    // i.e. no systematic bias toward the hidden card's true identity.
-    const bannermanAdjacentKeys = new Set(["2,2", "3,1", "4,2"]);
-    let adjacentPicks = 0;
-    const trials = 30;
-    for (let seed = 0; seed < trials; seed++) {
-      const action = chooseGreedyAiAction(state, "p1", deterministicRng(100 + seed));
-      if (action.type === "place" && bannermanAdjacentKeys.has(posKey(action.position))) adjacentPicks++;
+  it("does NOT exploit the same Bannerman's TRUE identity while it's still face-down (hidden info stays hidden)", () => {
+    // Note: a legal, honest reason to prefer a cell next to *any* hidden card can
+    // exist -- expectedHiddenNeighborAdjustments (see endgame.ts) weighs every still-
+    // hidden position by public deck-composition odds across every possible identity,
+    // which is fair game since it never depends on which identity this hidden card
+    // actually is. What must stay impossible is the placement decision changing based
+    // on the hidden card's *true* identity -- that would mean its cardId (redacted to
+    // "Unknown" for p1) leaked through. So: build the same board with the hidden card
+    // actually being a Bannerman, and again with it actually being some other
+    // high-impact card, and confirm p1's choice is identical either way.
+    function stateWithHiddenCard(hiddenCardId: CardId): GameState {
+      const board: Board = new Map();
+      board.set(posKey({ x: 3, y: 2 }), card(hiddenCardId, "p2", false)); // face-down -- unknown to p1
+      const handCard = card("Footman", "p1");
+      return makeState({
+        board,
+        players: [
+          { id: "p1", hand: [handCard], isAI: true },
+          { id: "p2", hand: [], isAI: true },
+        ],
+      });
     }
-    // 3 of the ~7 legal cells are "adjacent to the hidden card" -- pure chance would
-    // land here ~3/7 of the time. A cheating AI would land here ~100% of the time.
-    expect(adjacentPicks).toBeLessThan(trials);
-    expect(adjacentPicks).toBeGreaterThan(0);
+
+    for (let seed = 0; seed < 10; seed++) {
+      const bannermanAction = chooseGreedyAiAction(stateWithHiddenCard("Bannerman"), "p1", deterministicRng(100 + seed));
+      const truthseekerAction = chooseGreedyAiAction(stateWithHiddenCard("Truthseeker"), "p1", deterministicRng(100 + seed));
+      // Compare shape only, not instanceId -- each stateWithHiddenCard call mints its
+      // own fresh handCard instance (via the shared `counter` in card()), so the two
+      // actions' instanceIds necessarily differ even when the decision itself matches.
+      expect(bannermanAction.type).toBe(truthseekerAction.type);
+      if (bannermanAction.type === "place" && truthseekerAction.type === "place") {
+        expect(bannermanAction.position).toEqual(truthseekerAction.position);
+      }
+    }
   });
 });
 
@@ -655,17 +662,27 @@ describe("chooseGreedyAiAction — placement heuristics correct for what a one-p
 
   it("prefers the row that hits the most enemy cards for Earthshaker, not just whichever helps against the current leader", () => {
     const board: Board = new Map();
-    // p2 is a guaranteed, untouchable leader -- 7 Giants fill row 0 completely (no
-    // empty cell left in that row at all), so there's no legal way to hit p2 with
-    // Earthshaker here. That isolates the comparison below: since p2's total never
-    // moves either way, the *real* margin ties between hitting p3's row 2 (1 card) and
-    // row 4 (2 cards) -- only the disruption heuristic should tell them apart.
+    // p2 is a guaranteed, untouchable leader -- its single Giant sits at (5,5) with its
+    // entire row (y=5) AND entire column (x=5) fully packed edge-to-edge, so there is
+    // no empty cell anywhere in that row or column. Earthshaker's -2 only ever reaches
+    // along its OWN row/column (an unbroken run from wherever it's placed), and it can
+    // only ever be placed on an empty cell -- so it can never even be placed inside row
+    // 5 or column 5, let alone reach the Giant sitting at their intersection. That
+    // isolates the comparison below: since p2's total never moves either way, the
+    // *real* margin ties between hitting p3's row 2 (1 contiguous card) and row 4 (2
+    // contiguous cards) -- only the disruption heuristic should tell them apart.
     for (let x = 0; x < 7; x++) {
-      board.set(posKey({ x, y: 0 }), card("Giant", "p2", true));
+      if (x !== 5) board.set(posKey({ x, y: 5 }), card("Footman", "p2"));
     }
+    for (let y = 0; y < 7; y++) {
+      if (y !== 5) board.set(posKey({ x: 5, y }), card("Footman", "p2"));
+    }
+    board.set(posKey({ x: 5, y: 5 }), card("Giant", "p2", true));
+
     board.set(posKey({ x: 0, y: 2 }), card("Footman", "p3"));
+    // Contiguous pair in row 4 -- a single Earthshaker placement can chain through both.
     board.set(posKey({ x: 0, y: 4 }), card("Footman", "p3"));
-    board.set(posKey({ x: 3, y: 4 }), card("Footman", "p3"));
+    board.set(posKey({ x: 1, y: 4 }), card("Footman", "p3"));
 
     const earthshaker = card("Earthshaker", "p1");
     const state = makeState({

@@ -254,11 +254,19 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "Corpse of the Great Wyrm",
     themeColorClass: "text-fuchsia-700 dark:text-fuchsia-500",
     titleHighlight: "Wyrm",
-    description: "Two extra ownerless tiles flank the center, two cells out along its row.",
+    description: "Two extra ownerless tiles sit directly beside the center, touching along its row. +1 to any card adjacent to any of the three.",
     ownerlessLabel: "Wyrm Head",
     ownerlessPositions: (bounds) => {
       const { x, y } = bounds.center;
-      return [{ x, y }, { x: x - 2, y }, { x: x + 2, y }].filter((p) => inBounds(p, bounds));
+      return [{ x, y }, { x: x - 1, y }, { x: x + 1, y }].filter((p) => inBounds(p, bounds));
+    },
+    valueModifiers: (board, bounds, addDelta) => {
+      const heads = bounds.ownerless ?? [bounds.center];
+      for (const [key, c] of board.entries()) {
+        const pos = parsePosKey(key);
+        const adjacentToHead = heads.some((h) => Math.abs(h.x - pos.x) + Math.abs(h.y - pos.y) === 1);
+        if (adjacentToHead) addDelta(c.instanceId, 1, CENTER_EFFECTS.threeHeadedDragon.label);
+      }
     },
   },
 

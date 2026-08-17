@@ -18,6 +18,7 @@ export type CardId =
   | "Mercenary"
   | "DyingGod"
   | "Beacon"
+  | "PlagueRat"
   /**
    * Synthetic, non-drawable placeholder for "an opponent's face-down card I can't
    * identify" -- used only by estimateMargin's fair evaluation board (see
