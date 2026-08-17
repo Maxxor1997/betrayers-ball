@@ -494,14 +494,52 @@ const DOOMHERALD_FLIP_CHANCE_PER_OPPONENT_TURN = 0.18;
  * Combines a per-opponent-turn flip rate across every opponent-turn still available
  * before scoring, as "at least one of N independent attempts lands on it"
  * (1 - (1-p)^N) -- saturating, not linear, so it never overshoots 1 the way naively
- * multiplying opponentCount * roundsRemaining * p would once N gets large at 8p. Shared
- * by every `opponentOnlyFlip` card's placement heuristic (Gloryseeker, Doomherald --
- * see their own per-turn rate constants above), since "some opponent eventually takes
- * a blind flip that happens to land here" is the same shape of event for any of them.
+ * multiplying opponentTurns * p would once N gets large at 8p. Shared by every
+ * `opponentOnlyFlip` card's placement heuristic (Gloryseeker, Doomherald -- see their
+ * own per-turn rate constants above) plus Facestealer's swap-risk term, since "some
+ * opponent eventually takes a blind flip that happens to land here" is the same shape
+ * of event for any of them -- `opponentTurns` is meant to come from
+ * exactRemainingOpponentTurns below, not a hand-rolled estimate.
  */
-function saturatingFlipChance(perOpponentTurnRate: number, roundsWithFlipAvailable: number, opponentCount: number): number {
-  const opponentTurns = roundsWithFlipAvailable * opponentCount;
+function saturatingFlipChance(perOpponentTurnRate: number, opponentTurns: number): number {
   return 1 - (1 - perOpponentTurnRate) ** opponentTurns;
+}
+
+/**
+ * Exact count of opponent turns remaining between `state` and the game's guaranteed
+ * end (round `roundCap`, forced by shouldEndGame in game.ts's advanceTurn regardless
+ * of how any vote goes), given exactly where in the current round `state` sits.
+ * Replaces the old "average rounds remaining × opponent count" approximation the
+ * flip-risk models above used to share (via expectedFinalRound's (minRoundFloor +
+ * roundCap)/2 midpoint): that treated every seat identically regardless of turn
+ * order, so a player one turn from a round boundary and a player who just started
+ * their round both got the same estimate -- most visibly wrong exactly when it
+ * matters most, the literal last turn of the game, which that averaged estimate
+ * never actually reaches 0 for, even though the true risk there is exactly zero
+ * (nobody left to take another turn at all).
+ *
+ * Deliberately ignores the *possibility* the game ends early via a passing vote
+ * (available from minRoundFloor on) -- modeling that honestly would need a real
+ * prediction of vote behavior (computeAiVote, unpredictable humans), which isn't
+ * attempted here. This is the hard upper bound instead: "if the game runs all the
+ * way to roundCap, how many opponent turns are actually left." Since an early vote
+ * can only *shorten* the game, this can only ever overestimate real risk, never
+ * underestimate it -- a conservative bound, not a new blind spot.
+ */
+function exactRemainingOpponentTurns(state: GameState): number {
+  const { players, round, turnsThisRound, config } = state;
+  const n = players.length;
+  let total = 0;
+  if (round >= config.flipUnlockRound) {
+    // Opponents who haven't gone yet this round -- the current player's own turn
+    // (the action being considered right now) isn't a flip risk to itself, so
+    // neither side of this subtraction counts it.
+    total += Math.max(0, n - 1 - turnsThisRound);
+  }
+  for (let r = round + 1; r <= config.roundCap; r++) {
+    if (r >= config.flipUnlockRound) total += n - 1;
+  }
+  return total;
 }
 
 /**
@@ -534,18 +572,19 @@ const INFILTRATOR_FEW_FACE_DOWN_PENALTY = 2;
  * own placement heuristic (the "Infiltrator" case below) and Cyclops's protection
  * credit (the "Giant" case below) -- a Cyclops that locks a Facestealer in place
  * credits back exactly what placing the Facestealer alone would have discounted,
- * rather than a separately-tuned number that could drift out of sync with it.
- * `currentRound` is the round the *placement action itself* is being considered in
- * (preState.round at both call sites) -- not read off `postState`, since placing
- * either card doesn't advance the round.
+ * rather than a separately-tuned number that could drift out of sync with it. Uses
+ * exactRemainingOpponentTurns rather than a rounds-remaining estimate, so a Facestealer
+ * placed on the actual last opponent turn of the game reads as genuinely zero risk,
+ * not just a small one -- see that function's own doc comment. `preState` is the state
+ * the *placement action itself* is being considered from (not `postState`, since
+ * placing either card doesn't change whose turn it is or how many are left).
  */
-function infiltratorSwapRiskAtStake(postState: GameState, playerId: string, target: CardInstance, currentRound: number): number {
+function infiltratorSwapRiskAtStake(postState: GameState, playerId: string, target: CardInstance, preState: GameState): number {
   const currentMargin = estimateMargin(postState, playerId);
   const marginIfFlipped = hypotheticalFlipMargin(postState, playerId, target);
   const swapValueAtStake = currentMargin - marginIfFlipped;
-  const roundsWithFlipAvailable = Math.max(0, expectedFinalRound(postState.config) - Math.max(currentRound, postState.config.flipUnlockRound));
-  const opponentCount = postState.players.length - 1;
-  const flipChance = saturatingFlipChance(INFILTRATOR_FLIP_CHANCE_PER_OPPONENT_TURN, roundsWithFlipAvailable, opponentCount);
+  const opponentTurns = exactRemainingOpponentTurns(preState);
+  const flipChance = saturatingFlipChance(INFILTRATOR_FLIP_CHANCE_PER_OPPONENT_TURN, opponentTurns);
   return -swapValueAtStake * flipChance;
 }
 
@@ -644,11 +683,12 @@ export function placementHeuristicAdjustment(
         // +3 only if face-up at scoring -- placed face-down (the common case), the fair
         // margin sees none of that yet. The earlier it's placed (once flips are actually
         // unlocked) and the more opponents there are, the more opponent-turns remain
-        // for one of them to plausibly flip it before the game ends.
+        // for one of them to plausibly flip it before the game ends -- exactly how many,
+        // down to this seat's actual position in the round, via
+        // exactRemainingOpponentTurns (so a Gloryseeker placed on the true last opponent
+        // turn of the game reads as truly 0 chance, not just a small one).
         if (placedCard.faceUp) return 0;
-        const roundsWithFlipAvailable = Math.max(0, expectedFinalRound(postState.config) - Math.max(preState.round, postState.config.flipUnlockRound));
-        const opponentCount = postState.players.length - 1;
-        const flipChance = saturatingFlipChance(GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN, roundsWithFlipAvailable, opponentCount);
+        const flipChance = saturatingFlipChance(GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN, exactRemainingOpponentTurns(preState));
         return 3 * flipChance;
       }
 
@@ -671,7 +711,7 @@ export function placementHeuristicAdjustment(
         // (few peers to blend in with), on top of that.
         if (placedCard.faceUp) return 0;
         const faceDownOnBoard = [...postState.board.values()].filter((c) => !c.faceUp).length;
-        let adjustment = infiltratorSwapRiskAtStake(postState, playerId, placedCard, preState.round);
+        let adjustment = infiltratorSwapRiskAtStake(postState, playerId, placedCard, preState);
         if (faceDownOnBoard < INFILTRATOR_FEW_FACE_DOWN_THRESHOLD) adjustment -= INFILTRATOR_FEW_FACE_DOWN_PENALTY;
         return adjustment;
       }
@@ -699,7 +739,7 @@ export function placementHeuristicAdjustment(
         let protectionCredit = 0;
         for (const n of getAdjacentCards(postState.board, postState.config.boardBounds, action.position)) {
           if (n.ownerId === playerId && !n.faceUp && n.cardId === "Infiltrator") {
-            protectionCredit -= infiltratorSwapRiskAtStake(postState, playerId, n, preState.round);
+            protectionCredit -= infiltratorSwapRiskAtStake(postState, playerId, n, preState);
           }
         }
         return protectionCredit;
@@ -716,9 +756,7 @@ export function placementHeuristicAdjustment(
         // hitting one of ours is a real cost, and both happen together if triggered,
         // so they're netted rather than only crediting the upside.
         if (placedCard.faceUp) return 0;
-        const roundsWithFlipAvailable = Math.max(0, expectedFinalRound(postState.config) - Math.max(preState.round, postState.config.flipUnlockRound));
-        const opponentCount = postState.players.length - 1;
-        const flipChance = saturatingFlipChance(DOOMHERALD_FLIP_CHANCE_PER_OPPONENT_TURN, roundsWithFlipAvailable, opponentCount);
+        const flipChance = saturatingFlipChance(DOOMHERALD_FLIP_CHANCE_PER_OPPONENT_TURN, exactRemainingOpponentTurns(preState));
         const neighbors = getAdjacentCards(postState.board, postState.config.boardBounds, action.position);
         let netNeighborDamage = 0;
         for (const n of neighbors) netNeighborDamage += n.ownerId === playerId ? -3 : 3;

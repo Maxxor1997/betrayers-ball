@@ -913,6 +913,40 @@ describe("placementHeuristicAdjustment — Warlord risk discount (mirror image o
   });
 });
 
+describe("placementHeuristicAdjustment — Gloryseeker's flip-chance credit uses the exact remaining opponent-turn count", () => {
+  it("credits exactly 0 when placed on the deterministic last opponent turn of the game -- no one is left to ever flip it", () => {
+    const position = { x: 3, y: 3 };
+    const gloryseeker = card("Gloryseeker", "p1", false);
+    const board: Board = new Map([[posKey(position), gloryseeker]]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    // Same "p1 is the very last player to act at roundCap" setup as the Facestealer
+    // tests below.
+    const preState = makeState({ round: 6, turnsThisRound: 1, players });
+    const postState = makeState({ round: 6, turnsThisRound: 1, players, board });
+
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: gloryseeker.instanceId, position }, postState);
+    expect(adjustment).toBe(0);
+  });
+
+  it("credits a real (nonzero) chance one opponent turn before that same deterministic end", () => {
+    const position = { x: 3, y: 3 };
+    const gloryseeker = card("Gloryseeker", "p1", false);
+    const board: Board = new Map([[posKey(position), gloryseeker]]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    const preState = makeState({ round: 6, turnsThisRound: 0, players });
+    const postState = makeState({ round: 6, turnsThisRound: 0, players, board });
+
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: gloryseeker.instanceId, position }, postState);
+    expect(adjustment).toBeGreaterThan(0);
+  });
+});
+
 describe("placementHeuristicAdjustment — Facestealer's swap-risk discount", () => {
   // Padding face-down cards so INFILTRATOR_FEW_FACE_DOWN_PENALTY never fires in these
   // tests -- they're specifically about the swap-value-at-stake term, not the separate
@@ -951,7 +985,13 @@ describe("placementHeuristicAdjustment — Facestealer's swap-risk discount", ()
     const infiltrator = card("Infiltrator", "p1", false);
     const board: Board = new Map([
       [posKey(position), infiltrator],
-      [posKey({ x: 3, y: 2 }), card("Berserker", "p2", true)], // base 2, below Infiltrator's own base of 3
+      // Suppressor: base 2, below Infiltrator's own base of 3, and has no
+      // valueModifier of its own -- a clean flat-base comparison (Berserker would work
+      // numerically too, but its own rule scans the *real* board for enemy Berserkers,
+      // and since Facestealer never actually rewrites cardId anymore, the real
+      // Suppressor/Berserker card is still genuinely sitting there for that scan to
+      // find, muddying a test that's specifically about the base comparison).
+      [posKey({ x: 3, y: 2 }), card("Suppressor", "p2", true)],
       ...padding(),
     ]);
     const players = [
@@ -961,7 +1001,7 @@ describe("placementHeuristicAdjustment — Facestealer's swap-risk discount", ()
     const preState = makeState({ round: 1, players });
     const postState = makeState({ round: 1, players, board });
 
-    // Swapping into Berserker (2) is worse than staying Infiltrator (3) if flipped --
+    // Swapping into Suppressor (2) is worse than staying Infiltrator (3) if flipped --
     // this swap is currently hurting this player, so a flip would be a relief, not a
     // risk: the term should credit, not dock.
     const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: infiltrator.instanceId, position }, postState);
@@ -983,6 +1023,52 @@ describe("placementHeuristicAdjustment — Facestealer's swap-risk discount", ()
     // so there's genuinely nothing at stake either way.
     const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: infiltrator.instanceId, position }, postState);
     expect(adjustment).toBe(0);
+  });
+
+  it("reads as exactly 0 risk (net of the few-face-down penalty) when placed on the deterministic last opponent turn of the game -- nobody is left to flip it", () => {
+    const position = { x: 3, y: 3 };
+    const infiltrator = card("Infiltrator", "p1", false);
+    const board: Board = new Map([
+      [posKey(position), infiltrator],
+      [posKey({ x: 3, y: 2 }), card("Warlord", "p2", true)], // a genuinely valuable swap target
+      ...padding(),
+    ]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    // CONFIG.roundCap is 6 and CONFIG.playerCount is 2 -- round 6 with 1 opponent
+    // turn already completed this round (turnsThisRound: 1) means p1 is the very
+    // last player to act before the game is guaranteed to end (shouldEndGame forces
+    // it at roundCap regardless of any vote -- see game.ts's advanceTurn). No
+    // opponent turn remains after this placement at all.
+    const preState = makeState({ round: 6, turnsThisRound: 1, players });
+    const postState = makeState({ round: 6, turnsThisRound: 1, players, board });
+
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: infiltrator.instanceId, position }, postState);
+    expect(adjustment).toBe(0);
+  });
+
+  it("still reads as a real (nonzero) risk one opponent turn before that same deterministic end", () => {
+    const position = { x: 3, y: 3 };
+    const infiltrator = card("Infiltrator", "p1", false);
+    const board: Board = new Map([
+      [posKey(position), infiltrator],
+      [posKey({ x: 3, y: 2 }), card("Warlord", "p2", true)],
+      ...padding(),
+    ]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    // Same final round, but p1 is first to act (turnsThisRound: 0) -- p2 still gets
+    // one more turn (and one more chance to flip) after this placement, before the
+    // game ends.
+    const preState = makeState({ round: 6, turnsThisRound: 0, players });
+    const postState = makeState({ round: 6, turnsThisRound: 0, players, board });
+
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: infiltrator.instanceId, position }, postState);
+    expect(adjustment).toBeLessThan(0);
   });
 });
 

@@ -340,7 +340,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   PlagueBearer: {
     id: "PlagueBearer",
     name: "Leatherwing",
-    base: 2,
+    base: 3,
     bucket: "Control",
     text: "Steals 3 from matching adj. pairs",
     get fullText() {
@@ -383,14 +383,16 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Facestealer",
     base: 3,
     bucket: "Control",
-    text: "If face-down: swaps identity w/ highest-base adj. face-up card",
+    text: "If face-down: scores as highest-base adj. face-up card instead",
     fullText:
-      "While face-down, it swaps identities entirely -- base, text, and effect -- with the adjacent face-up card with the highest printed base. Multiple Facestealers can each independently swap with the same target.",
+      "While face-down, it swaps base and printed rule (not which card it actually is) with the adjacent face-up card with the highest printed base -- that card scores using Facestealer's own (inert while face-up) rule in return. Multiple Facestealers can each independently borrow the same target's rule.",
     count: [2, 2, 2, 2, 3, 3, 4],
-    // No valueModifier -- the identity swap itself is computed once, pre-resolution,
-    // by resolution.ts's computeIdentitySwaps (not a per-card scoring delta like every
-    // other card here). By the time valueModifier hooks run, a swapped Infiltrator is
-    // simply whatever card it became.
+    // No valueModifier -- the swap itself is computed once, pre-resolution, by
+    // resolution.ts's computeIdentitySwaps/effectiveCardId (not a per-card scoring
+    // delta like every other card here). It never rewrites either card's actual
+    // cardId -- only which base/valueModifier each one *scores with* -- so a swapped
+    // Facestealer is still genuinely "Facestealer" for the board, its art, and stats
+    // tracking; only its score reflects the borrowed rule.
   },
   Truthseeker: {
     id: "Truthseeker",
@@ -450,7 +452,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   PlagueRat: {
     id: "PlagueRat",
     name: "Plague Rat",
-    base: 3,
+    base: 4,
     bucket: "Control",
     text: "Afflicts adj. cards with Plague",
     get fullText() {

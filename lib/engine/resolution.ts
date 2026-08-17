@@ -11,17 +11,19 @@ interface IdentitySwap {
 
 /**
  * Step 0 — Facestealer's identity swap, computed once off the original board before
- * anything else runs (suppression, value-modifiers, negation all operate on cardId, so
- * this has to land first). Every face-down Infiltrator independently swaps cardId --
- * base, text, and effect -- with whichever adjacent face-up card (any owner, never
- * another Infiltrator) has the highest *printed* base; resolved value doesn't exist
- * yet at this point, so printed base is the only thing there is to compare. This isn't
- * a strict 1-for-1 exchange: multiple Facestealers can each independently swap with the
- * same popular target (the target still just becomes a single Infiltrator; each
- * Facestealer becomes its own independent copy of the target), so there's no ordering
- * or tie-break to resolve -- ties among a single Facestealer's own candidates break by
- * board/placement order (board.entries() iteration order), same as everywhere else in
- * this engine that needs a deterministic first-among-equals.
+ * anything else runs (suppression and value-modifiers both need to know each card's
+ * *effective* base/rule, so this has to land first). Every face-down Infiltrator
+ * independently swaps base and printed rule (not cardId itself -- see effectiveCardId's
+ * doc comment for what stays real) with whichever adjacent face-up card (any owner,
+ * never another Infiltrator) has the highest *printed* base; resolved value doesn't
+ * exist yet at this point, so printed base is the only thing there is to compare. This
+ * isn't a strict 1-for-1 exchange: multiple Facestealers can each independently swap
+ * with the same popular target (the target's own effective rule still just becomes a
+ * single Infiltrator's; each Facestealer independently borrows its own copy of the
+ * target's rule), so there's no ordering or tie-break to resolve -- ties among a single
+ * Facestealer's own candidates break by board/placement order (board.entries()
+ * iteration order), same as everywhere else in this engine that needs a deterministic
+ * first-among-equals.
  */
 function computeIdentitySwaps(board: Board, bounds: BoardBounds): Map<string, IdentitySwap> {
   const swaps = new Map<string, IdentitySwap>();
@@ -40,15 +42,21 @@ function computeIdentitySwaps(board: Board, bounds: BoardBounds): Map<string, Id
   return swaps;
 }
 
-/** Applies computeIdentitySwaps' result to a board -- same positions/owners/instanceIds/faceUp, swapped-in cardIds. */
-function applyIdentitySwaps(board: Board, swaps: Map<string, IdentitySwap>): Board {
-  if (swaps.size === 0) return board;
-  const swapped = new Map(board);
-  for (const [key, c] of board.entries()) {
-    const swap = swaps.get(c.instanceId);
-    if (swap) swapped.set(key, { ...c, cardId: swap.newCardId });
-  }
-  return swapped;
+/**
+ * Which CardDef's base/valueModifier/negatesNeighborsIf a card instance actually scores
+ * with -- its own real `cardId` unless computeIdentitySwaps swapped it, in which case
+ * whatever it's currently borrowing. Deliberately never mutates the board or a card's
+ * own `cardId`: the board still shows the card that was actually placed there (its art,
+ * its name, its stats-tracking identity all stay real -- see game_spec.md's "the board
+ * is what's actually there" spirit), and every *other* card's own effect still reads
+ * neighbors' real identities off the untouched board (so e.g. Bannerman's "is this
+ * neighbor a Footman" check is never fooled by a Facestealer borrowing Footman's rule --
+ * only the borrowing card's own scoring computation is affected, nothing about how it
+ * looks to everyone else). Falls back to the instance's own cardId when there's no swap,
+ * so every caller can use this unconditionally instead of checking swaps.has() first.
+ */
+function effectiveCardId(instanceId: string, ownCardId: CardId, swaps: Map<string, IdentitySwap>): CardId {
+  return swaps.get(instanceId)?.newCardId ?? ownCardId;
 }
 
 /** One line of a card's scoring breakdown -- `label` names the source, `amount` its contribution. */
@@ -94,6 +102,7 @@ export const FLOORED_AT_ZERO_LABEL = "Floored at 0";
 
 export interface ResolvedCard {
   instanceId: string;
+  /** The card actually placed on the board -- never rewritten by a Facestealer swap (see effectiveCardId); only its *scoring* (base/breakdown/finalValue) reflects a swap, not this. */
   cardId: CardId;
   ownerId: string;
   position: Position;
@@ -126,15 +135,15 @@ export interface ResolutionResult {
  * cancelled back to whichever negator(s) caused it; computeNegatedInstanceIds (the
  * plain membership version every other caller wants) is defined in terms of this.
  */
-function computeNegatorsOf(board: Board, bounds: BoardBounds): Map<string, string[]> {
+function computeNegatorsOf(board: Board, bounds: BoardBounds, swaps: Map<string, IdentitySwap> = new Map()): Map<string, string[]> {
   const negatorsOf = new Map<string, string[]>();
   for (const [key, c] of board.entries()) {
-    const negatesNeighborsIf = CARD_DEFS[c.cardId].negatesNeighborsIf;
+    const negatesNeighborsIf = CARD_DEFS[effectiveCardId(c.instanceId, c.cardId, swaps)].negatesNeighborsIf;
     if (!negatesNeighborsIf) continue;
     const pos = parsePosKey(key);
     if (!negatesNeighborsIf({ board, bounds, pos })) continue;
     for (const neighbor of getAdjacentCards(board, bounds, pos)) {
-      if (CARD_DEFS[neighbor.cardId].negatesNeighborsIf) continue; // negation-immune
+      if (CARD_DEFS[effectiveCardId(neighbor.instanceId, neighbor.cardId, swaps)].negatesNeighborsIf) continue; // negation-immune
       const list = negatorsOf.get(neighbor.instanceId);
       if (list) list.push(c.instanceId);
       else negatorsOf.set(neighbor.instanceId, [c.instanceId]);
@@ -143,7 +152,7 @@ function computeNegatorsOf(board: Board, bounds: BoardBounds): Map<string, strin
   return negatorsOf;
 }
 
-/** Plain "is this instance negated at all" membership -- what every caller outside this file actually wants (e.g. Board.tsx's rendering, pseudoCardLiveValue). */
+/** Plain "is this instance negated at all" membership -- what every caller outside this file actually wants (e.g. Board.tsx's rendering, pseudoCardLiveValue). Never swap-aware -- Facestealer's swap is a resolveBoard-only concept (see effectiveCardId), and this is used for live, pre-scoring board rendering. */
 export function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Set<string> {
   return new Set(computeNegatorsOf(board, bounds).keys());
 }
@@ -155,16 +164,20 @@ export function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Se
  * real impact shows up in the breakdown instead of just silently vanishing. Same
  * "simultaneous, only ever reads board/identity, never another card's resolved value"
  * computation every valueModifier already does -- this doesn't add a new kind of read,
- * it just runs one in isolation to see what it would have produced.
+ * it just runs one in isolation to see what it would have produced. `self` is patched
+ * to the card's *effective* identity (see effectiveCardId) so a swapped card's own
+ * self-referential lookups (e.g. Pretender's `CARD_DEFS[self.cardId].base`) see the
+ * rule it's actually borrowing, not its real, unchanged identity.
  */
-function selfContributionOnly(board: Board, bounds: BoardBounds, round: number, pos: Position, card: CardInstance): number {
+function selfContributionOnly(board: Board, bounds: BoardBounds, round: number, pos: Position, card: CardInstance, swaps: Map<string, IdentitySwap>): number {
   let total = 0;
-  CARD_DEFS[card.cardId].valueModifier?.({
+  const cardId = effectiveCardId(card.instanceId, card.cardId, swaps);
+  CARD_DEFS[cardId].valueModifier?.({
     board,
     bounds,
     round,
     pos,
-    self: card,
+    self: { ...card, cardId },
     addDelta: (instanceId, amount) => {
       if (instanceId === card.instanceId) total += amount;
     },
@@ -192,7 +205,8 @@ function computeValueModifiers(
   round: number,
   negated: Set<string>,
   negatorsOf: Map<string, string[]>,
-  centerEffect: CenterEffectId
+  centerEffect: CenterEffectId,
+  swaps: Map<string, IdentitySwap>
 ): Map<string, ScoreContribution[]> {
   const contributions = new Map<string, ScoreContribution[]>();
   const push = (
@@ -219,7 +233,8 @@ function computeValueModifiers(
       const isSelf = instanceId === c.instanceId;
       push(instanceId, amount, label, isSelf ? "self" : "external", isSelf ? undefined : c.instanceId);
     };
-    CARD_DEFS[c.cardId].valueModifier?.({ board, bounds, round, pos, self: c, addDelta });
+    const cardId = effectiveCardId(c.instanceId, c.cardId, swaps);
+    CARD_DEFS[cardId].valueModifier?.({ board, bounds, round, pos, self: { ...c, cardId }, addDelta });
   }
 
   // Negation cancels a target's own valueModifier entirely (see the loop above), so
@@ -235,7 +250,7 @@ function computeValueModifiers(
     for (const [instanceId, negatorIds] of negatorsOf) {
       const target = byInstanceId.get(instanceId);
       if (!target) continue;
-      const deniedSelfContribution = selfContributionOnly(board, bounds, round, target.pos, target.card);
+      const deniedSelfContribution = selfContributionOnly(board, bounds, round, target.pos, target.card, swaps);
       if (deniedSelfContribution === 0) continue; // nothing was actually denied
       const share = deniedSelfContribution / negatorIds.length;
       for (const negatorId of negatorIds) {
@@ -277,18 +292,17 @@ function applyFloors(board: Board, values: Map<string, number>): Set<string> {
  * with zero cards can still be the unique last place.
  */
 export function resolveBoard(
-  originalBoard: Board,
+  board: Board,
   bounds: BoardBounds,
   round: number,
   centerEffect: CenterEffectId = "none",
   playerIds?: string[]
 ): ResolutionResult {
-  const swaps = computeIdentitySwaps(originalBoard, bounds);
-  const board = applyIdentitySwaps(originalBoard, swaps);
+  const swaps = computeIdentitySwaps(board, bounds);
 
-  const negatorsOf = computeNegatorsOf(board, bounds);
+  const negatorsOf = computeNegatorsOf(board, bounds, swaps);
   const negated = new Set(negatorsOf.keys());
-  const contributions = computeValueModifiers(board, bounds, round, negated, negatorsOf, centerEffect);
+  const contributions = computeValueModifiers(board, bounds, round, negated, negatorsOf, centerEffect, swaps);
 
   // `informational` entries (currently just negation's "here's what got cancelled"
   // lines -- see computeValueModifiers) explain something in the breakdown/disruption
@@ -296,7 +310,8 @@ export function resolveBoard(
   // is always exactly its base, full stop.
   const values = new Map<string, number>();
   for (const c of board.values()) {
-    const rawTotal = CARD_DEFS[c.cardId].base + (contributions.get(c.instanceId) ?? []).reduce((sum, d) => sum + (d.informational ? 0 : d.amount), 0);
+    const base = CARD_DEFS[effectiveCardId(c.instanceId, c.cardId, swaps)].base;
+    const rawTotal = base + (contributions.get(c.instanceId) ?? []).reduce((sum, d) => sum + (d.informational ? 0 : d.amount), 0);
     values.set(c.instanceId, rawTotal);
   }
 
@@ -307,21 +322,24 @@ export function resolveBoard(
   if (playerIds) for (const id of playerIds) totalsByOwner[id] = 0;
 
   for (const [key, c] of board.entries()) {
-    const base = CARD_DEFS[c.cardId].base;
+    const swap = swaps.get(c.instanceId);
+    // The breakdown's "Base" reflects what's actually being *scored* -- the borrowed
+    // base when swapped -- even though `cardId` below stays this card's real, unchanged
+    // identity (see effectiveCardId's doc comment for why the two can differ).
+    const base = CARD_DEFS[effectiveCardId(c.instanceId, c.cardId, swaps)].base;
     const cardContributions = contributions.get(c.instanceId) ?? [];
     const finalValue = values.get(c.instanceId) ?? base;
 
     const breakdown: ScoreContribution[] = [{ label: "Base", amount: base, source: "self" }];
-    const swap = swaps.get(c.instanceId);
     if (swap) {
-      // Legible post-game annotation for what this card actually is now -- see
-      // computeIdentitySwaps. Zero-amount: the swap's real effect is already baked
-      // into `base` and `cardContributions` above (this card *is* its new identity by
-      // this point), this line just explains why.
+      // Legible post-game annotation for why this card's own numbers don't match its
+      // printed rule -- see computeIdentitySwaps. Zero-amount: the swap's real effect
+      // is already baked into `base` and `cardContributions` above, this line just
+      // explains why.
       const label =
         swap.originalCardId === "Infiltrator"
-          ? `${CARD_DEFS.Infiltrator.name} (became ${CARD_DEFS[swap.newCardId].name})`
-          : `${CARD_DEFS.Infiltrator.name} (this was ${CARD_DEFS[swap.originalCardId].name})`;
+          ? `${CARD_DEFS.Infiltrator.name} (borrowing ${CARD_DEFS[swap.newCardId].name}'s rule)`
+          : `${CARD_DEFS.Infiltrator.name} (its rule was stolen -- scoring as ${CARD_DEFS.Infiltrator.name} instead)`;
       breakdown.push({ label, amount: 0, source: "self" });
     }
     breakdown.push(...cardContributions);
