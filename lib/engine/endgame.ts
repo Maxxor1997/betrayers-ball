@@ -96,25 +96,28 @@ function hiddenIdentityWeights(state: GameState, viewerId: string): Map<CardId, 
 /**
  * The fair estimate's real blind spot: a still-hidden opposing card's `valueModifier`
  * never runs at all (see redactedBoardFor -- it becomes the inert "Unknown"
- * pseudo-card), so any effect it would eventually land on a *known* neighbor -- a
- * Skysplitter's -3, an Earthshaker's row-wide -2, a Bannerman's +1/+2, etc -- is
- * invisible to estimateMargin, even though the neighbor's owner is public information.
- * That silently favors whoever's known cards happen to sit next to the most hidden
- * cards, worst on boards where a lot stays face-down for a long time (e.g. Pit of
- * Erebus's delayed flip gate).
+ * pseudo-card), so any effect it would eventually land on a *known* neighbor -- a Plague
+ * Rat's flood-fill, an Earthshaker's connected-row/column -2, a Bannerman's +1/+2, etc
+ * -- is invisible to estimateMargin, even though the neighbor's owner is public
+ * information. That silently favors whoever's known cards happen to sit next to the
+ * most hidden cards, worst on boards where a lot stays face-down for a long time (e.g.
+ * Pit of Erebus's delayed flip gate).
  *
- * Fixed the same way Infiltrator/negation's dry-run helpers work elsewhere in this
- * codebase: for every still-hidden position, temporarily swap in each candidate
- * identity (weighted by hiddenIdentityWeights) and run its *real* valueModifier hook
- * against the real (redacted) board, keeping only the deltas it lands on other,
- * already-known cards -- never the hidden card's own value, which isn't part of
- * anyone's known total yet. This needs no hand-tuned per-card magnitude table: it
- * reuses each card's actual printed rule, so it automatically respects every
- * condition that rule already checks (Earthshaker's real row, Truthseeker's real
- * face-down check, Suppressor's real neighbor count, ...) and nets out positive for
- * cards like Bannerman just as correctly as it nets out negative for the Control
- * bucket's penalty cards -- no assumption here that hidden cards skew harmful, only
- * that they skew *unaccounted for*.
+ * Fixed the same way negation's dry-run helper (selfContributionOnly in resolution.ts)
+ * works elsewhere in this codebase: for every still-hidden position, temporarily swap
+ * in each candidate identity (weighted by hiddenIdentityWeights) and run its *real*
+ * valueModifier hook against the real (redacted) board, keeping only the deltas it
+ * lands on other, already-known cards -- never the hidden card's own value, which isn't
+ * part of anyone's known total yet. This needs no hand-tuned per-card magnitude table:
+ * it reuses each card's actual printed rule, so it automatically respects every
+ * condition that rule already checks (Earthshaker's real connected row/column,
+ * Truthseeker's real face-down check, Suppressor's real neighbor count, ...) and nets
+ * out positive for cards like Bannerman just as correctly as it nets out negative for
+ * the Control bucket's penalty cards -- no assumption here that hidden cards skew
+ * harmful, only that they skew *unaccounted for*. (Facestealer is a deliberate
+ * exception: its identity swap isn't a valueModifier at all anymore -- see
+ * lib/content/cards.ts and resolution.ts's computeIdentitySwaps -- so it's naturally
+ * excluded from hiddenIdentityWeights below, which only considers cards with one.)
  *
  * Returns the total expected adjustment per owner (added to totalsByOwner), not a
  * per-card breakdown -- this stays purely an estimateMargin input, deliberately not

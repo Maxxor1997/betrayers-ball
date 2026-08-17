@@ -318,13 +318,15 @@ describe("chooseGreedyAiAction — Truthseeker/Beacon-aware flip targeting", () 
     expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: targetB.instanceId });
   });
 
-  it("prefers flipping an opponent card adjacent to the AI's own Beacon", () => {
+  it("prefers flipping an opponent card adjacent to the AI's own face-up Beacon (Nightjar) -- flipping the target creates a matching-face-state neighbor", () => {
     const board: Board = new Map();
     board.set(posKey({ x: 2, y: 2 }), card("Footman", "p1")); // anchor -- equidistant from both targets
-    board.set(posKey({ x: 1, y: 1 }), card("Beacon", "p1")); // known (own); adjacent only to target A
+    board.set(posKey({ x: 1, y: 1 }), card("Beacon", "p1", true)); // known (own), face-up; adjacent only to target A
     const targetA = card("Footman", "p2", false);
     const targetB = card("Footman", "p2", false);
-    board.set(posKey({ x: 2, y: 1 }), targetA); // adjacent to the AI's own Beacon -- flipping it helps the AI
+    // Flipping targetA face-up creates a face-up/face-up match with the AI's own
+    // face-up Beacon -- a real +1 for the AI (see cards.ts's "matches own face state").
+    board.set(posKey({ x: 2, y: 1 }), targetA);
     board.set(posKey({ x: 2, y: 3 }), targetB); // no special neighbor
     const state = makeState({
       board,
@@ -339,13 +341,36 @@ describe("chooseGreedyAiAction — Truthseeker/Beacon-aware flip targeting", () 
     expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: targetA.instanceId });
   });
 
-  it("avoids flipping an opponent card adjacent to an opponent's (revealed) Beacon", () => {
+  it("avoids flipping an opponent card adjacent to the AI's own face-down Beacon -- flipping the target would break an existing match", () => {
+    const board: Board = new Map();
+    board.set(posKey({ x: 2, y: 2 }), card("Footman", "p1")); // anchor -- equidistant from both targets
+    board.set(posKey({ x: 1, y: 1 }), card("Beacon", "p1", false)); // known (own), face-down; adjacent only to target A
+    const targetA = card("Footman", "p2", false);
+    const targetB = card("Footman", "p2", false);
+    // targetA is currently face-down, matching the AI's own face-down Beacon -- flipping
+    // it breaks that match, a real -1 for the AI, so it should be avoided in favor of B.
+    board.set(posKey({ x: 2, y: 1 }), targetA);
+    board.set(posKey({ x: 2, y: 3 }), targetB); // no special neighbor
+    const state = makeState({
+      board,
+      round: 2,
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+    });
+
+    const action = chooseGreedyAiAction(state, "p1", () => 0.01);
+    expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: targetB.instanceId });
+  });
+
+  it("avoids flipping an opponent card adjacent to an opponent's revealed face-up Beacon -- flipping it would help them", () => {
     const board: Board = new Map();
     board.set(posKey({ x: 2, y: 2 }), card("Footman", "p1")); // anchor -- equidistant from both targets
     board.set(posKey({ x: 1, y: 1 }), card("Beacon", "p2", true)); // revealed, so known; adjacent only to target A
     const targetA = card("Footman", "p2", false);
     const targetB = card("Footman", "p2", false);
-    board.set(posKey({ x: 2, y: 1 }), targetA); // adjacent to a rival's Beacon -- flipping it helps them, not the AI
+    board.set(posKey({ x: 2, y: 1 }), targetA); // adjacent to a rival's face-up Beacon -- flipping it helps them, not the AI
     board.set(posKey({ x: 2, y: 3 }), targetB); // no special neighbor
     const state = makeState({
       board,
@@ -412,7 +437,14 @@ describe("chooseGreedyAiAction — Truthseeker/Beacon-aware flip targeting", () 
     expect(discounted.type).not.toBe("flip");
   });
 
-  it("explores more often when holding a Beacon -- more face-up cards is generally good setup for it", () => {
+  it("holding a Beacon (Nightjar) no longer nudges the exploration rate at all -- removed once it stopped unconditionally wanting more face-up neighbors", () => {
+    // Nightjar keys off matching its own face-up/down state, not "more face-up cards is
+    // always good" (see cards.ts) -- whether more face-up cards helps depends on what
+    // face state it and its owner's own future flips end up in, which isn't knowable
+    // from hand alone, so there's no honest directional lean anymore (see
+    // HAND_TRUTHSEEKER_EXPLORATION_DISCOUNT's doc comment in greedyAi.ts). Holding one
+    // should produce the exact same explore/don't-explore decision as not holding one,
+    // at a rate that would have cleared the old (now-removed) boosted threshold.
     const board: Board = new Map();
     const opponentCard = card("Footman", "p2", false);
     board.set(posKey({ x: 2, y: 2 }), opponentCard);
@@ -434,13 +466,14 @@ describe("chooseGreedyAiAction — Truthseeker/Beacon-aware flip targeting", () 
       ],
     });
 
-    // Midpoint between BASE_EXPLORATION and the Beacon-in-hand-boosted rate (+0.15) --
-    // clears the boosted rate but not the plain baseline.
-    const midpoint = () => BASE_EXPLORATION + 0.075;
-    const baseline = chooseGreedyAiAction(withoutBeacon, "p1", midpoint);
-    const boosted = chooseGreedyAiAction(withBeacon, "p1", midpoint);
-    expect(baseline.type).not.toBe("flip");
-    expect(boosted.type).toBe("flip");
+    // Comfortably below BASE_EXPLORATION -- clears the (single, unboosted) threshold
+    // either way, so both scenarios explore and should land on the exact same target.
+    const rng = () => BASE_EXPLORATION - 0.075;
+    const baseline = chooseGreedyAiAction(withoutBeacon, "p1", rng);
+    const withHand = chooseGreedyAiAction(withBeacon, "p1", rng);
+    expect(baseline.type).toBe("flip");
+    expect(withHand.type).toBe("flip");
+    expect(baseline).toEqual(withHand);
   });
 
   it("explores less often when holding an Infiltrator -- protects a card that needs to stay hidden", () => {
@@ -876,6 +909,154 @@ describe("placementHeuristicAdjustment — Warlord risk discount (mirror image o
     // p2 is the only opponent, and they're already a known owner -- no opponents left
     // to speculate about.
     const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: warlord.instanceId, position }, postState);
+    expect(adjustment).toBe(0);
+  });
+});
+
+describe("placementHeuristicAdjustment — Facestealer's swap-risk discount", () => {
+  // Padding face-down cards so INFILTRATOR_FEW_FACE_DOWN_PENALTY never fires in these
+  // tests -- they're specifically about the swap-value-at-stake term, not the separate
+  // few-face-down-peers penalty.
+  function padding(): [string, CardInstance][] {
+    return [
+      [posKey({ x: 6, y: 6 }), card("Footman", "p2", false)],
+      [posKey({ x: 6, y: 5 }), card("Footman", "p2", false)],
+      [posKey({ x: 5, y: 6 }), card("Footman", "p2", false)],
+    ];
+  }
+
+  it("is a real risk (negative) when the swap it's currently holding is good for this player", () => {
+    const position = { x: 3, y: 3 };
+    const infiltrator = card("Infiltrator", "p1", false);
+    const board: Board = new Map([
+      [posKey(position), infiltrator],
+      [posKey({ x: 3, y: 2 }), card("Warlord", "p2", true)], // base 8, no rival Warlords -- a clean, valuable swap target
+      ...padding(),
+    ]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    const preState = makeState({ round: 1, players });
+    const postState = makeState({ round: 1, players, board });
+
+    // Swapping into Warlord (8) beats staying Infiltrator (3) if flipped -- real value
+    // at stake, so getting flipped before scoring is a genuine downside.
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: infiltrator.instanceId, position }, postState);
+    expect(adjustment).toBeLessThan(0);
+  });
+
+  it("flips sign into a real relief (positive) when the swap it's currently holding is bad for this player", () => {
+    const position = { x: 3, y: 3 };
+    const infiltrator = card("Infiltrator", "p1", false);
+    const board: Board = new Map([
+      [posKey(position), infiltrator],
+      [posKey({ x: 3, y: 2 }), card("Berserker", "p2", true)], // base 2, below Infiltrator's own base of 3
+      ...padding(),
+    ]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    const preState = makeState({ round: 1, players });
+    const postState = makeState({ round: 1, players, board });
+
+    // Swapping into Berserker (2) is worse than staying Infiltrator (3) if flipped --
+    // this swap is currently hurting this player, so a flip would be a relief, not a
+    // risk: the term should credit, not dock.
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: infiltrator.instanceId, position }, postState);
+    expect(adjustment).toBeGreaterThan(0);
+  });
+
+  it("is exactly 0 (net of the few-face-down penalty) when there's no neighbor to swap with", () => {
+    const position = { x: 3, y: 3 };
+    const infiltrator = card("Infiltrator", "p1", false);
+    const board: Board = new Map([[posKey(position), infiltrator], ...padding()]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    const preState = makeState({ round: 1, players });
+    const postState = makeState({ round: 1, players, board });
+
+    // No eligible face-up neighbor -> no swap at all -> flipping it changes nothing,
+    // so there's genuinely nothing at stake either way.
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: infiltrator.instanceId, position }, postState);
+    expect(adjustment).toBe(0);
+  });
+});
+
+describe("placementHeuristicAdjustment — Cyclops's Facestealer-protection credit", () => {
+  it("credits back exactly what the adjacent Facestealer's own swap-risk term currently discounts", () => {
+    const infPos = { x: 3, y: 2 };
+    const cyclopsPos = { x: 3, y: 3 };
+    const infiltrator = card("Infiltrator", "p1", false);
+    const cyclops = card("Giant", "p1", true);
+    // Same padding as above, plus a valuable swap target so there's real value at
+    // stake for the Cyclops to protect.
+    const boardWithoutCyclops: Board = new Map([
+      [posKey(infPos), infiltrator],
+      [posKey({ x: 2, y: 2 }), card("Warlord", "p2", true)],
+      [posKey({ x: 6, y: 6 }), card("Footman", "p2", false)],
+      [posKey({ x: 6, y: 5 }), card("Footman", "p2", false)],
+      [posKey({ x: 5, y: 6 }), card("Footman", "p2", false)],
+    ]);
+    const boardWithCyclops: Board = new Map([...boardWithoutCyclops, [posKey(cyclopsPos), cyclops]]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    const preState = makeState({ round: 1, players, board: boardWithoutCyclops });
+    const postState = makeState({ round: 1, players, board: boardWithCyclops });
+
+    // The Facestealer's own standalone risk term (same board, no Cyclops yet) --
+    // what the Cyclops placement should exactly cancel out for that one neighbor.
+    const infiltratorOwnRisk = placementHeuristicAdjustment(
+      makeState({ round: 1, players, board: boardWithoutCyclops }),
+      "p1",
+      { instanceId: infiltrator.instanceId, position: infPos },
+      makeState({ round: 1, players, board: boardWithoutCyclops })
+    );
+
+    const cyclopsAdjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: cyclops.instanceId, position: cyclopsPos }, postState);
+    expect(cyclopsAdjustment).toBeCloseTo(-infiltratorOwnRisk);
+    expect(cyclopsAdjustment).toBeGreaterThan(0); // protecting a genuinely good swap is a real credit
+  });
+
+  it("credits nothing when there's no adjacent own face-down Facestealer to protect", () => {
+    const position = { x: 3, y: 3 };
+    const cyclops = card("Giant", "p1", true);
+    const board: Board = new Map([
+      [posKey(position), cyclops],
+      [posKey({ x: 2, y: 3 }), card("Warlord", "p2", true)], // a neighbor, but not a Facestealer
+    ]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    const preState = makeState({ round: 1, players });
+    const postState = makeState({ round: 1, players, board });
+
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: cyclops.instanceId, position }, postState);
+    expect(adjustment).toBe(0);
+  });
+
+  it("does not credit protecting an OPPONENT's face-down Facestealer -- only the acting player's own", () => {
+    const position = { x: 3, y: 3 };
+    const cyclops = card("Giant", "p1", true);
+    const board: Board = new Map([
+      [posKey(position), cyclops],
+      [posKey({ x: 2, y: 3 }), card("Infiltrator", "p2", false)], // an opponent's, not p1's
+      [posKey({ x: 2, y: 2 }), card("Warlord", "p1", true)],
+    ]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    const preState = makeState({ round: 1, players });
+    const postState = makeState({ round: 1, players, board });
+
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: cyclops.instanceId, position }, postState);
     expect(adjustment).toBe(0);
   });
 });

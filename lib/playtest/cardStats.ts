@@ -176,8 +176,9 @@ export function ownValueFor(card: ResolvedCard): number {
 
 /**
  * Net damage `card` dealt to *other* cards this game, via its own outgoing effect
- * (Earthshaker's row, Skysplitter's above/below, Truthseeker's face-down neighbors,
- * Plague Bearer's steal, ...) -- found by scanning every resolved card's breakdown
+ * (Earthshaker's connected row/column, Truthseeker's face-down neighbors, Plague
+ * Bearer's steal, Plague Rat's flood-fill, ...) -- found by scanning every resolved
+ * card's breakdown
  * for an "external" contribution whose sourceInstanceId is this card's (see
  * ScoreContribution.sourceInstanceId), so two copies of the same card on the board
  * never get their damage mixed up.

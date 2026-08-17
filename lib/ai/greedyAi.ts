@@ -27,10 +27,10 @@ function pickBest<T>(options: T[], score: (option: T) => number, rng: Rng): T {
 /**
  * Baseline chance of flipping an opponent's card speculatively, when no own-card flip
  * is worth it -- see the note in chooseFlip on why this can't be value-ranked. Still
- * high, not 50/50: only Gloryseeker clearly wants to stay hidden for its owner (+4
+ * high, not 50/50: only Gloryseeker clearly wants to stay hidden for its owner (+3
  * face-up), and it's a small slice of the deck, so a blind flip is still usually a
  * free look. But it's not *zero* risk either -- flipping a hidden card that happens to
- * be an opponent's Gloryseeker hands them a free +4, so this is nudged down a bit
+ * be an opponent's Gloryseeker hands them a free +3, so this is nudged down a bit
  * from a flat "always grab the free look" to reflect that real downside instead of
  * ignoring it entirely.
  */
@@ -68,18 +68,22 @@ function opponentTargetPriority(board: GameState["board"], playerId: string, tar
 }
 
 /**
- * Extra priority for a blind opponent flip target from any Truthseeker/Beacon
+ * Extra priority for a blind opponent flip target from any Truthseeker/Nightjar
  * neighbor whose owner is actually known -- either the flipper's own card (always
  * known, even face-down) or a revealed face-up card, the same honest info
  * estimateMargin itself is limited to. Flipping the target face-up has a real,
  * certain consequence for each such neighbor even though the target's own identity
  * stays unknown until it's flipped:
- * - An adjacent Truthseeker is currently dealing the target -3 for being face-down
+ * - An adjacent Truthseeker is currently dealing the target -2 for being face-down
  *   (see lib/content/cards.ts) -- flipping removes that, which only ever helps the
  *   target's owner (an opponent), so it's discouraged regardless of who owns the
  *   Truthseeker.
- * - An adjacent Beacon gains +1 once the target is face-up -- worth flipping toward
- *   if that Beacon is the flipper's own, worth avoiding if it belongs to anyone else.
+ * - An adjacent Nightjar (cardId "Beacon") gains +1 per adjacent card that *matches
+ *   its own* face-up/down state, not simply "+1 per face-up neighbor" anymore -- so
+ *   flipping the target face-up only helps a Nightjar that's ALSO face-up (a new
+ *   match forms) and actually HURTS one that's face-down (breaks an existing
+ *   face-down/face-down match). The sign here tracks the Nightjar's own `faceUp`,
+ *   then flips again if it belongs to an opponent rather than the flipper.
  */
 function truthseekerBeaconFlipAdjustment(board: Board, bounds: BoardBounds, playerId: string, target: CardInstance): number {
   const entry = [...board.entries()].find(([, c]) => c.instanceId === target.instanceId)!;
@@ -88,22 +92,30 @@ function truthseekerBeaconFlipAdjustment(board: Board, bounds: BoardBounds, play
   for (const n of getAdjacentCards(board, bounds, pos)) {
     const identityKnown = n.ownerId === playerId || n.faceUp;
     if (!identityKnown) continue;
-    if (n.cardId === "Truthseeker") adjustment -= 3;
-    else if (n.cardId === "Beacon") adjustment += n.ownerId === playerId ? 1 : -1;
+    if (n.cardId === "Truthseeker") adjustment -= 2;
+    else if (n.cardId === "Beacon") {
+      const gainForOwner = n.faceUp ? 1 : -1;
+      adjustment += n.ownerId === playerId ? gainForOwner : -gainForOwner;
+    }
   }
   return adjustment;
 }
 
 /**
  * Extra priority for a blind opponent flip target adjacent to one of the flipper's own
- * face-up cards, scaled by that neighbor's base value. Infiltrator only swaps with a
- * face-up neighbor now (see lib/content/cards.ts), so a face-down opponent card
- * sitting next to a valuable face-up card of ours is a live threat -- it might BE an
- * Infiltrator waiting to steal that value at scoring, and flipping it face-up is the
- * counter (a face-up Infiltrator's own valueModifier bails out immediately, forfeiting
- * the swap). The AI can't know the target's identity before flipping, so this can't be
+ * face-up cards, scaled by that neighbor's base value. A face-down opponent card
+ * sitting next to a valuable face-up card of ours is a live threat -- it might BE a
+ * Facestealer waiting to swap into that neighbor's whole identity at scoring (it
+ * always targets the highest-*base* adjacent face-up card -- see lib/content/cards.ts
+ * -- so this scan by base value is still the right proxy for "how tempting a target is
+ * this"), and flipping it face-up is the counter (a face-up Facestealer's swap never
+ * fires at all -- resolution.ts's identity-swap pass only ever considers face-down
+ * ones). The AI can't know the target's identity before flipping, so this can't be
  * certain -- just a heuristic nudge toward defending whatever's most worth protecting,
- * on top of opponentTargetPriority's plain adjacency signal.
+ * on top of opponentTargetPriority's plain adjacency signal. This weight predates
+ * Facestealer's rework from a resolved-value swap into a full identity swap -- the
+ * underlying logic (defend valuable face-up neighbors) still applies unchanged, but
+ * the magnitude was never re-validated against the new mechanic's real stakes.
  */
 const INFILTRATOR_DEFENSE_WEIGHT_PER_BASE = 0.15;
 
@@ -129,9 +141,11 @@ function infiltratorDefenseAdjustment(board: Board, bounds: BoardBounds, playerI
  * Doomherald staged to blast it), just the opposite sign and its own weight so the two
  * can be tuned independently. Deliberately smaller in magnitude than
  * INFILTRATOR_DEFENSE_WEIGHT_PER_BASE (not equal, which would cancel it out entirely)
- * -- Infiltrator's threat is calibrated from real playtest data and Doomherald's isn't
- * yet, so this starts as a real but subordinate caution on top of that proven signal,
- * pending its own calibration once Doomherald has actually been played.
+ * -- kept subordinate to that older, more battle-tested signal, but neither weight has
+ * real playtest validation behind its current number right now: Facestealer's own
+ * weight predates its rework into a full identity swap (see that constant's own doc
+ * comment), and Doomherald's was never calibrated to begin with. Both are starting
+ * priors pending real data.
  */
 const DOOMHERALD_RISK_WEIGHT_PER_BASE = 0.075;
 
@@ -151,19 +165,25 @@ function doomheraldRiskAdjustment(board: Board, bounds: BoardBounds, playerId: s
  * specific placement, just lean the overall willingness to explore. Holding a
  * Truthseeker means face-down opponent cards are worth more left alone (future
  * targets for its -2/face-down-neighbor once placed), so exploring less preserves
- * them; holding a Beacon means face-up cards are worth more existing in general
- * (future neighbors for its +1/face-up-neighbor once placed), so exploring more
- * grows that pool.
+ * them.
+ *
+ * There used to be a mirror-image HAND_BEACON_EXPLORATION_BONUS here ("holding a
+ * Beacon means face-up cards are worth more existing in general, so explore more to
+ * grow that pool"), removed once Beacon (now "Nightjar") was reworked to key off
+ * matching its *own* face-up/down state instead of unconditionally wanting more
+ * face-up neighbors -- see lib/content/cards.ts. Whether more face-up cards on the
+ * board helps a given Nightjar now depends entirely on what face state it (and its
+ * owner's own future flip choices) end up in, which isn't knowable from hand alone,
+ * so there's no longer a clean, honest directional lean to nudge exploration by.
  */
 const HAND_TRUTHSEEKER_EXPLORATION_DISCOUNT = 0.15;
-const HAND_BEACON_EXPLORATION_BONUS = 0.15;
 
 /**
  * Further discount on the exploration rate when the AI has a face-down Infiltrator at
  * stake -- either already on the board, or still in hand (a future placement, same
  * as the Truthseeker/Beacon hand nudges above). Infiltrator's entire value depends on
- * staying face-down until scoring (its own valueModifier bails out immediately once
- * faceUp -- see lib/content/cards.ts), and every flip this AI initiates is a small
+ * staying face-down until scoring (once face-up, resolution.ts's identity-swap pass
+ * skips it entirely -- see lib/content/cards.ts), and every flip this AI initiates is a small
  * push toward a more flip-happy table overall, raising the odds someone eventually
  * flips this AI's own Infiltrator back. Not a direct mechanical consequence like
  * Truthseeker/Beacon's adjacency effects (there's no real causal link from "I flipped
@@ -331,17 +351,23 @@ function warlordFlipDeterrenceBonus(state: GameState, playerId: string, target: 
 
 /**
  * Own-flip candidates only preempt the blind opponent-flip search below when their
- * edge over baseline is a clean, decisive one -- not just noise. Every self-flippable
- * card (Gloryseeker/Chronicler, the only two cards whose own value depends on
- * self.faceUp, are both opponentOnlyFlip and so never appear as an own target at all)
- * has zero *direct* self-value dependency, so before expectedHiddenNeighborAdjustments
- * existed, an own target's hypotheticalFlipMargin delta was always exactly 0 and this
- * branch never fired. Now every own flip gets a small secondary "defensive" delta too
- * (revealing a card removes its exposure to a hypothetical hidden face-down-only
- * threat like Truthseeker -- see estimateMargin) -- real, but small, and it shouldn't
- * be enough on its own to skip a potentially much more valuable blind opponent flip.
- * 1 matches the smallest single printed-effect magnitude in the deck (e.g. Footman's
- * own +1, Beacon's +1/neighbor), so a gain at or above it reads as a genuine, decisive
+ * edge over baseline is a clean, decisive one -- not just noise. Gloryseeker/Chronicler
+ * are the two cards whose value depends most directly on self.faceUp, but both are
+ * opponentOnlyFlip and so never appear as an own target at all. Nightjar (cardId
+ * "Beacon") is the one remaining own-target card with a *real* direct self-value
+ * dependency (it keys off matching its own face-up/down state against its neighbors --
+ * see lib/content/cards.ts) -- flipping your own face-down Nightjar can swing its value
+ * by more than this secondary noise all on its own, and hypotheticalFlipMargin already
+ * captures that correctly since it's a real engine simulation, not a special-cased
+ * shortcut. Every *other* own-target card has zero direct self-value dependency, so for
+ * those, before expectedHiddenNeighborAdjustments existed, hypotheticalFlipMargin's
+ * delta was always exactly 0 and this branch never fired. Now every own flip gets a
+ * small secondary "defensive" delta too (revealing a card removes its exposure to a
+ * hypothetical hidden face-down-only threat like Truthseeker -- see estimateMargin) --
+ * real, but small, and it shouldn't be enough on its own to skip a potentially much
+ * more valuable blind opponent flip. 1 matches the smallest single printed-effect
+ * magnitude in the deck (e.g. Footman's own +1, Nightjar's +1/matching neighbor), so a
+ * gain at or above it reads as a genuine, decisive
  * edge rather than this secondary noise.
  */
 const OWN_FLIP_MIN_EDGE = 1;
@@ -357,9 +383,8 @@ const OWN_FLIP_MIN_EDGE = 1;
  * weight for threatening a valuable face-up card of ours, see
  * infiltratorDefenseAdjustment; extra caution near our own face-up cards, see
  * doomheraldRiskAdjustment), at an exploration rate nudged by the AI's own hand and
- * board (see HAND_TRUTHSEEKER_EXPLORATION_DISCOUNT/HAND_BEACON_EXPLORATION_BONUS/
- * INFILTRATOR_EXPLORATION_DISCOUNT) and by public deck knowledge (see
- * DOOMHERALD_DECK_PRESENCE_EXPLORATION_DISCOUNT).
+ * board (see HAND_TRUTHSEEKER_EXPLORATION_DISCOUNT/INFILTRATOR_EXPLORATION_DISCOUNT)
+ * and by public deck knowledge (see DOOMHERALD_DECK_PRESENCE_EXPLORATION_DISCOUNT).
  */
 function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null {
   const targets = getLegalFlipTargets(state);
@@ -394,7 +419,6 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
       [...state.board.values()].some((c) => c.ownerId === playerId && c.cardId === "Infiltrator" && !c.faceUp);
     let explorationProbability = OPPONENT_FLIP_EXPLORATION_PROBABILITY;
     if (hand.some((c) => c.cardId === "Truthseeker")) explorationProbability -= HAND_TRUTHSEEKER_EXPLORATION_DISCOUNT;
-    if (hand.some((c) => c.cardId === "Beacon")) explorationProbability += HAND_BEACON_EXPLORATION_BONUS;
     if (hasVulnerableInfiltrator) explorationProbability -= INFILTRATOR_EXPLORATION_DISCOUNT;
     if (copiesForPlayerCount(CARD_DEFS.Chronicler, state.config.playerCount) > 0) {
       explorationProbability -= DOOMHERALD_DECK_PRESENCE_EXPLORATION_DISCOUNT;
@@ -480,11 +504,50 @@ function saturatingFlipChance(perOpponentTurnRate: number, roundsWithFlipAvailab
   return 1 - (1 - perOpponentTurnRate) ** opponentTurns;
 }
 
-/** Flat per-remaining-round discount on a face-down Infiltrator's current swap value, reflecting the cumulative risk it gets flipped (forfeiting the swap) before scoring. */
-const INFILTRATOR_FLIP_RISK_PER_ROUND = 0.5;
-/** Below this many face-down cards on the board, a face-down Infiltrator reads as unusually exposed (few peers to blend in with, and few plausible future swap targets), so it takes an extra flat penalty. */
+/**
+ * Rough chance, per *opponent turn* once flips are actually unlocked, that a given
+ * opponent's blind exploration flip lands on this specific face-down Facestealer --
+ * same saturating shape as GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN/
+ * DOOMHERALD_FLIP_CHANCE_PER_OPPONENT_TURN above, but set a bit higher than either:
+ * unlike those two (pure blind targets), a Facestealer sitting next to one of the
+ * flipper's own valuable face-up cards gets actively sought out, not just randomly
+ * stumbled into -- see infiltratorDefenseAdjustment. Not proven/calibrated against
+ * real playtest data yet -- since the swap was reworked from a resolved-value steal
+ * into a full identity swap (see lib/content/cards.ts), whatever number was tuned for
+ * the old mechanic doesn't carry over, so this restarts as a reasonable prior pending
+ * real data on the new one.
+ */
+const INFILTRATOR_FLIP_CHANCE_PER_OPPONENT_TURN = 0.22;
+/** Below this many face-down cards on the board, a face-down Facestealer reads as unusually exposed (few peers to blend in with, and few plausible future swap targets), so it takes an extra flat penalty. */
 const INFILTRATOR_FEW_FACE_DOWN_THRESHOLD = 3;
 const INFILTRATOR_FEW_FACE_DOWN_PENALTY = 2;
+
+/**
+ * Real expected downside (or, when the swap currently hurts, upside) of a face-down
+ * Facestealer's identity swap getting cancelled by a flip before scoring -- the actual
+ * gap between its live margin and what its margin would be if flipped right now
+ * (hypotheticalFlipMargin, same helper chooseFlip uses for the AI's own targets),
+ * discounted by the odds an opponent gets to it before scoring
+ * (INFILTRATOR_FLIP_CHANCE_PER_OPPONENT_TURN). Negative return means real risk
+ * (a beneficial swap that could get cancelled); positive means a beneficial *relief*
+ * is at stake instead (a currently-bad swap that a flip would cancel). Shared by its
+ * own placement heuristic (the "Infiltrator" case below) and Cyclops's protection
+ * credit (the "Giant" case below) -- a Cyclops that locks a Facestealer in place
+ * credits back exactly what placing the Facestealer alone would have discounted,
+ * rather than a separately-tuned number that could drift out of sync with it.
+ * `currentRound` is the round the *placement action itself* is being considered in
+ * (preState.round at both call sites) -- not read off `postState`, since placing
+ * either card doesn't advance the round.
+ */
+function infiltratorSwapRiskAtStake(postState: GameState, playerId: string, target: CardInstance, currentRound: number): number {
+  const currentMargin = estimateMargin(postState, playerId);
+  const marginIfFlipped = hypotheticalFlipMargin(postState, playerId, target);
+  const swapValueAtStake = currentMargin - marginIfFlipped;
+  const roundsWithFlipAvailable = Math.max(0, expectedFinalRound(postState.config) - Math.max(currentRound, postState.config.flipUnlockRound));
+  const opponentCount = postState.players.length - 1;
+  const flipChance = saturatingFlipChance(INFILTRATOR_FLIP_CHANCE_PER_OPPONENT_TURN, roundsWithFlipAvailable, opponentCount);
+  return -swapValueAtStake * flipChance;
+}
 
 /**
  * Each opponent's total, from `viewerId`'s honest point of view (hidden cards read as
@@ -578,7 +641,7 @@ export function placementHeuristicAdjustment(
       }
 
       case "Gloryseeker": {
-        // +4 only if face-up at scoring -- placed face-down (the common case), the fair
+        // +3 only if face-up at scoring -- placed face-down (the common case), the fair
         // margin sees none of that yet. The earlier it's placed (once flips are actually
         // unlocked) and the more opponents there are, the more opponent-turns remain
         // for one of them to plausibly flip it before the game ends.
@@ -586,19 +649,60 @@ export function placementHeuristicAdjustment(
         const roundsWithFlipAvailable = Math.max(0, expectedFinalRound(postState.config) - Math.max(preState.round, postState.config.flipUnlockRound));
         const opponentCount = postState.players.length - 1;
         const flipChance = saturatingFlipChance(GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN, roundsWithFlipAvailable, opponentCount);
-        return 4 * flipChance;
+        return 3 * flipChance;
       }
 
       case "Infiltrator": {
-        // Its swap bonus only applies while face-down -- the more turns remain before
-        // scoring, the higher the cumulative chance it gets flipped (by either player)
-        // and forfeits it, and a board with very few other face-down cards leaves it
-        // unusually exposed. The fair margin has no way to see either risk.
+        // "Facestealer": its identity swap only holds while face-down -- getting
+        // flipped (by an opponent; its own owner never would, except in the relief
+        // case below) reverts it to its own printed identity. Unlike the old
+        // resolved-value swap this discount used to be calibrated against, an
+        // identity swap's real stakes vary wildly by target (swapping into a Dying
+        // God deep into the game is a very different bet than swapping into a
+        // Berserker with no rivals yet), so instead of guessing a flat number this
+        // computes the *actual* current swap value at stake -- the real gap between
+        // its live margin and what its margin would be if flipped right now
+        // (hypotheticalFlipMargin, the same helper chooseFlip uses for the AI's own
+        // targets) -- and discounts by the odds an opponent gets to it before
+        // scoring. When the swap currently HURTS this player (it landed on something
+        // worse off than its own base), the sign flips naturally: a flip is then a
+        // real chance of relief, not risk, and this correctly turns into a bonus. A
+        // board with very few other face-down cards also leaves it unusually exposed
+        // (few peers to blend in with), on top of that.
         if (placedCard.faceUp) return 0;
         const faceDownOnBoard = [...postState.board.values()].filter((c) => !c.faceUp).length;
-        let adjustment = -roundsRemaining * INFILTRATOR_FLIP_RISK_PER_ROUND;
+        let adjustment = infiltratorSwapRiskAtStake(postState, playerId, placedCard, preState.round);
         if (faceDownOnBoard < INFILTRATOR_FEW_FACE_DOWN_THRESHOLD) adjustment -= INFILTRATOR_FEW_FACE_DOWN_PENALTY;
         return adjustment;
+      }
+
+      case "Giant": {
+        // "Cyclops": no adjacent card can be flipped by anyone while it stays
+        // adjacent to this one (see blocksAdjacentFlips in lib/content/cards.ts). The
+        // clearest safe use of that here: a face-down Facestealer of ours placed next
+        // to a Cyclops is now permanently immune to being flipped, so its swap risk
+        // (see infiltratorSwapRiskAtStake / the "Infiltrator" case above) drops from
+        // "discounted by flip odds" to exactly zero -- credit back precisely what that
+        // risk term currently subtracts. The negation stays correct even when the
+        // swap is currently a bad one hoping to get cancelled by a flip: locking it
+        // away permanently debits for losing that chance at relief, same as it would
+        // credit for protecting a good one.
+        //
+        // Deliberately doesn't try to credit denying an *opponent's* face-down card
+        // (e.g. permanently locking away their own Gloryseeker so they can never cash
+        // its +3) -- doing that honestly would mean weighing every possible hidden
+        // identity the way expectedHiddenNeighborAdjustments does (see endgame.ts),
+        // not just checking a neighbor's true cardId, which this heuristic layer never
+        // does for anyone but the acting player's own cards (see e.g.
+        // infiltratorDefenseAdjustment's `n.ownerId === playerId` guard above -- same
+        // rule here).
+        let protectionCredit = 0;
+        for (const n of getAdjacentCards(postState.board, postState.config.boardBounds, action.position)) {
+          if (n.ownerId === playerId && !n.faceUp && n.cardId === "Infiltrator") {
+            protectionCredit -= infiltratorSwapRiskAtStake(postState, playerId, n, preState.round);
+          }
+        }
+        return protectionCredit;
       }
 
       case "Chronicler": {
