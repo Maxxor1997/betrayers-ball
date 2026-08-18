@@ -126,6 +126,8 @@ function ActiveSessions() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [joinCode, setJoinCode] = useState("");
+  const [joinCodeError, setJoinCodeError] = useState<string | null>(null);
+  const [checkingJoinCode, setCheckingJoinCode] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -134,6 +136,32 @@ function ActiveSessions() {
     setLoading(false);
     if ("error" in result) setError(result.error);
     else setRooms(result.rooms.filter((room) => isLocalRoom(room.roomCode)));
+  }
+
+  /**
+   * Checks the code against the server's real room registry before navigating --
+   * without this, a typo or an already-ended room would still land on
+   * /join/[code]'s name-entry screen (it has no way to tell "room doesn't exist" from
+   * "room exists, I just haven't joined it yet" until you actually submit a name), a
+   * dead end that looks like a login prompt for a room that was never there.
+   */
+  async function handleJoinByCode(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const code = joinCode.trim().toUpperCase();
+    if (!code) return;
+    setCheckingJoinCode(true);
+    setJoinCodeError(null);
+    const result = await listMultiplayerRooms();
+    setCheckingJoinCode(false);
+    if ("error" in result) {
+      setJoinCodeError(result.error);
+      return;
+    }
+    if (!result.rooms.some((room) => room.roomCode.toUpperCase() === code)) {
+      setJoinCodeError(`No room found with code "${code}".`);
+      return;
+    }
+    router.push(`/join/${code}`);
   }
 
   useEffect(() => {
@@ -196,33 +224,32 @@ function ActiveSessions() {
           this screen at all, but the same host handing out a bare room code, e.g. over
           voice, needs somewhere to type it), so it always shows regardless of whether
           the local-only list above is empty. */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          const code = joinCode.trim();
-          if (code) router.push(`/join/${code.toUpperCase()}`);
-        }}
-        className="flex items-center gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-800"
-      >
-        <input
-          type="text"
-          value={joinCode}
-          // Uppercased as typed -- room codes are always displayed/stored uppercase
-          // (see roomWords.ts's randomRoomCode), and the submit handler already
-          // uppercases before navigating, so this just makes what's on screen match
-          // that from the first keystroke instead of only once submitted.
-          onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-          placeholder="Have a room code?"
-          maxLength={24}
-          className="min-w-0 flex-1 rounded border border-zinc-300 bg-transparent px-2 py-1.5 text-sm uppercase dark:border-zinc-700"
-        />
-        <button
-          type="submit"
-          disabled={!joinCode.trim()}
-          className="shrink-0 rounded-full bg-zinc-900 px-3 py-1.5 text-xs whitespace-nowrap text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-black"
-        >
-          Join
-        </button>
+      <form onSubmit={handleJoinByCode} className="flex flex-col gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={joinCode}
+            // Uppercased as typed -- room codes are always displayed/stored uppercase
+            // (see roomWords.ts's randomRoomCode), and the submit handler already
+            // uppercases before checking/navigating, so this just makes what's on
+            // screen match that from the first keystroke instead of only once submitted.
+            onChange={(e) => {
+              setJoinCode(e.target.value.toUpperCase());
+              setJoinCodeError(null);
+            }}
+            placeholder="Have a room code?"
+            maxLength={24}
+            className="min-w-0 flex-1 rounded border border-zinc-300 bg-transparent px-2 py-1.5 text-sm uppercase dark:border-zinc-700"
+          />
+          <button
+            type="submit"
+            disabled={!joinCode.trim() || checkingJoinCode}
+            className="shrink-0 rounded-full bg-zinc-900 px-3 py-1.5 text-xs whitespace-nowrap text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-black"
+          >
+            {checkingJoinCode ? "Checking…" : "Join"}
+          </button>
+        </div>
+        {joinCodeError && <p className="text-xs text-red-600 dark:text-red-400">{joinCodeError}</p>}
       </form>
     </div>
   );

@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMultiplayerSession } from "@/app/hooks/useMultiplayerSession";
 import { loadCredentials } from "@/app/hooks/multiplayerCredentials";
+import { listMultiplayerRooms } from "@/app/hooks/listMultiplayerRooms";
 import { MultiplayerUnavailableBanner } from "@/app/components/MultiplayerUnavailableNotice";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
@@ -57,6 +58,24 @@ function Room() {
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => setIsMobile(isMobileViewport()), []);
   const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobile);
+
+  // null = still checking (or the check failed) -- NameEntry shows the password field
+  // by default in that case, since a false negative there (hiding a field a real
+  // password room actually needs) is worse than a harmless extra field on a room that
+  // doesn't. Only ever fetched pre-join -- once seated there's no more use for it.
+  const [roomHasPassword, setRoomHasPassword] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!session.connected || !session.needsName) return;
+    let cancelled = false;
+    listMultiplayerRooms().then((result) => {
+      if (cancelled || "error" in result) return;
+      const summary = result.rooms.find((r) => r.roomCode.toUpperCase() === roomCode);
+      if (summary) setRoomHasPassword(summary.hasPassword);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.connected, session.needsName, roomCode]);
 
   const isHost = !!session.lobby && session.myPlayerId === session.lobby.hostPlayerId;
   const showGame = !session.roomClosed && session.connected && !session.needsName && session.lobby?.started && session.gameState && session.myPlayerId;
@@ -194,7 +213,9 @@ function Room() {
         <p className="text-sm text-zinc-500">Connecting to the game server…</p>
       )}
 
-      {!session.roomClosed && session.connected && session.needsName && <NameEntry onJoin={session.join} error={session.error} />}
+      {!session.roomClosed && session.connected && session.needsName && (
+        <NameEntry onJoin={session.join} error={session.error} showPassword={roomHasPassword !== false} />
+      )}
 
       {!session.roomClosed && session.connected && !session.needsName && !session.lobby?.started && (
         <Lobby roomCode={roomCode} session={session} />
@@ -203,12 +224,17 @@ function Room() {
   );
 }
 
-function NameEntry({ onJoin, error }: { onJoin: (name: string, password?: string) => void; error: string | null }) {
+function NameEntry({
+  onJoin,
+  error,
+  showPassword,
+}: {
+  onJoin: (name: string, password?: string) => void;
+  error: string | null;
+  /** False only once this room is confirmed passwordless (see Room()'s roomHasPassword fetch) -- defaults to shown while that's still unknown, so a real password room never has its field hidden by a slow/failed check. */
+  showPassword: boolean;
+}) {
   const [name, setName] = useState("");
-  // Shown unconditionally, not just when the room is known to need one -- an
-  // anonymous visitor hasn't joined yet, so there's no lobby:update for this page to
-  // have learned hasPassword from before this form submits. Left blank, it's simply
-  // ignored by a room with no password (see GameSession.addPlayer).
   const [password, setPassword] = useState("");
   return (
     <form
@@ -228,18 +254,20 @@ function NameEntry({ onJoin, error }: { onJoin: (name: string, password?: string
         maxLength={24}
         className="rounded border border-zinc-300 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-700"
       />
-      <input
-        type="text"
-        value={password}
-        // Uppercased as typed -- the server also normalizes to uppercase before
-        // comparing (see GameSession.addPlayer), so this is purely so what's on
-        // screen always matches what the host displayed, not a correctness
-        // requirement, but matching it avoids "did I get the case right" confusion.
-        onChange={(e) => setPassword(e.target.value.toUpperCase())}
-        placeholder="Room password (if set)"
-        maxLength={64}
-        className="rounded border border-zinc-300 bg-transparent px-2 py-1.5 text-sm uppercase dark:border-zinc-700"
-      />
+      {showPassword && (
+        <input
+          type="text"
+          value={password}
+          // Uppercased as typed -- the server also normalizes to uppercase before
+          // comparing (see GameSession.addPlayer), so this is purely so what's on
+          // screen always matches what the host displayed, not a correctness
+          // requirement, but matching it avoids "did I get the case right" confusion.
+          onChange={(e) => setPassword(e.target.value.toUpperCase())}
+          placeholder="Room password"
+          maxLength={64}
+          className="rounded border border-zinc-300 bg-transparent px-2 py-1.5 text-sm uppercase dark:border-zinc-700"
+        />
+      )}
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
       <button type="submit" className="rounded-full bg-zinc-900 px-4 py-1.5 text-sm text-white dark:bg-zinc-100 dark:text-black">
         Join
