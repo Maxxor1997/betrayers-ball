@@ -220,14 +220,48 @@ function roundSensitiveVoteAdjustment(state: GameState, playerId: string): numbe
   return adjustment;
 }
 
+/** How many margin points the strongest possible vote-history signal is worth -- kept modest (comparable to the Dying God nudge) since it's a secondary correction to estimateMargin's own blind spot, not a primary driver of the vote. */
+const VOTE_HISTORY_ADJUSTMENT_SCALE = 1.5;
+
+/**
+ * Corrects a real blind spot in estimateMargin: it only ever prices in *this* player's
+ * own redacted view of the board (own hand + visible cards + a fair guess at hidden
+ * neighbor identities from expectedHiddenNeighborAdjustments) -- it has no way to know
+ * an opponent's actual hand or hidden board cards. But every AI opponent's own vote
+ * (computeAiVote, called with their own playerId) IS driven by their true, unredacted
+ * margin -- so a recent yes vote from an opponent leaks that they believe their real
+ * position is stronger than this player's estimate of them can see. The correction
+ * runs opposite to that signal, not with it: the more opponents have recently voted
+ * yes, the more this player's own margin gets pulled down (less eager to also vote yes
+ * and confirm a lead it can't actually see); the more they've voted no, the less
+ * correction is applied (nothing suggests the estimate is missing anything).
+ *
+ * Only the single most recently tallied round is used, not the whole history -- an
+ * opponent's vote from several rounds ago reflects a board that's since changed
+ * underneath it, so it's stale evidence about their *current* position. Yields 0
+ * before any round has ever been tallied (voteHistory empty) -- there's no signal yet.
+ */
+function voteHistoryAdjustment(state: GameState, playerId: string): number {
+  const lastRound = state.voteHistory[state.voteHistory.length - 1];
+  if (!lastRound) return 0;
+
+  const opponentVotes = Object.entries(lastRound.votes).filter(([id]) => id !== playerId);
+  if (opponentVotes.length === 0) return 0;
+
+  const opponentYesRate = opponentVotes.filter(([, vote]) => vote).length / opponentVotes.length;
+  return -VOTE_HISTORY_ADJUSTMENT_SCALE * (2 * opponentYesRate - 1);
+}
+
 /**
  * Vote yes/no off the player's own (fair) margin estimate, via
- * marginToVoteYesProbability, plus roundSensitiveVoteAdjustment for Dying God.
+ * marginToVoteYesProbability, plus roundSensitiveVoteAdjustment for Dying God and
+ * voteHistoryAdjustment for what recent opponent votes leak about their real position.
  * Otherwise deliberately ignores the round: whether to end is a fresh decision every
  * time voting comes up, not a countdown; the round cap already force-ends the game on
  * its own once reached, so there's no separate need to ramp pressure by round here too.
  */
 export function computeAiVote(state: GameState, playerId: string, rng: () => number): boolean {
-  const margin = estimateMargin(state, playerId) + roundSensitiveVoteAdjustment(state, playerId);
+  const margin =
+    estimateMargin(state, playerId) + roundSensitiveVoteAdjustment(state, playerId) + voteHistoryAdjustment(state, playerId);
   return rng() < marginToVoteYesProbability(margin);
 }

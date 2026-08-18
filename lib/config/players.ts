@@ -25,12 +25,18 @@ export const AI_NAMES = [
   "Marquess of Mischief",
 ];
 
+// 8 hues spread around the color wheel (not the closest-named Tailwind swatch to each
+// other) so every seat stays visually distinct even at a glance -- Red/Orange used to
+// sit right next to each other in hue and were hard to tell apart; Emerald/Amber/Violet
+// replace Orange/(the old Purple slot)/(kept Purple's neighbor) to widen the gaps. Blue
+// stays first on purpose: seat 0 is always "you" in solo play, so its color is the one
+// most worth keeping stable across any future palette tweak.
 export const PLAYER_COLOR_CLASSES = [
   "border-blue-500 bg-blue-50 dark:bg-blue-950",
   "border-red-500 bg-red-50 dark:bg-red-950",
-  "border-purple-500 bg-purple-50 dark:bg-purple-950",
-  "border-orange-500 bg-orange-50 dark:bg-orange-950",
-  "border-teal-500 bg-teal-50 dark:bg-teal-950",
+  "border-emerald-500 bg-emerald-50 dark:bg-emerald-950",
+  "border-amber-500 bg-amber-50 dark:bg-amber-950",
+  "border-violet-500 bg-violet-50 dark:bg-violet-950",
   "border-pink-500 bg-pink-50 dark:bg-pink-950",
   "border-lime-500 bg-lime-50 dark:bg-lime-950",
   "border-cyan-500 bg-cyan-50 dark:bg-cyan-950",
@@ -40,9 +46,9 @@ export const PLAYER_COLOR_CLASSES = [
 export const PLAYER_TEXT_COLOR_CLASSES = [
   "text-blue-600 dark:text-blue-400",
   "text-red-600 dark:text-red-400",
-  "text-purple-600 dark:text-purple-400",
-  "text-orange-600 dark:text-orange-400",
-  "text-teal-600 dark:text-teal-400",
+  "text-emerald-600 dark:text-emerald-400",
+  "text-amber-600 dark:text-amber-400",
+  "text-violet-600 dark:text-violet-400",
   "text-pink-600 dark:text-pink-400",
   "text-lime-600 dark:text-lime-400",
   "text-cyan-600 dark:text-cyan-400",
@@ -52,9 +58,9 @@ export const PLAYER_TEXT_COLOR_CLASSES = [
 export const PLAYER_BORDER_COLOR_CLASSES = [
   "border-blue-500",
   "border-red-500",
-  "border-purple-500",
-  "border-orange-500",
-  "border-teal-500",
+  "border-emerald-500",
+  "border-amber-500",
+  "border-violet-500",
   "border-pink-500",
   "border-lime-500",
   "border-cyan-500",
@@ -64,9 +70,9 @@ export const PLAYER_BORDER_COLOR_CLASSES = [
 export const PLAYER_DOT_COLOR_CLASSES = [
   "bg-blue-500",
   "bg-red-500",
-  "bg-purple-500",
-  "bg-orange-500",
-  "bg-teal-500",
+  "bg-emerald-500",
+  "bg-amber-500",
+  "bg-violet-500",
   "bg-pink-500",
   "bg-lime-500",
   "bg-cyan-500",

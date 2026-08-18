@@ -233,4 +233,52 @@ describe("computeAiVote", () => {
     const state = makeState({ board, round: 3 });
     expect(computeAiVote(state, "p1", () => 0.5)).toBe(false); // tied margin (0-0) -> exactly 50/50, rng 0.5 -> no (see the tied test above)
   });
+
+  it("pulls toward no when opponents recently voted yes -- their vote leaks a hidden strength this player's own margin can't see", () => {
+    // Tied margin (0-0) would normally be an exact 50/50 (rng 0.5 -> no, per the tied
+    // test above); with p1 tied against two opponents who *both* voted yes last round,
+    // voteHistoryAdjustment pulls the margin further negative, only reinforcing the
+    // already-"no" outcome at rng 0.5 -- flip the assertion around instead, at an rng
+    // just below the *unadjusted* 50% line, to prove the adjustment actually moved it.
+    const state = makeState({
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+        { id: "p3", hand: [], isAI: true },
+      ],
+      voteHistory: [{ round: 2, votes: { p1: false, p2: true, p3: true } }],
+    });
+    expect(computeAiVote(state, "p1", () => 0.49)).toBe(false); // would be "yes" at plain 50/50 (rng < 0.5), but the correction pulls yes-probability below 0.49
+  });
+
+  it("pulls toward yes when opponents recently voted no -- nothing suggests this player's margin estimate is missing anything", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+        { id: "p3", hand: [], isAI: true },
+      ],
+      voteHistory: [{ round: 2, votes: { p1: true, p2: false, p3: false } }],
+    });
+    expect(computeAiVote(state, "p1", () => 0.51)).toBe(true); // would be "no" at plain 50/50 (rng >= 0.5), but the correction pushes yes-probability above 0.51
+  });
+
+  it("only looks at the most recent tallied round, not the whole history", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", hand: [], isAI: true },
+        { id: "p2", hand: [], isAI: true },
+      ],
+      voteHistory: [
+        { round: 1, votes: { p1: false, p2: true } }, // stale -- should have no effect
+        { round: 2, votes: { p1: false, p2: false } }, // this is the only one that should count
+      ],
+    });
+    expect(computeAiVote(state, "p1", () => 0.51)).toBe(true); // opponent's most recent vote was "no" -> pulled toward yes, same as the "pulls toward yes" test above
+  });
+
+  it("applies no correction before any round has ever been tallied", () => {
+    const state = makeState(); // voteHistory: [] -- empty board, tied margin
+    expect(computeAiVote(state, "p1", () => 0.5)).toBe(false); // exactly the plain 50/50 behavior, same as the tied test above
+  });
 });
