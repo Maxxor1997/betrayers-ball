@@ -71,7 +71,7 @@ export function NewGameModal({
         className="w-[min(90vw,18rem)] rounded-lg border border-zinc-300 bg-white p-3 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
         onClick={(e) => e.stopPropagation()}
       >
-        <p className="mb-3 font-medium">{title}</p>
+        <p className="mb-3 text-base font-bold">{title}</p>
         <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-sm text-zinc-600 dark:text-zinc-400">
           {nameField && (
             <>
@@ -147,7 +147,7 @@ export function NewGameModal({
               </option>
             ))}
           </select>
-          <label htmlFor="ngm-difficulty">Difficulty</label>
+          <label htmlFor="ngm-difficulty">AI difficulty</label>
           <select
             id="ngm-difficulty"
             value={setup.aiDifficulty}
