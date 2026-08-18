@@ -87,12 +87,12 @@ export function copiesForPlayerCount(def: CardDef, playerCount: number): number 
 export const CARD_DEFS: Record<CardId, CardDef> = {
   Footman: {
     id: "Footman",
-    name: "Shieldbearer",
+    name: "Hoplite",
     base: 5,
     bucket: "Engine",
     text: "+1 if in unbroken line of 3+ owned cards",
     get fullText() {
-      return `+1 to itself if it's part of an unbroken line of 3 or more cards you own in a row or column -- any card type, not just other copies of ${CARD_DEFS.Footman.name}.`;
+      return `+1 to itself if it's part of an unbroken line of 3 or more cards you own in a row or column.`;
     },
     // 6p-8p counts scaled up (along with every other active card's) so those player
     // counts don't draw nearly the whole deck into hands -- see the 6p-8p comment on
@@ -138,7 +138,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     base: 9,
     bucket: "Slam",
     text: "−1 per adj. card, −3 if boxed in",
-    fullText: "−1 per neighbor (any owner). If it has no open adjacent tile, it gets an additional −3.",
+    fullText: "−1 per adjacent card (any owner). If it has no open adjacent tile, it gets an additional −3.",
     count: [4, 4, 4, 4, 5, 6, 8],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const neighbors = countAdjacentOccupied(board, bounds, pos);
@@ -157,7 +157,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     },
     get fullText() {
       const name = CARD_DEFS.Warlord.name;
-      return `−2 for each distinct opposing player with a ${name} anywhere on the board -- multiple ${name}s from the same rival only count once.`;
+      return `−2 for each distinct opposing player with a ${name} anywhere on the board -- multiple from the same player only count once.`;
     },
     count: [6, 6, 6, 6, 8, 8, 8],
     valueModifier: ({ board, self, addDelta }) => {
@@ -178,13 +178,13 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Usurper",
     base: 7,
     bucket: "Slam",
-    text: "−4 if adj. face-up base ≥ self",
-    fullText: "−4 to itself if any adjacent face-up card has a base ≥ its own (any owner).",
+    text: "−4 if any adj. card has base ≥ self",
+    fullText: "−4 if any adjacent card (any owner) has a base ≥ its own.",
     count: [4, 4, 4, 4, 5, 6, 8],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const ownBase = CARD_DEFS[self.cardId].base;
-      const dangerousNeighbor = getAdjacentCards(board, bounds, pos).some((n) => n.faceUp && CARD_DEFS[n.cardId].base >= ownBase);
-      if (dangerousNeighbor) addDelta(self.instanceId, -4, `${CARD_DEFS.Pretender.name} (adj. face-up base≥self)`);
+      const dangerousNeighbor = getAdjacentCards(board, bounds, pos).some((n) => CARD_DEFS[n.cardId].base >= ownBase);
+      if (dangerousNeighbor) addDelta(self.instanceId, -4, `${CARD_DEFS.Pretender.name} (adj. base≥self)`);
     },
   },
   Berserker: {
@@ -196,7 +196,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       return `+2 per unique enemy ${CARD_DEFS.Berserker.name} owner`;
     },
     get fullText() {
-      return `+2 for each distinct opposing player with a ${CARD_DEFS.Berserker.name} anywhere on the board -- multiple ${CARD_DEFS.Berserker.name}s from the same rival only count once (same shape as Warlord).`;
+      return `+2 for each distinct opposing player with a ${CARD_DEFS.Berserker.name} anywhere on the board -- multiple from the same player only count once.`;
     },
     count: [0, 0, 0, 7, 7, 7, 8],
     valueModifier: ({ board, self, addDelta }) => {
@@ -233,8 +233,8 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Pyre-Bird",
     base: 4,
     bucket: "Engine",
-    text: "+3 if face-up, can't be self flipped",
-    fullText: "+3 if this card is face-up at scoring. Its own owner can't flip it -- only an opponent can.",
+    text: "If face-up: +3. Can't be self-flipped",
+    fullText: "+3 if this card is face-up at scoring. Can't be flipped by its owner -- only an opponent.",
     count: [4, 4, 4, 4, 5, 6, 8],
     opponentOnlyFlip: true,
     valueModifier: ({ self, addDelta }) => {
@@ -246,9 +246,9 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Doomherald",
     base: 4,
     bucket: "Control",
-    text: "If face-up: −3 to all adj., can't self-flip",
+    text: "If face-up: −3 to adj. Can't be self-flipped",
     fullText:
-      "−3 to every adjacent card (any owner, not itself) while this card is face-up. Its own owner can't flip it -- only an opponent can.",
+      "−3 to every adjacent card (any owner) while this card is face-up. Can't be flipped by its owner -- only an opponent.",
     // Same modest-copy tier as the deck's other high-ceiling Control cards
     // (Suppressor/PlagueBearer) -- its worst case (up to 4 adjacent cards hit for
     // -3 each) is the biggest single-action swing in the set, so it stays rare.
@@ -268,7 +268,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Slam",
     text: "Always face-up. Adj. cards can't be flipped",
     fullText:
-      "Always face-up — can't be played face-down. No adjacent card (any owner) can be flipped by anyone.",
+      "Always face-up -- can't be played face-down. No adjacent card (any owner) can be flipped by anyone.",
     // 6p-8p bumped up from the flat 4 (and every other active card scaled the same
     // way) -- at handSize 8, 6p-8p games were drawing 76-100% of the deck straight
     // into hands, leaving almost no unseen pool. Scaled proportionally so each card's
@@ -283,7 +283,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     base: 4,
     bucket: "Control",
     text: "−2 to connected row & col",
-    fullText: "−2 to every card (any owner, not itself) in the unbroken run of occupied cells extending from it along its row and its column.",
+    fullText: "−2 to every card (any owner, not itself) in the unbroken run of occupied cells extending along its row and its column.",
     count: [2, 2, 2, 4, 5, 5, 6],
     valueModifier: ({ board, pos, self, addDelta }) => {
       function walk(dx: number, dy: number) {
@@ -309,7 +309,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     base: 4,
     bucket: "Control",
     text: "−3 above and below",
-    fullText: "−3 to the card directly above and directly below.",
+    fullText: "−3 to the card directly above and directly below (any owner).",
     count: [4, 4, 4, 4, 0, 0, 0],
     disabled: true,
     valueModifier: ({ board, pos, addDelta }) => {
@@ -328,7 +328,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       return `+2 to adj. ${CARD_DEFS.Footman.name}, +1 to others`;
     },
     get fullText() {
-      return `Gives +2 to each adjacent ${CARD_DEFS.Footman.name}, +1 to each other adjacent card (any owner, not itself).`;
+      return `Gives +2 to each adjacent ${CARD_DEFS.Footman.name} (any owner), +1 to each other adjacent card.`;
     },
     count: [6, 6, 6, 6, 8, 10, 12],
     valueModifier: ({ board, bounds, pos, addDelta }) => {
@@ -345,7 +345,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     text: "Steals 3 from matching adj. pairs",
     get fullText() {
       const self = CARD_DEFS.PlagueBearer.name;
-      return `If 2 or more of its neighbors are the same card type (any owner) ${self} steals 3 points from each of them. This can happen for more than one matching type at once, and each group pays out on its own.`;
+      return `If 2 or more of the cards adjacent to it are the same card type (any owner), ${self} steals 3 points from each of them. This can happen for more than one matching type at once.`;
     },
     count: [2, 2, 2, 2, 3, 3, 4],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
@@ -371,9 +371,9 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Lictor",
     base: 2,
     bucket: "Control",
-    text: "if 3+ adj.: negates adj. cards",
+    text: "If 3+ adj.: negates adj. cards",
     get fullText() {
-      return `If 3+ adjacent cards (center counts), each adjacent non-${CARD_DEFS.Suppressor.name} card is treated as vanilla — base value only, printed text negated.`;
+      return `If ${CARD_DEFS.Suppressor.name} has 3+ adjacent cards, each adjacent non-${CARD_DEFS.Suppressor.name} card (any owner) is treated as vanilla -- base value only, printed text negated.`;
     },
     count: [2, 2, 2, 2, 3, 3, 4],
     negatesNeighborsIf: ({ board, bounds, pos }) => countAdjacentOccupied(board, bounds, pos) >= 3,
@@ -383,9 +383,9 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Facestealer",
     base: 3,
     bucket: "Control",
-    text: "If face-down: scores as highest-base adj. face-up card instead",
+    text: "If face-down: swaps w/ highest face-up adj.",
     fullText:
-      "While face-down, it swaps base and printed rule (not which card it actually is) with the adjacent face-up card with the highest printed base -- that card scores using Facestealer's own (inert while face-up) rule in return. Multiple Facestealers can each independently borrow the same target's rule.",
+      "While face-down, it swaps base and printed rule with the adjacent face-up card (any owner) with the highest printed base. Multiple Facestealers can each independently swap with the same target.",
     count: [2, 2, 2, 2, 3, 3, 4],
     // No valueModifier -- the swap itself is computed once, pre-resolution, by
     // resolution.ts's computeIdentitySwaps/applyIdentitySwaps (not a per-card scoring
@@ -401,7 +401,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Inquisitor",
     base: 5,
     bucket: "Control",
-    text: "−2 to each adj. face-down card",
+    text: "−2 to adj. face-down cards",
     fullText: "−2 to each adjacent face-down card (any owner).",
     count: [2, 2, 2, 4, 5, 6, 6],
     valueModifier: ({ board, bounds, pos, addDelta }) => {
@@ -416,7 +416,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     base: 4,
     bucket: "Engine",
     text: "+1 per unique adj. enemy",
-    fullText: "+1 for each distinct opposing player with a card adjacent to it -- two neighbors owned by the same enemy still only count once.",
+    fullText: "+1 for each distinct opposing player with a card adjacent to it.",
     count: [0, 0, 4, 4, 0, 0, 0],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const uniqueEnemyOwners = new Set(
@@ -438,7 +438,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Nightjar",
     base: 4,
     bucket: "Engine",
-    text: "+1 per adj. card matching own face state",
+    text: "+1 per adj. matching own face state",
     fullText:
       "+1 for each adjacent card (any owner) whose face-up/face-down state matches this card's own.",
     count: [4, 4, 4, 4, 5, 6, 8],
@@ -458,7 +458,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Control",
     text: "Afflicts adj. cards with Plague",
     get fullText() {
-      return `Applies Plague to each adjacent card (any owner). Plague: −1 to every afflicted card, and spreads from each afflicted card to every card of the same owner connected to it (however far that chain of ownership runs). Each card can only be afflicted once by the same ${CARD_DEFS.PlagueRat.name}.`
+      return `Applies Plague to each adjacent card (any owner). Plague: −1 to every afflicted card, and spreads from each afflicted card to every card of the same owner connected to it. Each card can only be afflicted once by the same ${CARD_DEFS.PlagueRat.name}.`
     },
     count: [2, 2, 2, 2, 3, 3, 4],
     valueModifier: ({ board, bounds, pos, addDelta }) => {

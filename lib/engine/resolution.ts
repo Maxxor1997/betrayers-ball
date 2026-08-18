@@ -258,6 +258,18 @@ function computeValueModifiers(
       if (!target) continue;
       const deniedSelfContribution = selfContributionOnly(board, bounds, round, target.pos, target.card);
       if (deniedSelfContribution === 0) continue; // nothing was actually denied
+      // The point effect first, then its cancellation right below it -- so the
+      // breakdown reads "here's what its own rule would have been worth, here's why
+      // it didn't count" in that order, instead of only ever showing the already-net
+      // result with nothing to compare it against. "external"/no sourceInstanceId (not
+      // "self", and not the negator's id) on purpose: ownValueFor/disruptionFor in
+      // lib/playtest/cardStats.ts scan breakdown entries by source/sourceInstanceId to
+      // attribute real stats, and this line is neither a genuine self-earned point nor
+      // a real disruption event to credit to the negator -- just an explanatory mirror
+      // of the "Negated by" line right after it. Both informational: the real total is
+      // always exactly base for a negated card (see resolveBoard), these two lines
+      // exist purely to make the denial visible/attributable.
+      push(instanceId, deniedSelfContribution, "Own rule (negated)", "external", undefined, true);
       const share = deniedSelfContribution / negatorIds.length;
       for (const negatorId of negatorIds) {
         const negatorName = byInstanceId.get(negatorId) ? CARD_DEFS[byInstanceId.get(negatorId)!.card.cardId].name : "negation";
@@ -333,6 +345,12 @@ export function resolveBoard(
   const totalsByOwner: Record<string, number> = {};
   if (playerIds) for (const id of playerIds) totalsByOwner[id] = 0;
 
+  // For the top-of-breakdown "Negated by X" caption below -- needs each negator's
+  // display name off its instanceId, same lookup computeValueModifiers builds
+  // internally for its own "Negated by" lines, just needed again out here.
+  const cardNameByInstanceId = new Map<string, string>();
+  for (const c2 of board.values()) cardNameByInstanceId.set(c2.instanceId, CARD_DEFS[c2.cardId].name);
+
   for (const [key, c] of board.entries()) {
     const swap = swaps.get(c.instanceId);
     // `base`/`cardContributions`/`finalValue` all come from `c`, the swapped card --
@@ -344,6 +362,16 @@ export function resolveBoard(
     const finalValue = values.get(c.instanceId) ?? base;
 
     const breakdown: ScoreContribution[] = [];
+    if (negated.has(c.instanceId)) {
+      // The single most important fact about a negated card's breakdown, so it goes
+      // first, above even the swap caption/Base -- a reader shouldn't have to scan
+      // past several other lines to learn a card's own rule never fired at all. The
+      // detailed point-effect-then-cancellation pair (see computeValueModifiers) is
+      // still further down in cardContributions; this is just the headline. Multiple
+      // negators (rare -- a card boxed in by two at once) are all named, joined.
+      const negatorNames = (negatorsOf.get(c.instanceId) ?? []).map((id) => cardNameByInstanceId.get(id) ?? "negation");
+      breakdown.push({ label: `Negated by ${negatorNames.join(", ")}`, amount: 0, source: "self" });
+    }
     if (swap) {
       // Legible post-game annotation for why this card's own numbers don't match its
       // printed rule -- see computeIdentitySwaps. Placed before "Base" (not after) so

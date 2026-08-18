@@ -228,12 +228,12 @@ describe("resolveBoard — Pretender", () => {
     expect(find(cards, p.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 4);
   });
 
-  it("is safe if the dangerous neighbor is face-down", () => {
+  it("also triggers off a face-down dangerous neighbor -- the penalty no longer requires the threat to be revealed", () => {
     const board: Board = new Map();
     const p = place(board, 0, 0, "Pretender", "p1");
     place(board, 1, 0, "Exile", "p2", false);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, p.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base);
+    expect(find(cards, p.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 4);
   });
 
   it("triggers off a neighbor whose base merely equals its own, not just a hardcoded 7", () => {
@@ -887,6 +887,40 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     expect(negationLine).toBeDefined();
     expect(negationLine!.amount).toBe(-3); // the +3 it would have scored, denied
     expect(negationLine!.informational).toBe(true); // explains the denial, doesn't double-count into finalValue
+  });
+
+  it("puts a zero-amount 'Negated by X' caption first in a negated card's breakdown, and shows the point effect before its cancellation", () => {
+    const board: Board = new Map();
+    const suppressor = place(board, 2, 2, "Suppressor", "p1");
+    const glory = place(board, 3, 2, "Gloryseeker", "p2", true);
+    place(board, 1, 2, "Giant", "p1");
+    place(board, 2, 1, "Giant", "p1");
+    place(board, 2, 3, "Giant", "p1");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const breakdown = find(cards, glory.instanceId).breakdown;
+
+    // The headline caption is the very first entry, zero-amount (real effect already
+    // baked into base/finalValue -- see resolveBoard), before even "Base".
+    expect(breakdown[0]).toMatchObject({ label: `Negated by ${CARD_DEFS.Suppressor.name}`, amount: 0 });
+    expect(breakdown[1]).toMatchObject({ label: "Base" });
+
+    // Further down, the detailed pair: the point effect itself, then its cancellation
+    // right after it -- in that order, not just the already-net result.
+    const ownRuleIndex = breakdown.findIndex((d) => d.label === "Own rule (negated)");
+    const negatedByIndex = breakdown.findIndex((d) => d.sourceInstanceId === suppressor.instanceId);
+    expect(ownRuleIndex).toBeGreaterThan(-1);
+    expect(negatedByIndex).toBe(ownRuleIndex + 1);
+    expect(breakdown[ownRuleIndex].amount).toBe(3); // what Gloryseeker's own rule would have scored
+    expect(breakdown[negatedByIndex].amount).toBe(-3); // its cancellation
+
+    // Neither of the two detail lines pollutes ownValueFor/disruptionFor's own
+    // source-based scans (see lib/playtest/cardStats.ts) -- "Own rule (negated)" is
+    // "external" with no sourceInstanceId (not "self", so it can't be double-counted
+    // as a real earned point), and its pair with "Negated by" (also "external",
+    // sourceInstanceId = the negator) nets to exactly the original single-line
+    // behavior for any stat keyed off the negator's instanceId.
+    expect(breakdown[ownRuleIndex].source).toBe("external");
+    expect(breakdown[ownRuleIndex].sourceInstanceId).toBeUndefined();
   });
 
   it("a negated card that would have scored a self-PENALTY shows the denial as a positive (an accidental backfire)", () => {
