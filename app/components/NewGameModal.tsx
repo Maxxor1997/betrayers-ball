@@ -35,6 +35,8 @@ export function NewGameModal({
   confirmLabel = "Start",
   /** Multiplayer hosting only -- solo play and /play's mid-game "New game" have no separate "who are you" identity to collect. */
   nameField,
+  /** Multiplayer room creation only (host/display, not rematch -- a room's password is fixed for its lifetime, same as its seats). Blank stays optional/no-password, matching the room's pre-password behavior. */
+  passwordField,
   /** Solo play's remaining seats are always AI; a hosted multiplayer room's remaining seats might be other joining players, only backfilled with AI at Start -- so the wording next to the player-count picker differs. */
   playerCountLabel = (n) => `${n} (you + ${n - 1} AI)`,
   /**
@@ -56,6 +58,7 @@ export function NewGameModal({
   onConfirm: () => void;
   confirmLabel?: string;
   nameField?: { value: string; onChange: (name: string) => void };
+  passwordField?: { value: string; onChange: (password: string) => void };
   playerCountLabel?: (n: number) => string;
   seatFillNote?: string;
   showPlayerCount?: boolean;
@@ -81,6 +84,23 @@ export function NewGameModal({
                 placeholder="Host"
                 maxLength={24}
                 className={controlClass}
+              />
+            </>
+          )}
+          {passwordField && (
+            <>
+              <label htmlFor="ngm-password">Password</label>
+              <input
+                id="ngm-password"
+                type="text"
+                value={passwordField.value}
+                // Uppercased as typed (not just at comparison time server-side) so
+                // what the host sees on screen to read off always matches what a
+                // joiner has to type -- see GameSession's roomPassword doc comment.
+                onChange={(e) => passwordField.onChange(e.target.value.toUpperCase())}
+                placeholder="Optional"
+                maxLength={64}
+                className={`${controlClass} uppercase`}
               />
             </>
           )}

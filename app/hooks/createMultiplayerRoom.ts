@@ -2,6 +2,7 @@ import { io, Socket } from "socket.io-client";
 import { ClientToServerEvents, ServerToClientEvents } from "@/lib/server/protocol";
 import { AiDifficulty, CenterEffectId } from "@/lib/engine/types";
 import { saveCredentials } from "./multiplayerCredentials";
+import { rememberLocalRoom } from "./localRooms";
 import { MULTIPLAYER_UNAVAILABLE_MESSAGE } from "./multiplayerUnavailable";
 import { CONNECT_TIMEOUT_MS } from "./socketConnectTimeout";
 
@@ -17,7 +18,9 @@ export function createMultiplayerRoom(
   centerEffect: CenterEffectId,
   aiDifficulty: AiDifficulty,
   /** Jackbox-style shared screen -- the caller takes no seat, just hosts. Defaults false (the normal "host also plays" room). */
-  asDisplay = false
+  asDisplay = false,
+  /** Optional -- blank/omitted means no password, same as every call site that predates this feature. */
+  password?: string
 ): Promise<{ roomCode: string } | { error: string }> {
   return new Promise((resolve) => {
     const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io({ timeout: CONNECT_TIMEOUT_MS });
@@ -30,9 +33,10 @@ export function createMultiplayerRoom(
     };
 
     socket.on("connect", () => {
-      socket.emit("room:create", { hostName, playerCount, centerEffect, asDisplay, aiDifficulty }, (ack) => {
+      socket.emit("room:create", { hostName, playerCount, centerEffect, asDisplay, aiDifficulty, password }, (ack) => {
         if (ack.ok) {
-          saveCredentials(ack.roomCode, { playerId: ack.playerId, token: ack.token });
+          saveCredentials(ack.roomCode, { playerId: ack.playerId, token: ack.token, roomPassword: ack.password });
+          rememberLocalRoom(ack.roomCode);
           finish({ roomCode: ack.roomCode });
         } else {
           finish({ error: ack.error });

@@ -71,7 +71,7 @@ describe("RoomRegistry", () => {
     session.addPlayer("Bob");
 
     const summaries = registry.listSummaries();
-    expect(summaries).toEqual([{ roomCode: session.roomCode, hostName: "Alice", hostIsDisplay: false, seatedCount: 2, playerCount: 3, centerEffect: "none", started: false }]);
+    expect(summaries).toEqual([{ roomCode: session.roomCode, hostName: "Alice", hostIsDisplay: false, seatedCount: 2, playerCount: 3, centerEffect: "none", started: false, hasPassword: false }]);
   });
 
   it("listSummaries still includes a room once it has started -- so a player who went back to home can find their way back in", () => {
@@ -80,7 +80,7 @@ describe("RoomRegistry", () => {
     session.start(session.hostToken);
 
     const summaries = registry.listSummaries();
-    expect(summaries).toEqual([{ roomCode: session.roomCode, hostName: "Alice", hostIsDisplay: false, seatedCount: 1, playerCount: 2, centerEffect: "none", started: true }]);
+    expect(summaries).toEqual([{ roomCode: session.roomCode, hostName: "Alice", hostIsDisplay: false, seatedCount: 1, playerCount: 2, centerEffect: "none", started: true, hasPassword: false }]);
   });
 
   it("delete removes a room from both get() and listSummaries()", () => {

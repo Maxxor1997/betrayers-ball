@@ -41,7 +41,7 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
   }
 
   io.on("connection", (socket: IOSocket) => {
-    socket.on("room:create", ({ hostName, playerCount, centerEffect, asDisplay, aiDifficulty }, ack) => {
+    socket.on("room:create", ({ hostName, playerCount, centerEffect, asDisplay, aiDifficulty, password }, ack) => {
       try {
         const session = registry.create(
           (roomCode) =>
@@ -57,7 +57,8 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
               },
               undefined,
               asDisplay,
-              aiDifficulty
+              aiDifficulty,
+              password
             )
         );
         attach(socket, session.roomCode, session.hostPlayerId);
@@ -66,13 +67,13 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
         // without this, the host would see no lobby at all (no Start button) until a
         // second player's join happens to trigger the first real broadcast.
         socket.emit("lobby:update", session.getLobbyState());
-        ack({ ok: true, roomCode: session.roomCode, playerId: session.hostPlayerId, token: session.hostToken });
+        ack({ ok: true, roomCode: session.roomCode, playerId: session.hostPlayerId, token: session.hostToken, password: session.password });
       } catch (err) {
         ack({ ok: false, error: err instanceof Error ? err.message : "Couldn't create room." });
       }
     });
 
-    socket.on("room:join", ({ roomCode, name }, ack) => {
+    socket.on("room:join", ({ roomCode, name, password }, ack) => {
       const session = registry.get(roomCode);
       if (!session) return ack({ ok: false, error: "No game found at that room code." });
       // GameSession.addPlayer broadcasts lobby:update synchronously, as part of the
@@ -81,7 +82,7 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
       // broadcast reaches everyone *already* in the room, but not this socket, so the
       // explicit emit after attach() below is this joiner's only guaranteed copy of
       // the lobby state their own join just caused.
-      const result = session.addPlayer(name?.trim() || "Player");
+      const result = session.addPlayer(name?.trim() || "Player", password);
       if ("error" in result) return ack({ ok: false, error: result.error });
       attach(socket, session.roomCode, result.playerId);
       socket.emit("lobby:update", session.getLobbyState());

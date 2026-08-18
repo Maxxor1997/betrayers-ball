@@ -9,6 +9,8 @@
 export interface StoredCredentials {
   playerId: string;
   token: string;
+  /** Only ever set for the browser that actually created the room (see createMultiplayerRoom.ts) -- so its own lobby screen can display the password for others to read off. Never set for a browser that joined via room code, even if the room has one. */
+  roomPassword?: string;
 }
 
 const STORAGE_PREFIX = "board-game:mp:";

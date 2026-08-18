@@ -343,18 +343,20 @@ export function resolveBoard(
     const cardContributions = contributions.get(c.instanceId) ?? [];
     const finalValue = values.get(c.instanceId) ?? base;
 
-    const breakdown: ScoreContribution[] = [{ label: "Base", amount: base, source: "self" }];
+    const breakdown: ScoreContribution[] = [];
     if (swap) {
       // Legible post-game annotation for why this card's own numbers don't match its
-      // printed rule -- see computeIdentitySwaps. Zero-amount: the swap's real effect
-      // is already baked into `base` and `cardContributions` above, this line just
-      // explains why.
+      // printed rule -- see computeIdentitySwaps. Placed before "Base" (not after) so
+      // it reads as the reason the base/rule below is what it is, not an afterthought.
+      // Zero-amount: the swap's real effect is already baked into `base` and
+      // `cardContributions` below, this line just explains why.
       const label =
         swap.originalCardId === "Infiltrator"
-          ? `${CARD_DEFS.Infiltrator.name} (borrowing ${CARD_DEFS[swap.newCardId].name}'s rule)`
-          : `${CARD_DEFS.Infiltrator.name} (its rule was stolen -- scoring as ${CARD_DEFS.Infiltrator.name} instead)`;
+          ? `Scoring as ${CARD_DEFS[swap.newCardId].name} (Facestealer effect)`
+          : `Scoring as ${CARD_DEFS.Infiltrator.name} (Facestealer effect)`;
       breakdown.push({ label, amount: 0, source: "self" });
     }
+    breakdown.push({ label: "Base", amount: base, source: "self" });
     breakdown.push(...cardContributions);
     const rawTotal = base + cardContributions.reduce((sum, d) => sum + (d.informational ? 0 : d.amount), 0);
     if (finalValue !== rawTotal) {

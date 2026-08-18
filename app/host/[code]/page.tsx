@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMultiplayerSession } from "@/app/hooks/useMultiplayerSession";
+import { loadCredentials } from "@/app/hooks/multiplayerCredentials";
 import { MultiplayerUnavailableBanner } from "@/app/components/MultiplayerUnavailableNotice";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
@@ -210,6 +211,10 @@ function DisplayLobby({ roomCode, session }: { roomCode: string; session: Return
   const { lobby, error, startGame } = session;
   const [copied, setCopied] = useState(false);
   const joinUrl = lobby ? `${lobby.serverOrigin}/join/${roomCode}` : "";
+  // This page is only ever reachable with the host's own stored credentials (see this
+  // file's top-level doc comment), so unlike join/[code]/page.tsx's Lobby there's no
+  // separate isHost check needed here -- whoever's looking at this screen is the host.
+  const roomPassword = loadCredentials(roomCode)?.roomPassword;
 
   return (
     <div className="flex w-full max-w-md flex-col gap-4 rounded-lg border border-zinc-300 p-5 dark:border-zinc-700">
@@ -231,6 +236,11 @@ function DisplayLobby({ roomCode, session }: { roomCode: string; session: Return
             {copied ? "Copied!" : "Copy"}
           </button>
         </div>
+        {roomPassword && (
+          <p className="mt-1 text-xs text-zinc-500">
+            Room password: <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">{roomPassword}</span>
+          </p>
+        )}
         <p className="mt-1 text-xs text-zinc-500">
           Everyone must be on the same network as this screen. Any empty seats left when you hit Start get filled with AI.
         </p>

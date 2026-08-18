@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMultiplayerSession } from "@/app/hooks/useMultiplayerSession";
+import { loadCredentials } from "@/app/hooks/multiplayerCredentials";
 import { MultiplayerUnavailableBanner } from "@/app/components/MultiplayerUnavailableNotice";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
@@ -202,13 +203,18 @@ function Room() {
   );
 }
 
-function NameEntry({ onJoin, error }: { onJoin: (name: string) => void; error: string | null }) {
+function NameEntry({ onJoin, error }: { onJoin: (name: string, password?: string) => void; error: string | null }) {
   const [name, setName] = useState("");
+  // Shown unconditionally, not just when the room is known to need one -- an
+  // anonymous visitor hasn't joined yet, so there's no lobby:update for this page to
+  // have learned hasPassword from before this form submits. Left blank, it's simply
+  // ignored by a room with no password (see GameSession.addPlayer).
+  const [password, setPassword] = useState("");
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onJoin(name.trim() || "Player");
+        onJoin(name.trim() || "Player", password);
       }}
       className="flex w-full max-w-xs flex-col gap-3 rounded-lg border border-zinc-300 p-4 dark:border-zinc-700"
     >
@@ -221,6 +227,18 @@ function NameEntry({ onJoin, error }: { onJoin: (name: string) => void; error: s
         placeholder="Your name"
         maxLength={24}
         className="rounded border border-zinc-300 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-700"
+      />
+      <input
+        type="text"
+        value={password}
+        // Uppercased as typed -- the server also normalizes to uppercase before
+        // comparing (see GameSession.addPlayer), so this is purely so what's on
+        // screen always matches what the host displayed, not a correctness
+        // requirement, but matching it avoids "did I get the case right" confusion.
+        onChange={(e) => setPassword(e.target.value.toUpperCase())}
+        placeholder="Room password (if set)"
+        maxLength={64}
+        className="rounded border border-zinc-300 bg-transparent px-2 py-1.5 text-sm uppercase dark:border-zinc-700"
       />
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
       <button type="submit" className="rounded-full bg-zinc-900 px-4 py-1.5 text-sm text-white dark:bg-zinc-100 dark:text-black">
@@ -238,6 +256,11 @@ function Lobby({ roomCode, session }: { roomCode: string; session: ReturnType<ty
   // which is meaningless to share with a different device.
   const joinUrl = lobby ? `${lobby.serverOrigin}/join/${roomCode}` : "";
   const isHost = !!lobby && myPlayerId === lobby.hostPlayerId;
+  // Only the creator's own browser ever has this (see multiplayerCredentials.ts's
+  // roomPassword doc comment) -- a browser that rejoined the host seat some other way
+  // (there isn't one today, but nothing here assumes it) simply wouldn't have it to
+  // show, same as it wouldn't for a joiner.
+  const roomPassword = isHost ? loadCredentials(roomCode)?.roomPassword : undefined;
 
   return (
     <div className="flex w-full max-w-md flex-col gap-4 rounded-lg border border-zinc-300 p-5 dark:border-zinc-700">
@@ -259,6 +282,11 @@ function Lobby({ roomCode, session }: { roomCode: string; session: ReturnType<ty
             {copied ? "Copied!" : "Copy"}
           </button>
         </div>
+        {roomPassword && (
+          <p className="mt-1 text-xs text-zinc-500">
+            Room password: <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">{roomPassword}</span>
+          </p>
+        )}
         <p className="mt-1 text-xs text-zinc-500">
           Everyone must be on the same network as the host. Any empty seats left when you hit Start get filled with AI.
         </p>

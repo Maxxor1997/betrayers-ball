@@ -13,7 +13,7 @@ function deterministicRng(seed: number) {
 }
 
 /** Records every push a session makes, and captures the host's own token (GameSession exposes it via `.hostToken` -- see its doc comment for why that getter exists). */
-function harness(playerCount: number, seed = 1, displayHosted = false, aiDifficulty: AiDifficulty = "medium") {
+function harness(playerCount: number, seed = 1, displayHosted = false, aiDifficulty: AiDifficulty = "medium", password?: string) {
   const lobbyPushes: LobbyState[] = [];
   const statePushes: { playerId: string; state: WireGameState }[] = [];
   const session = new GameSession(
@@ -28,7 +28,8 @@ function harness(playerCount: number, seed = 1, displayHosted = false, aiDifficu
     },
     deterministicRng(seed),
     displayHosted,
-    aiDifficulty
+    aiDifficulty,
+    password
   );
   return { session, lobbyPushes, statePushes, hostToken: session.hostToken };
 }
@@ -118,7 +119,44 @@ describe("GameSession lobby", () => {
       playerCount: 3,
       centerEffect: "none",
       started: false,
+      hasPassword: false,
     });
+  });
+
+  it("rejects a join with a missing or wrong password when the room was created with one", () => {
+    const { session } = harness(3, 1, false, "medium", "hunter2");
+    expect(session.addPlayer("Guest")).toEqual({ error: "Incorrect room password." });
+    expect(session.addPlayer("Guest", "wrong")).toEqual({ error: "Incorrect room password." });
+  });
+
+  it("accepts a join with the matching password", () => {
+    const { session } = harness(3, 1, false, "medium", "hunter2");
+    const result = session.addPlayer("Guest", "hunter2");
+    expect("error" in result).toBe(false);
+  });
+
+  it("normalizes the password to uppercase at construction and compares case-insensitively", () => {
+    const { session } = harness(3, 1, false, "medium", "Secret1");
+    expect(session.password).toBe("SECRET1");
+    expect("error" in session.addPlayer("Guest", "secret1")).toBe(false);
+  });
+
+  it("getSummary reports hasPassword without leaking the password itself", () => {
+    const { session } = harness(3, 1, false, "medium", "hunter2");
+    expect(session.getSummary().hasPassword).toBe(true);
+    expect(JSON.stringify(session.getSummary())).not.toContain("hunter2");
+  });
+
+  it("treats a blank/whitespace-only password as no password at all", () => {
+    const { session } = harness(3, 1, false, "medium", "   ");
+    expect(session.getSummary().hasPassword).toBe(false);
+    expect("error" in session.addPlayer("Guest")).toBe(false);
+  });
+
+  it("lets an already-seated player rejoin by token without ever re-supplying the password", () => {
+    const { session, hostToken } = harness(3, 1, false, "medium", "hunter2");
+    const result = session.rejoin(hostToken);
+    expect("error" in result).toBe(false);
   });
 
   it("rejects joining after the game has started", () => {

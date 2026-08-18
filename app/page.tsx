@@ -12,6 +12,7 @@ import { MultiplayerUnavailableBanner, MultiplayerUnavailableModal } from "@/app
 import { createMultiplayerRoom } from "@/app/hooks/createMultiplayerRoom";
 import { listMultiplayerRooms } from "@/app/hooks/listMultiplayerRooms";
 import { loadCredentials } from "@/app/hooks/multiplayerCredentials";
+import { isLocalRoom } from "@/app/hooks/localRooms";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
@@ -104,20 +105,27 @@ function PlayOption({
 }
 
 /**
- * Every room on this network, lobby or in-progress -- lets a player join (or, for a
- * started game, reconnect) without needing a direct link/room code. Includes started
+ * Rooms this browser has actually touched (created or joined -- see localRooms.ts),
+ * lobby or in-progress, filtered client-side out of the server's full room list. Lets
+ * a player rejoin without needing to re-find a direct link/room code. Includes started
  * games on purpose: someone who hit the "Home" link mid-game still has their seat's
  * credentials in this browser's sessionStorage (see multiplayerCredentials.ts), so
  * this is how they find their way back in. A started room this browser was never
  * seated in shows as a plain status, not a button -- clicking through would just hit
  * addPlayer's "already started" rejection on the join page, a dead end not worth
  * offering.
+ *
+ * Deliberately NOT "every room on this network": the server's room registry is shared
+ * by every visitor to a given deployment (see rooms.ts), and this app now runs both as
+ * a LAN desktop and on a public Render deployment -- an unfiltered list there would
+ * hand every visitor a live directory of every stranger's game.
  */
 function ActiveSessions() {
   const router = useRouter();
   const [rooms, setRooms] = useState<RoomSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
 
   async function refresh() {
     setLoading(true);
@@ -125,7 +133,7 @@ function ActiveSessions() {
     const result = await listMultiplayerRooms();
     setLoading(false);
     if ("error" in result) setError(result.error);
-    else setRooms(result.rooms);
+    else setRooms(result.rooms.filter((room) => isLocalRoom(room.roomCode)));
   }
 
   useEffect(() => {
@@ -147,7 +155,7 @@ function ActiveSessions() {
 
       {error && <MultiplayerUnavailableBanner />}
       {rooms && rooms.length === 0 && !error && (
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">No games on this network right now.</p>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">No games you've created or joined from this browser right now.</p>
       )}
       {rooms && rooms.length > 0 && (
         <ul className="flex flex-col gap-2">
@@ -164,6 +172,7 @@ function ActiveSessions() {
                   <span className="text-zinc-500 dark:text-zinc-400">
                     — {room.seatedCount}/{room.playerCount} players, {CENTER_EFFECTS[room.centerEffect].label}
                     {room.started && " · in progress"}
+                    {room.hasPassword && " · 🔒"}
                   </span>
                 </span>
                 {canJoin || canReconnect ? (
@@ -181,6 +190,40 @@ function ActiveSessions() {
           })}
         </ul>
       )}
+
+      {/* Below the list, not folded into it -- this is how a browser that's never
+          touched a given room gets in (a stranger clicking a shared link never sees
+          this screen at all, but the same host handing out a bare room code, e.g. over
+          voice, needs somewhere to type it), so it always shows regardless of whether
+          the local-only list above is empty. */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const code = joinCode.trim();
+          if (code) router.push(`/join/${code.toUpperCase()}`);
+        }}
+        className="flex items-center gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-800"
+      >
+        <input
+          type="text"
+          value={joinCode}
+          // Uppercased as typed -- room codes are always displayed/stored uppercase
+          // (see roomWords.ts's randomRoomCode), and the submit handler already
+          // uppercases before navigating, so this just makes what's on screen match
+          // that from the first keystroke instead of only once submitted.
+          onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+          placeholder="Have a room code?"
+          maxLength={24}
+          className="min-w-0 flex-1 rounded border border-zinc-300 bg-transparent px-2 py-1.5 text-sm uppercase dark:border-zinc-700"
+        />
+        <button
+          type="submit"
+          disabled={!joinCode.trim()}
+          className="shrink-0 rounded-full bg-zinc-900 px-3 py-1.5 text-xs whitespace-nowrap text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-black"
+        >
+          Join
+        </button>
+      </form>
     </div>
   );
 }
@@ -195,6 +238,7 @@ export default function HomePage() {
   const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(null);
   const [mode, setMode] = useState<"solo" | "host" | "display">("solo");
   const [hostName, setHostName] = useState("");
+  const [roomPassword, setRoomPassword] = useState("");
   const [hostError, setHostError] = useState<string | null>(null);
   const [hosting, setHosting] = useState(false);
   // Starts false (SSR-safe -- window isn't available yet) and corrects itself once
@@ -214,12 +258,14 @@ export default function HomePage() {
   function openHostSetup() {
     setMode("host");
     setHostError(null);
+    setRoomPassword("");
     setNewGameSetup({ playerCount: 4, centerEffect: "random", aiDifficulty: DEFAULT_AI_DIFFICULTY });
   }
 
   function openDisplaySetup() {
     setMode("display");
     setHostError(null);
+    setRoomPassword("");
     setNewGameSetup({ playerCount: 4, centerEffect: "random", aiDifficulty: DEFAULT_AI_DIFFICULTY });
   }
 
@@ -235,7 +281,7 @@ export default function HomePage() {
     setHostError(null);
     const pool = randomCenterEffectPool(setup.playerCount);
     const centerEffect = setup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : setup.centerEffect;
-    const result = await createMultiplayerRoom(hostName.trim() || "Host", setup.playerCount, centerEffect, setup.aiDifficulty);
+    const result = await createMultiplayerRoom(hostName.trim() || "Host", setup.playerCount, centerEffect, setup.aiDifficulty, false, roomPassword);
     setHosting(false);
     if ("error" in result) {
       setNewGameSetup(null);
@@ -251,7 +297,7 @@ export default function HomePage() {
     setHostError(null);
     const pool = randomCenterEffectPool(setup.playerCount);
     const centerEffect = setup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : setup.centerEffect;
-    const result = await createMultiplayerRoom("Host", setup.playerCount, centerEffect, setup.aiDifficulty, true);
+    const result = await createMultiplayerRoom("Host", setup.playerCount, centerEffect, setup.aiDifficulty, true, roomPassword);
     setHosting(false);
     if ("error" in result) {
       setNewGameSetup(null);
@@ -316,6 +362,7 @@ export default function HomePage() {
             onConfirm={confirmNewGame}
             confirmLabel={hosting ? "Starting…" : mode === "host" ? "Create room" : mode === "display" ? "Open display" : "Start"}
             nameField={mode === "host" ? { value: hostName, onChange: setHostName } : undefined}
+            passwordField={mode === "host" || mode === "display" ? { value: roomPassword, onChange: setRoomPassword } : undefined}
             playerCountLabel={mode === "host" ? (n) => `${n}` : mode === "display" ? (n) => `${n} players` : undefined}
             seatFillNote={mode === "solo" ? undefined : "Any empty seats are filled with AI once the game starts."}
           />

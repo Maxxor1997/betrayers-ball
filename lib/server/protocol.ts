@@ -95,17 +95,23 @@ export interface CreateRoomPayload {
   asDisplay: boolean;
   /** Strategy every AI seat backfilled at Start uses -- see AiDifficulty's doc comment. */
   aiDifficulty: AiDifficulty;
+  /** Optional, blank/omitted means no password (existing behavior, unchanged) -- gates room:join only. Doesn't hide the room from rooms:list, and a seat's saved reconnect token (room:rejoin) bypasses it entirely -- once you've been seated, you don't need to keep re-proving it. */
+  password?: string;
 }
 export interface CreateRoomResult {
   roomCode: string;
   /** DISPLAY_VIEWER_ID for a display-hosted room -- see its doc comment. */
   playerId: string;
   token: string;
+  /** Echoed back only to the room's own creator (never sent to anyone who joins later) so the host's own screen can display it for others to read off -- see CreateRoomPayload.password. Undefined if the room has no password. */
+  password?: string;
 }
 
 export interface JoinRoomPayload {
   roomCode: string;
   name: string;
+  /** Required (and checked) only if the room was created with one -- see CreateRoomPayload.password. */
+  password?: string;
 }
 export interface JoinRoomResult {
   playerId: string;
@@ -164,6 +170,8 @@ export interface RoomSummary {
   playerCount: number;
   centerEffect: CenterEffectId;
   started: boolean;
+  /** True if room:join requires a matching password -- lets the home screen prompt for one up front instead of only finding out after a rejected join. Never the password itself. */
+  hasPassword: boolean;
 }
 
 export interface ClientToServerEvents {

@@ -9,7 +9,7 @@ import { computeNegatedInstanceIds, ResolvedCard } from "@/lib/engine/resolution
 import { GameState, Position, posKey } from "@/lib/engine/types";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useHasHover } from "@/app/hooks/useHasHover";
-import { visibleBreakdown } from "./scoreBreakdown";
+import { BreakdownPopup } from "./scoreBreakdown";
 
 /** Index-based, not identity-based -- same seat position always gets the same color regardless of who (human or AI, single- or multiplayer) sits there. */
 function ownerColorClass(state: GameState, ownerId: string): string {
@@ -63,6 +63,18 @@ export function BoardGrid({
   // hover-vs-tap and click/scroll-to-dismiss behavior every other tooltip already has.
   const endScreenPrefix = "endscreen:";
   const hoveredEndCardInstanceId = activeTooltipId?.startsWith(endScreenPrefix) ? activeTooltipId.slice(endScreenPrefix.length) : null;
+  // Same idea, but for a whole player rather than one card: TurnOrderTracker's row
+  // hover (`turnorder:${playerId}`) and EndScreen's per-player header hover
+  // (`player:${playerId}`) both reuse the same shared tooltip-id store, so hovering
+  // (or tapping, on touch) either one highlights every one of that player's cards
+  // here, not just a single card.
+  const turnOrderPrefix = "turnorder:";
+  const playerRowPrefix = "player:";
+  const hoveredPlayerId = activeTooltipId?.startsWith(turnOrderPrefix)
+    ? activeTooltipId.slice(turnOrderPrefix.length)
+    : activeTooltipId?.startsWith(playerRowPrefix)
+      ? activeTooltipId.slice(playerRowPrefix.length)
+      : null;
 
   // Cells are sized to fill their grid column (aspect-square, no fixed px) rather than
   // a fixed h-20 w-20 -- with wider/taller boards (7-8p can be 11+ columns or rows) a
@@ -176,7 +188,9 @@ export function BoardGrid({
             // aid, not a "where are more of this type" one, so opponents' cards (even
             // an exact type match) are deliberately excluded.
             const highlighted =
-              (selectedInstanceId !== null && card.ownerId === viewerId) || card.instanceId === hoveredEndCardInstanceId;
+              (selectedInstanceId !== null && card.ownerId === viewerId) ||
+              card.instanceId === hoveredEndCardInstanceId ||
+              card.ownerId === hoveredPlayerId;
             const tooltipDetail = displayFaceUp
               ? `${def.name} (${def.base}) — ${def.text}`
               : card.ownerId === viewerId
@@ -252,24 +266,12 @@ export function BoardGrid({
                   )}
                 </button>
                 {activeTooltipId === tooltipId && (
-                  <div className="pointer-events-none absolute -top-12 left-1/2 z-10 w-max max-w-[12rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-white shadow dark:bg-zinc-100 dark:text-black">
-                    <div className="text-[10px] font-semibold leading-tight">{tooltipOwner}</div>
-                    <div className="text-[10px] leading-tight">{tooltipDetail}</div>
+                  <div className="pointer-events-none absolute -top-2 left-1/2 z-10 w-max min-w-[9rem] max-w-[16rem] -translate-x-1/2 -translate-y-full rounded bg-zinc-900 px-2 py-1 text-center text-[10px] text-white shadow dark:bg-zinc-100 dark:text-black">
+                    <div className="font-semibold leading-tight">{tooltipOwner}</div>
+                    <div className="leading-tight">{tooltipDetail}</div>
                     {resolvedCard && (
-                      <div className="mt-1 border-t border-white/20 pt-1 text-left dark:border-black/20">
-                        {visibleBreakdown(resolvedCard.breakdown).map((d, j) => (
-                          <div key={j} className="flex justify-between gap-3 text-[10px] whitespace-nowrap">
-                            <span>{d.label}</span>
-                            <span>
-                              {d.amount > 0 && d.label !== "Base" ? "+" : ""}
-                              {d.amount}
-                            </span>
-                          </div>
-                        ))}
-                        <div className="mt-0.5 flex justify-between gap-3 border-t border-white/20 pt-0.5 text-[10px] font-semibold whitespace-nowrap dark:border-black/20">
-                          <span>Final</span>
-                          <span>{resolvedCard.finalValue}</span>
-                        </div>
+                      <div className="mt-1 border-t border-white/20 pt-1 dark:border-black/20">
+                        <BreakdownPopup breakdown={resolvedCard.breakdown} finalValue={resolvedCard.finalValue} />
                       </div>
                     )}
                   </div>

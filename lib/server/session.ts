@@ -38,6 +38,8 @@ export class GameSession {
   /** Stored separately from `seats` -- getSummary() needs it even when displayHosted leaves no host seat to read it from. */
   private readonly hostNameLabel: string;
   private readonly hostTokenValue: string;
+  /** Undefined means no password -- the room:join-gating check is skipped entirely, matching the room's pre-password behavior. Never sent back to any client (see getSummary()'s hasPassword instead). */
+  private readonly roomPassword?: string;
   private readonly playerCount: number;
   /** Not readonly -- rematch() can change the location for the next deal, unlike playerCount which is fixed to the room's existing seats. */
   private centerEffect: CenterEffectId;
@@ -76,7 +78,9 @@ export class GameSession {
     /** Jackbox-style shared screen -- the host takes no seat, and all `playerCount` seats are open for real players/AI. Defaults false so every existing single-device-host call site is unaffected. */
     displayHosted = false,
     /** Trailing optional, defaulting to "medium" -- so every existing call site (including tests) that predates AI difficulty keeps working unchanged. */
-    aiDifficulty: AiDifficulty = "medium"
+    aiDifficulty: AiDifficulty = "medium",
+    /** Trailing optional -- blank/undefined means no password, same as every call site that predates this feature. Trimmed here (not by the caller) so " " isn't treated as a real password. */
+    password?: string
   ) {
     if (!Number.isInteger(playerCount) || playerCount < MIN_PLAYERS || playerCount > MAX_PLAYERS) {
       throw new Error(`playerCount must be an integer between ${MIN_PLAYERS} and ${MAX_PLAYERS}`);
@@ -88,6 +92,11 @@ export class GameSession {
     this.serverOrigin = serverOrigin;
     this.rng = rng;
     this.displayHosted = displayHosted;
+    // Uppercased at construction (not just compared case-insensitively) so the value
+    // handed back to the host for display (see the `password` getter/CreateRoomResult)
+    // always matches what a joiner has to type -- same "all caps, no ambiguity about
+    // case" treatment as room codes themselves.
+    this.roomPassword = password?.trim().toUpperCase() || undefined;
     this.hostNameLabel = hostName;
     this.onLobbyChange = handlers.onLobbyChange;
     this.onPlayerState = handlers.onPlayerState;
@@ -113,6 +122,11 @@ export class GameSession {
     return this.state !== null;
   }
 
+  /** Undefined if the room has no password. Only meant to be handed back to the room's own creator (see room:create's ack) -- everyone else only ever learns hasPassword (getSummary/getLobbyState), never the value itself. */
+  get password(): string | undefined {
+    return this.roomPassword;
+  }
+
   /** The host's own bearer token -- for a non-display room this is the same token its seat holds; for a display room it's a standalone token no seat ever carries. Either way, this is the only way to retrieve it, both for tests and for the real room:create handler to hand back to its caller. */
   get hostToken(): string {
     return this.hostTokenValue;
@@ -128,6 +142,7 @@ export class GameSession {
       playerCount: this.playerCount,
       centerEffect: this.centerEffect,
       started: this.started,
+      hasPassword: this.roomPassword !== undefined,
     };
   }
 
@@ -145,9 +160,16 @@ export class GameSession {
     };
   }
 
-  /** Result carries a token the client must present on every future action/rejoin -- treat it like a bearer credential, never broadcast. */
-  addPlayer(name: string): { playerId: string; token: string } | { error: string } {
+  /**
+   * Result carries a token the client must present on every future action/rejoin --
+   * treat it like a bearer credential, never broadcast. `password` is only checked
+   * here (joining) -- once seated, room:rejoin authenticates by that token alone, so a
+   * password change (there is none, currently -- it's fixed at room creation) or a
+   * forgotten password never locks an already-seated player out.
+   */
+  addPlayer(name: string, password?: string): { playerId: string; token: string } | { error: string } {
     if (this.started) return { error: "This game has already started." };
+    if (this.roomPassword !== undefined && password?.trim().toUpperCase() !== this.roomPassword) return { error: "Incorrect room password." };
     const humanSeats = [...this.seats.values()].filter((s) => !s.isAI);
     if (humanSeats.length >= this.playerCount) return { error: "This room is full." };
 

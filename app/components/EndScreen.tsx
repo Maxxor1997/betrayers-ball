@@ -7,7 +7,7 @@ import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { PLAYER_BORDER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 import { ResolutionResult, ResolvedCard } from "@/lib/engine/resolution";
 import { GameState } from "@/lib/engine/types";
-import { visibleBreakdown } from "./scoreBreakdown";
+import { BreakdownPopup } from "./scoreBreakdown";
 
 /** Index-based, not identity-based -- same reasoning as Board.tsx's ownerColorClass. */
 function ownerTextColorClass(state: GameState, ownerId: string): string {
@@ -36,6 +36,7 @@ function ordinal(n: number): string {
 }
 
 function PlayerTable({
+  ownerId,
   label,
   score,
   placeLabel,
@@ -46,6 +47,8 @@ function PlayerTable({
   extraRow,
   votesByRound,
 }: {
+  /** Drives the header's hover/tap-to-highlight -- see the `player:${ownerId}` tooltip id below, which Board.tsx also watches for to highlight every one of this player's cards, same as hovering their row in the in-game turn-order tracker. */
+  ownerId: string;
   label: string;
   score: number;
   /** e.g. "1st place" or "Tied for 2nd place". */
@@ -73,7 +76,24 @@ function PlayerTable({
         isYou ? "bg-amber-50 ring-2 ring-amber-400 dark:bg-amber-950/30 dark:ring-amber-600" : ""
       }`}
     >
-      <h3 className={`mb-1 text-sm font-semibold ${colorClass}`}>
+      <h3
+        className={`mb-1 cursor-help text-sm font-semibold [-webkit-touch-callout:none] select-none ${colorClass}`}
+        // Same shared-tooltip-id/hover-vs-tap pattern as everywhere else -- here it's
+        // not used to show a tooltip of its own, just to broadcast "this player is
+        // being looked at" so Board.tsx (which also watches this `player:` prefix) can
+        // highlight every one of their cards, the post-game-screen equivalent of
+        // hovering a row in the in-game turn-order tracker.
+        onMouseEnter={hasHover ? () => setActiveTooltip(`player:${ownerId}`) : undefined}
+        onMouseLeave={hasHover ? () => clearActiveTooltip(`player:${ownerId}`) : undefined}
+        onClick={
+          hasHover
+            ? undefined
+            : (e) => {
+                e.stopPropagation();
+                toggleActiveTooltip(`player:${ownerId}`);
+              }
+        }
+      >
         {label}: {score} <span className="font-normal text-zinc-500 dark:text-zinc-400">— {placeLabel}</span>
       </h3>
       <table className="w-full text-left text-xs">
@@ -122,19 +142,7 @@ function PlayerTable({
                   </button>
                   {activeTooltipId === tooltipId && (
                     <div className="pointer-events-none absolute top-full left-0 z-20 mt-1 w-max min-w-[9rem] max-w-[16rem] rounded bg-zinc-900 px-2 py-1.5 text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
-                      {visibleBreakdown(c.breakdown).map((d, j) => (
-                        <div key={j} className="flex justify-between gap-3 whitespace-nowrap">
-                          <span>{d.label}</span>
-                          <span>
-                            {d.amount > 0 && d.label !== "Base" ? "+" : ""}
-                            {d.amount}
-                          </span>
-                        </div>
-                      ))}
-                      <div className="mt-1 flex justify-between gap-3 border-t border-white/20 pt-1 font-semibold whitespace-nowrap dark:border-black/20">
-                        <span>Final</span>
-                        <span>{c.finalValue}</span>
-                      </div>
+                      <BreakdownPopup breakdown={c.breakdown} finalValue={c.finalValue} />
                     </div>
                   )}
                 </td>
@@ -231,6 +239,7 @@ export function EndScreen({
         {rankedPlayerIds.map((id) => (
           <PlayerTable
             key={id}
+            ownerId={id}
             label={nameFor(id)}
             score={gameResult.scores[id]}
             placeLabel={placeLabel(id)}

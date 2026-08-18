@@ -8,9 +8,10 @@ import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription } from "@/lib/content/centerEffects";
 import { PLAYER_TEXT_COLOR_CLASSES, playerDotColorClass } from "@/lib/config/players";
 import { estimatedResolutionFor } from "@/lib/engine/endgame";
+import { roundRotationShiftFor } from "@/lib/engine/game";
 import { currentPlayerId } from "@/lib/engine/turns";
 import { GameState } from "@/lib/engine/types";
-import { visibleBreakdown } from "./scoreBreakdown";
+import { BreakdownPopup } from "./scoreBreakdown";
 
 /** Index-based, not identity-based -- same as Board.tsx's ownerColorClass, just the text-color palette. */
 function ownerTextColorClass(state: GameState, ownerId: string): string {
@@ -122,20 +123,11 @@ function MyScoreTracker({ state, viewerId }: { state: GameState; viewerId: strin
               <span className="whitespace-nowrap">No cards placed yet.</span>
             ) : (
               myCards.map((c) => (
-                <div key={c.instanceId} className="whitespace-nowrap">
-                  <div className="flex justify-between gap-3 font-semibold">
-                    <span>{CARD_DEFS[c.cardId].name}</span>
-                    <span>{c.finalValue}</span>
+                <div key={c.instanceId} className="min-w-[9rem]">
+                  <div className="mb-0.5 font-semibold">{CARD_DEFS[c.cardId].name}</div>
+                  <div className="pl-2">
+                    <BreakdownPopup breakdown={c.breakdown} finalValue={c.finalValue} />
                   </div>
-                  {visibleBreakdown(c.breakdown).map((d, i) => (
-                    <div key={i} className="flex justify-between gap-3 pl-2">
-                      <span>{d.label}</span>
-                      <span>
-                        {d.amount > 0 ? "+" : ""}
-                        {d.amount}
-                      </span>
-                    </div>
-                  ))}
                 </div>
               ))
             )}
@@ -184,6 +176,11 @@ function TurnOrderTracker({ state, viewerId, nameFor }: { state: GameState; view
   // since that's exactly when a seat gets skipped.
   const roundStartIndex = ((state.currentPlayerIndex - state.turnsThisRound) % playerCount + playerCount) % playerCount;
   const roundStartId = state.players[roundStartIndex].id;
+  // Same seat-skip math advanceTurn itself applies at a round boundary (see
+  // roundRotationShiftFor's doc comment in game.ts) -- derived here, not read off
+  // state, since nothing on GameState names "next round's start seat" directly.
+  const nextRoundStartIndex = (roundStartIndex + roundRotationShiftFor(playerCount)) % playerCount;
+  const nextRoundStartId = state.players[nextRoundStartIndex].id;
 
   return (
     <div className="flex w-full flex-col gap-1">
@@ -192,6 +189,13 @@ function TurnOrderTracker({ state, viewerId, nameFor }: { state: GameState; view
         <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
           Round starts with <span className={`font-semibold ${ownerTextColorClass(state, roundStartId)}`}>{nameFor(roundStartId)}</span>
           {roundStartId === viewerId ? " (you)" : ""}
+        </span>
+      )}
+      {playerCount >= 3 && (
+        <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+          Next round starts with{" "}
+          <span className={`font-semibold ${ownerTextColorClass(state, nextRoundStartId)}`}>{nameFor(nextRoundStartId)}</span>
+          {nextRoundStartId === viewerId ? " (you)" : ""}
         </span>
       )}
       <div className="flex flex-col gap-0.5">

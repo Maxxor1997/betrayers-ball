@@ -59,7 +59,7 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
               } ${selected ? "border-amber-500 bg-amber-50 dark:bg-amber-950" : ownerAccentClass}`}
             >
               <span className="w-full text-[length:clamp(8px,20cqw,10px)] leading-tight break-words font-semibold">{def.name}</span>
-              <CardArt cardId={card.cardId} className="h-8 w-8 shrink-0" />
+              <CardArt cardId={card.cardId} className="h-7 w-7 shrink-0" />
               <span className="text-[length:clamp(14px,32cqw,20px)] leading-none font-bold">{def.base}</span>
               {/* Truncated to 2 lines, not left to grow -- keeps the card's fixed h-28
                   from growing with description length. Full text is available in the

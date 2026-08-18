@@ -5,6 +5,7 @@ import { io, Socket } from "socket.io-client";
 import { ClientToServerEvents, fromWireState, LobbyState, ServerToClientEvents } from "@/lib/server/protocol";
 import { AiDifficulty, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
 import { clearCredentials, loadCredentials, saveCredentials, StoredCredentials } from "./multiplayerCredentials";
+import { rememberLocalRoom } from "./localRooms";
 import { MULTIPLAYER_UNAVAILABLE_MESSAGE } from "./multiplayerUnavailable";
 import { CONNECT_TIMEOUT_MS } from "./socketConnectTimeout";
 
@@ -29,7 +30,7 @@ export interface MultiplayerSession {
   /** True once the host has ended this room (room:closed) -- nothing else in this session updates further; render a "room closed" screen. */
   roomClosed: boolean;
   error: string | null;
-  join: (name: string) => void;
+  join: (name: string, password?: string) => void;
   startGame: () => void;
   /** Host-only, only once the current game has ended -- deals a fresh game to the same seats without leaving the room. `centerEffect` should already be resolved from "random", same as room:create. */
   rematch: (centerEffect: CenterEffectId, aiDifficulty: AiDifficulty) => void;
@@ -70,6 +71,7 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
         return;
       }
       credentialsRef.current = stored;
+      rememberLocalRoom(roomCode);
       socket.emit("room:rejoin", { roomCode, token: stored.token }, (ack) => {
         if (ack.ok) {
           setMyPlayerId(ack.playerId);
@@ -105,14 +107,15 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
   }, [roomCode]);
 
   const join = useCallback(
-    (name: string) => {
+    (name: string, password?: string) => {
       const socket = socketRef.current;
       if (!socket) return;
-      socket.emit("room:join", { roomCode, name }, (ack) => {
+      socket.emit("room:join", { roomCode, name, password }, (ack) => {
         if (ack.ok) {
           const credentials = { playerId: ack.playerId, token: ack.token };
           credentialsRef.current = credentials;
           saveCredentials(roomCode, credentials);
+          rememberLocalRoom(roomCode);
           setMyPlayerId(ack.playerId);
           setNeedsName(false);
           setError(null);

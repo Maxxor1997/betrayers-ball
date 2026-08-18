@@ -114,7 +114,7 @@ function applyRoundStart(state: GameState, newRound: number, rng: Rng): Pick<Gam
  * InstructionsModal), the exact shift amount isn't something a player needs to know to
  * play well.
  */
-function roundRotationShiftFor(playerCount: number): number {
+export function roundRotationShiftFor(playerCount: number): number {
   if (playerCount < 3) return 0;
   return playerCount === 8 ? 3 : 1;
 }
