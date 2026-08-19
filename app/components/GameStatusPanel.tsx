@@ -56,16 +56,16 @@ function StatusCell({ label, active, number, text }: { label: string; active: bo
   );
 }
 
-/** ✓ voted to end, ✗ voted to continue, nothing if they haven't voted this round (or voting hasn't opened yet). */
+/** "E" voted to end, "C" voted to continue, nothing if they haven't voted this round (or voting hasn't opened yet). Letters, not a check/X -- self-explanatory without a legend, unlike a bare check/X which reads as ambiguously "good"/"bad" rather than "end"/"continue". Green ("go"/keep playing) on C, red (stop) on E -- not the reverse. */
 function VoteGlyph({ vote }: { vote: boolean | undefined }) {
   if (vote === undefined) return null;
   return vote ? (
-    <span className="text-emerald-600 dark:text-emerald-400" title="Voted to end the game">
-      ✓
+    <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400" title="Voted to end the game">
+      E
     </span>
   ) : (
-    <span className="text-rose-600 dark:text-rose-400" title="Voted to keep playing">
-      ✗
+    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400" title="Voted to keep playing">
+      C
     </span>
   );
 }

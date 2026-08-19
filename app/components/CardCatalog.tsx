@@ -90,13 +90,13 @@ export const LOCATION_COMPLEXITY_ORDER: CenterEffectId[] = [
 ];
 
 const BUCKET_DESCRIPTIONS: Record<CardBucket, string> = {
-  Slam: "High base value with a built-in downside or condition that can cut it back down -- big numbers, but risky.",
-  Engine: "Low base value that grows from board state or synergy with other cards -- value comes from setup, not the printed number.",
-  Control: "Doesn't boost itself -- manipulates neighbors' values or bends the normal rules (negation, forced flips, zeroing).",
+  Slam: "High base value cards with a built-in downside or condition that can cut it back down.",
+  Engine: "Low base value cards that grow from board state or synergy with other cards.",
+  Control: "Cards that manipulate the values of other cards or bend the normal rules.",
 };
 
 const LOCATIONS_DESCRIPTION =
-  "A location is a game-wide rule this match is being played with -- it changes what the center tile does, adds a special win condition, or bends a normal rule (adjacency, flipping, ...) for everyone. Exactly one is active per game, picked at New Game.";
+  "A location is a game-wide rule this match is being played with -- it changes what the center tile does or bends a normal rule for everyone. Exactly one is active per game.";
 
 /**
  * Reference sidebar listing every card in the game, grouped by bucket, with its copy

@@ -6,7 +6,7 @@ import { MULTIPLAYER_UNAVAILABLE_MESSAGE } from "@/app/hooks/multiplayerUnavaila
 export function MultiplayerUnavailableBanner() {
   return (
     <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-      {MULTIPLAYER_UNAVAILABLE_MESSAGE} Single-player still works fine.
+      {MULTIPLAYER_UNAVAILABLE_MESSAGE}
     </div>
   );
 }
@@ -22,7 +22,7 @@ export function MultiplayerUnavailableModal({ onClose }: { onClose: () => void }
       >
         <h2 className="mb-2 text-lg font-semibold">Multiplayer unavailable</h2>
         <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
-          {MULTIPLAYER_UNAVAILABLE_MESSAGE} Single-player still works fine.
+          {MULTIPLAYER_UNAVAILABLE_MESSAGE}
         </p>
         <button
           onClick={onClose}

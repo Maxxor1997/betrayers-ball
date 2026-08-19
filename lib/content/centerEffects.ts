@@ -176,12 +176,19 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "Contested Lands",
     themeColorClass: "text-orange-700 dark:text-orange-500",
     titleHighlight: "Contested",
-    description: "+1 to every card for each opponent's card adjacent to it.",
+    description: "Every card gains +1 for each distinct opposing player with a card adjacent to it.",
     valueModifiers: (board, bounds, addDelta) => {
       for (const [key, c] of board.entries()) {
         const pos = parsePosKey(key);
-        const enemyNeighbors = getAdjacentCards(board, bounds, pos).filter((n) => n.ownerId !== c.ownerId).length;
-        if (enemyNeighbors > 0) addDelta(c.instanceId, enemyNeighbors, CENTER_EFFECTS.frontier.label);
+        // Unique opponents, not a raw neighbor count -- two adjacent cards from the
+        // same opponent only count once, same dedupe-by-owner shape as Warlord/
+        // Berserker/Mercenary elsewhere in the deck.
+        const uniqueEnemyOwners = new Set(
+          getAdjacentCards(board, bounds, pos)
+            .filter((n) => n.ownerId !== c.ownerId)
+            .map((n) => n.ownerId)
+        ).size;
+        if (uniqueEnemyOwners > 0) addDelta(c.instanceId, uniqueEnemyOwners, CENTER_EFFECTS.frontier.label);
       }
     },
   },
@@ -190,7 +197,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "The Lazaret",
     themeColorClass: "text-lime-700 dark:text-lime-500",
     titleHighlight: "Lazaret",
-    description: `A flat ${PSEUDO_CARD_BASE_VALUE} points, transferred at the end of scoring to the owner of the single lowest-valued card on the board — a tie for lowest means no transfer.`,
+    description: `At the end of scoring, the single lowest-valued card on the board gains ${PSEUDO_CARD_BASE_VALUE} points -- a tie for lowest means no transfer.`,
     postResolution: ({ cards, totalsByOwner }) => {
       if (cards.length === 0) return {};
       const minValue = Math.min(...cards.map((c) => c.finalValue));
@@ -206,7 +213,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "Dragon Gate",
     themeColorClass: "text-purple-700 dark:text-purple-500",
     titleHighlight: "Dragon",
-    description: "At the end of the game, each player's single highest-valued card is worth double (a tie is broken by whichever was placed first).",
+    description: "At the end of the game, each player's single highest-valued card is worth double (a tie is broken by whichever was placed last).",
     postResolution: ({ cards, totalsByOwner }) => {
       const byOwner = new Map<string, ResolvedCard[]>();
       for (const c of cards) {
@@ -215,12 +222,15 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
         else byOwner.set(c.ownerId, [c]);
       }
       for (const ownerCards of byOwner.values()) {
-        const maxValue = Math.max(...ownerCards.map((c) => c.finalValue));
         // `cards` (and so `ownerCards`) follows board.entries() iteration order, which
-        // is placement order (a Map preserves insertion order) -- so .find() here
-        // deterministically picks whichever tied-for-highest card was placed first,
-        // no RNG needed.
-        const highest = ownerCards.find((c) => c.finalValue === maxValue)!;
+        // is placement order (a Map preserves insertion order) -- `>=` (not `>`) means
+        // a later card that merely ties the current highest still overwrites it, so
+        // this deterministically lands on whichever tied-for-highest card was placed
+        // last, no RNG needed.
+        let highest = ownerCards[0];
+        for (const c of ownerCards) {
+          if (c.finalValue >= highest.finalValue) highest = c;
+        }
         const bonus = highest.finalValue;
         highest.breakdown.push({ label: `${CENTER_EFFECTS.summit.label} (highest card, doubled)`, amount: bonus, source: "external" });
         highest.finalValue += bonus;
@@ -234,7 +244,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "The Pit of Erebus",
     themeColorClass: "text-indigo-700 dark:text-indigo-500",
     titleHighlight: "Erebus",
-    description: "Flips unlock one round later than usual",
+    description: "Flips unlock one round later than usual.",
     flipGate: (round, config) => round >= config.flipUnlockRound + 1,
   },
 
@@ -254,7 +264,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "Corpse of the Great Wyrm",
     themeColorClass: "text-fuchsia-700 dark:text-fuchsia-500",
     titleHighlight: "Wyrm",
-    description: "Two extra ownerless tiles sit directly beside the center, touching along its row. +1 to any card adjacent to any of the three.",
+    description: "Two extra ownerless tiles sit directly beside the center. Any card adjacent to any of the three heads gains +1.",
     ownerlessLabel: "Wyrm Head",
     ownerlessPositions: (bounds) => {
       const { x, y } = bounds.center;
@@ -289,7 +299,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "The Free Cities",
     themeColorClass: "text-amber-600 dark:text-amber-400",
     titleHighlight: "Free",
-    description: "No adjacency requirement -- any empty tile on the board is a legal placement",
+    description: "No adjacency requirement -- any empty tile on the board is a legal placement.",
     placementAnywhere: true,
   },
 
@@ -300,7 +310,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     // The board tile itself just says "Kingslayer" -- "Kingslayer's Court" is the
     // location's full name (catalog, New Game picker), too long to sit on the tile.
     ownerlessLabel: "Kingslayer",
-    description: `Kingslayer counts as a card worth ${PSEUDO_CARD_BASE_VALUE} (modified by adjacent buffs/dents, same as the center). After scoring, its value is subtracted from the highest-value face-up card(s) on the board -- ties still all get hit.`,
+    description: `Kingslayer counts as a card worth ${PSEUDO_CARD_BASE_VALUE} (modified by buffs/debuffs). After scoring, its value is subtracted from the highest-value face-up card(s) on the board -- tied cards all get hit.`,
     postResolution: ({ board, bounds, negated, cards, totalsByOwner }) => {
       const faceUpCards = cards.filter((c) => c.faceUp);
       if (faceUpCards.length === 0) return {};

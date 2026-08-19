@@ -1056,14 +1056,23 @@ describe("resolveBoard — center effect: The Frontier", () => {
     expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
 
-  it("stacks +1 per opponent neighbor, not a flat bonus for having any", () => {
+  it("stacks +1 per unique opponent neighbor, not a flat bonus for having any", () => {
     const board: Board = new Map();
     const a = place(board, 2, 2, "Footman", "p1");
     place(board, 1, 2, "Footman", "p2");
-    place(board, 3, 2, "Footman", "p2");
-    place(board, 2, 1, "Footman", "p3");
+    place(board, 3, 2, "Footman", "p3");
+    place(board, 2, 1, "Footman", "p4");
     const { cards } = resolveBoard(board, BOUNDS, 3, "frontier");
     expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 3);
+  });
+
+  it("two neighbors from the same opponent only count once -- unique opponents, not a raw neighbor count", () => {
+    const board: Board = new Map();
+    const a = place(board, 2, 2, "Footman", "p1");
+    place(board, 1, 2, "Footman", "p2");
+    place(board, 3, 2, "Footman", "p2"); // same opponent as above, second card
+    const { cards } = resolveBoard(board, BOUNDS, 3, "frontier");
+    expect(find(cards, a.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
   });
 
   it("adjacency to the ownerless center doesn't count as an opponent's card", () => {
@@ -1190,13 +1199,13 @@ describe("resolveBoard — center effect: The Summit", () => {
     expect(find(cards, p2card.instanceId).finalValue).toBe(CARD_DEFS.Giant.base * 2);
   });
 
-  it("on a tie for highest, doubles whichever was placed first", () => {
+  it("on a tie for highest, doubles whichever was placed last", () => {
     const board: Board = new Map();
     const first = place(board, 0, 0, "Footman", "p1");
     const second = place(board, 1, 0, "Footman", "p1"); // same value, placed later
     const { cards } = resolveBoard(board, BOUNDS, 3, "summit");
-    expect(find(cards, first.instanceId).finalValue).toBe(CARD_DEFS.Footman.base * 2);
-    expect(find(cards, second.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+    expect(find(cards, first.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+    expect(find(cards, second.instanceId).finalValue).toBe(CARD_DEFS.Footman.base * 2);
   });
 
   it("appends a breakdown entry for the doubled card", () => {

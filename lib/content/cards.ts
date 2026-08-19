@@ -9,7 +9,7 @@ export interface CardEffectContext {
   round: number;
   pos: Position;
   self: CardInstance;
-  /** `label` identifies the source in a per-card scoring breakdown, e.g. "<card name> (neighbor)". */
+  /** `label` identifies the source in a per-card scoring breakdown, e.g. "<card name> (adjacent)". */
   addDelta: (instanceId: string, amount: number, label: string) => void;
 }
 
@@ -142,7 +142,8 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: [4, 4, 4, 4, 5, 6, 8],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const neighbors = countAdjacentOccupied(board, bounds, pos);
-      if (neighbors > 0) addDelta(self.instanceId, -1 * neighbors, `${CARD_DEFS.Exile.name} (${neighbors} neighbor${neighbors > 1 ? "s" : ""})`);
+      if (neighbors > 0)
+        addDelta(self.instanceId, -1 * neighbors, `${CARD_DEFS.Exile.name} (${neighbors} adjacent card${neighbors > 1 ? "s" : ""})`);
       const hasOpenAdjacent = adjacentPositions(pos, bounds).some((p) => !isOwnerlessPosition(p, bounds) && !board.has(posKey(p)));
       if (!hasOpenAdjacent) addDelta(self.instanceId, -3, `${CARD_DEFS.Exile.name} (no open adjacent tile)`);
     },
@@ -315,8 +316,8 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     valueModifier: ({ board, pos, addDelta }) => {
       const above = board.get(posKey({ x: pos.x, y: pos.y - 1 }));
       const below = board.get(posKey({ x: pos.x, y: pos.y + 1 }));
-      if (above) addDelta(above.instanceId, -3, `${CARD_DEFS.Skysplitter.name} (vertical neighbor)`);
-      if (below) addDelta(below.instanceId, -3, `${CARD_DEFS.Skysplitter.name} (vertical neighbor)`);
+      if (above) addDelta(above.instanceId, -3, `${CARD_DEFS.Skysplitter.name} (adjacent, vertical)`);
+      if (below) addDelta(below.instanceId, -3, `${CARD_DEFS.Skysplitter.name} (adjacent, vertical)`);
     },
   },
   Bannerman: {
@@ -333,7 +334,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: [6, 6, 6, 6, 8, 10, 12],
     valueModifier: ({ board, bounds, pos, addDelta }) => {
       for (const n of getAdjacentCards(board, bounds, pos)) {
-        addDelta(n.instanceId, n.cardId === "Footman" ? 2 : 1, `${CARD_DEFS.Bannerman.name} (neighbor)`);
+        addDelta(n.instanceId, n.cardId === "Footman" ? 2 : 1, `${CARD_DEFS.Bannerman.name} (adjacent)`);
       }
     },
   },
@@ -406,7 +407,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     count: [2, 2, 2, 4, 5, 6, 6],
     valueModifier: ({ board, bounds, pos, addDelta }) => {
       for (const n of getAdjacentCards(board, bounds, pos)) {
-        if (!n.faceUp) addDelta(n.instanceId, -2, `${CARD_DEFS.Truthseeker.name} (face-down neighbor)`);
+        if (!n.faceUp) addDelta(n.instanceId, -2, `${CARD_DEFS.Truthseeker.name} (adjacent, face-down)`);
       }
     },
   },
