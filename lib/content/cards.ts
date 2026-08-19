@@ -179,13 +179,13 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Usurper",
     base: 7,
     bucket: "Slam",
-    text: "−4 if any adj. card has base ≥ self",
-    fullText: "−4 if any adjacent card (any owner) has a base ≥ its own.",
+    text: "−3 if any adj. card has base ≥ self",
+    fullText: "−3 if any adjacent card (any owner) has a base ≥ its own.",
     count: [4, 4, 4, 4, 5, 6, 8],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       const ownBase = CARD_DEFS[self.cardId].base;
       const dangerousNeighbor = getAdjacentCards(board, bounds, pos).some((n) => CARD_DEFS[n.cardId].base >= ownBase);
-      if (dangerousNeighbor) addDelta(self.instanceId, -4, `${CARD_DEFS.Pretender.name} (adj. base≥self)`);
+      if (dangerousNeighbor) addDelta(self.instanceId, -3, `${CARD_DEFS.Pretender.name} (adj. base≥self)`);
     },
   },
   Berserker: {
@@ -214,7 +214,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Commander: {
     id: "Commander",
     name: "Hipparch",
-    base: 3,
+    base: 4,
     bucket: "Engine",
     get text() {
       return `+2 per adj. ${CARD_DEFS.Footman.name}`;

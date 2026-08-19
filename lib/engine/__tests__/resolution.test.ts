@@ -225,7 +225,7 @@ describe("resolveBoard — Pretender", () => {
     const p = place(board, 0, 0, "Pretender", "p1");
     place(board, 1, 0, "Exile", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, p.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 4);
+    expect(find(cards, p.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 3);
   });
 
   it("also triggers off a face-down dangerous neighbor -- the penalty no longer requires the threat to be revealed", () => {
@@ -233,7 +233,7 @@ describe("resolveBoard — Pretender", () => {
     const p = place(board, 0, 0, "Pretender", "p1");
     place(board, 1, 0, "Exile", "p2", false);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, p.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 4);
+    expect(find(cards, p.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 3);
   });
 
   it("triggers off a neighbor whose base merely equals its own, not just a hardcoded 7", () => {
@@ -242,7 +242,7 @@ describe("resolveBoard — Pretender", () => {
     const p1 = place(board, 0, 0, "Pretender", "p1");
     place(board, 1, 0, "Pretender", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, p1.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 4);
+    expect(find(cards, p1.instanceId).finalValue).toBe(CARD_DEFS.Pretender.base - 3);
   });
 });
 
