@@ -450,8 +450,8 @@ function countEmptyAdjacentCells(board: Board, bounds: BoardBounds, pos: Positio
 /** Rough fraction of a currently-empty neighbor cell expected to fill in per remaining round, for Exile's future-neighbor discount below. Not derived from anything -- a modest, clearly-bounded playtesting estimate. */
 const EXILE_NEIGHBOR_FILL_RATE_PER_ROUND = 0.4;
 
-/** Value credited per Footman still in the player's own hand when considering a Commander placement -- a fraction of the full +2 adjacency bonus, since there's no guarantee that Footman ever actually lands adjacent to this Commander. */
-const COMMANDER_HAND_FOOTMAN_WEIGHT = 1;
+/** Value credited per Footman still in the player's own hand when considering a Commander placement -- a fraction (not the full weight=1 this used to sit at) of the full +2 adjacency bonus, since orthogonal adjacency caps a Commander at 4 neighbors total and there's no guarantee any given hand Footman ever actually lands next to this specific Commander instead of somewhere else on the board -- crediting the full +2 systematically overvalued Commander relative to how rarely it actually realizes more than one or two adjacent Footmen in practice (see the playtest "Own Δ base" data). */
+const COMMANDER_HAND_FOOTMAN_WEIGHT = 0.4;
 /** Flat per-remaining-round nudge for Commander, on top of any hand-Footman credit -- more turns left means more chances to draw and set up a Footman next to it even with none in hand yet. */
 const COMMANDER_EARLY_GAME_BONUS_PER_ROUND = 0.5;
 

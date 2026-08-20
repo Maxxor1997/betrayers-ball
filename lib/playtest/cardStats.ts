@@ -22,7 +22,7 @@ export interface CardStats {
   ownScoreSum: number;
   /** Sum of each appearance's actual finalValue as scored in-game -- includes everything, same number the game itself totals a player's score from. */
   finalScoreSum: number;
-  /** Sum of the owning player's standard-competition placement (1st/2nd/...) in each game this card appeared in. */
+  /** Sum of the owning player's placement (1st/2nd/..., fractional on a tie -- see computeFractionalRanks) in each game this card appeared in. */
   placementSum: number;
   /**
    * Sum of ((this placement's rank - placementBaseline(that game's playerCount)) /
@@ -37,7 +37,12 @@ export interface CardStats {
    * dominance produces a mechanically bigger raw number at high player counts simply
    * because there's more room on the ladder to move (a rank swing of 1 is a bigger
    * fraction of a 4p game's spread than an 8p game's), not because the card is
-   * actually stronger there. See statsSummary's avgPlacementDelta.
+   * actually stronger there. `rank` here is computeFractionalRanks' fractional rank,
+   * not computeRanks' shared-lowest one -- see computeFractionalRanks' doc comment for
+   * why: with shared-lowest ranks, a batch of tie-prone games (AI-vs-AI especially)
+   * mechanically pulls this whole metric negative regardless of any card's real
+   * strength, purely because ties are common, not rare. See statsSummary's
+   * avgPlacementDelta.
    */
   placementDeltaSum: number;
   /** Sum of the ending round number (see OverallStats.roundLengthSum's doc comment) of every game this card appeared in -- once per placement, same weighting as every other per-card sum here. */
@@ -146,6 +151,15 @@ export function createEmptyStats(): PlaytestStats {
  * it), highest score first -- same rule EndScreen.tsx's placeLabel uses for the
  * end-of-game summary, duplicated here rather than imported since that's a "use
  * client" component and this module needs to stay usable from a plain script/effect.
+ * This is the right notion of rank for "did this seat actually win" (a 3-way tie for
+ * 1st means all three genuinely won, matching computeGameResult's own shared-win rule)
+ * -- see session.ts's roomStats and aiArena.ts's win-rate tracking, both of which need
+ * exactly that. It's deliberately NOT used for placement-quality stats below (see
+ * computeFractionalRanks) -- shared-lowest-rank ties systematically pull a whole
+ * population's *average* rank below placementBaseline the more tie-prone a batch of
+ * games is (AI-vs-AI batches especially, since similar heuristics produce more score
+ * clustering than humans would), which has nothing to do with any card's real
+ * strength.
  */
 export function computeRanks(scores: Record<string, number>): Map<string, number> {
   const ids = Object.keys(scores).sort((a, b) => scores[b] - scores[a]);
@@ -154,6 +168,35 @@ export function computeRanks(scores: Record<string, number>): Map<string, number
     const rank = i === 0 || scores[id] !== scores[ids[i - 1]] ? i + 1 : ranks.get(ids[i - 1])!;
     ranks.set(id, rank);
   });
+  return ranks;
+}
+
+/**
+ * Fractional (mid-rank) placement: every seat tied for a run of positions gets the
+ * *average* of the positions that run collectively occupies, instead of
+ * computeRanks' shared-lowest convention -- e.g. a 3-way tie for 1st among 5 players
+ * gets rank 2 each (average of 1, 2, 3), not 1 each. With no ties at all, this
+ * produces identical output to computeRanks (every "run" has length 1, so its
+ * "average" is just its own position). The point: this keeps the population's average
+ * rank exactly equal to placementBaseline regardless of how many ties happen to occur
+ * in a given batch of games, which is what placement-*quality* stats (avgPlacement/
+ * avgPlacementDelta below, and humanStats.ts's own placement tracking) actually want
+ * to measure against -- unlike computeRanks, which is for "did this seat win," not
+ * "how good was this finish."
+ */
+export function computeFractionalRanks(scores: Record<string, number>): Map<string, number> {
+  const ids = Object.keys(scores).sort((a, b) => scores[b] - scores[a]);
+  const ranks = new Map<string, number>();
+  let i = 0;
+  while (i < ids.length) {
+    let j = i;
+    while (j < ids.length && scores[ids[j]] === scores[ids[i]]) j++;
+    // Positions i+1..j (1-indexed) belong to this tied run; their average is
+    // (firstPosition + lastPosition) / 2, same as (i + 1 + j) / 2 here.
+    const avgRank = (i + 1 + j) / 2;
+    for (let k = i; k < j; k++) ranks.set(ids[k], avgRank);
+    i = j;
+  }
   return ranks;
 }
 
@@ -225,7 +268,7 @@ function tallyIntoBucket(
     bucket.overall.faceUpFractionSum += resolvedCards.filter((c) => c.faceUp).length / resolvedCards.length;
   }
 
-  const ranks = computeRanks(scores);
+  const ranks = computeFractionalRanks(scores);
   const baseline = placementBaseline(playerCount);
   // "Average opponent" needs the *opponent* count, not the seat count -- floored at 1
   // defensively, though MIN_PLAYERS is 2 so this never actually divides by 0 in a real game.

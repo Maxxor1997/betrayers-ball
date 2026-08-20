@@ -1,6 +1,6 @@
 import { ResolvedCard } from "@/lib/engine/resolution";
 import { CenterEffectId } from "@/lib/engine/types";
-import { computeRanks, placementBaseline, placementMaxDeviation, PlaytestStats, tallyGame } from "./cardStats";
+import { computeFractionalRanks, placementBaseline, placementMaxDeviation, PlaytestStats, tallyGame } from "./cardStats";
 import { loadStats, mergeStats, resetStats, saveStats } from "./store";
 
 /**
@@ -24,7 +24,10 @@ export interface OwnPlacementBucket {
    * "by location" in particular can span every player count you've ever played that
    * location at), so each game's contribution is measured against its own game's
    * baseline *and* scale before being summed, the same way CardStats.placementDeltaSum
-   * works in cardStats.ts.
+   * works in cardStats.ts -- `rank` is computeFractionalRanks' fractional rank, not
+   * computeRanks' shared-lowest one, for the same reason (see that function's doc
+   * comment): shared-lowest ties would otherwise skew this negative purely based on
+   * how tie-prone your own game history happens to be, not on how well you actually did.
    */
   placementDeltaSum: number;
 }
@@ -74,7 +77,7 @@ export function tallyHumanGame(
   centerEffect: CenterEffectId,
   humanId: string
 ): void {
-  const rank = computeRanks(scores).get(humanId)!;
+  const rank = computeFractionalRanks(scores).get(humanId)!;
   tallyPlacementBucket(placementStats.overall, rank, playerCount);
   if (!placementStats.byPlayerCount[playerCount]) placementStats.byPlayerCount[playerCount] = createEmptyPlacementBucket();
   tallyPlacementBucket(placementStats.byPlayerCount[playerCount], rank, playerCount);

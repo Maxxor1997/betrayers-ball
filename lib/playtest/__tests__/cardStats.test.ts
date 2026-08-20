@@ -3,6 +3,7 @@ import { CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { resolveBoard } from "@/lib/engine/resolution";
 import { Board, BoardBounds, CardId, CardInstance, posKey } from "@/lib/engine/types";
 import {
+  computeFractionalRanks,
   computeRanks,
   createEmptyStats,
   disruptionFor,
@@ -47,6 +48,49 @@ describe("computeRanks", () => {
     expect(ranks.get("a")).toBe(1);
     expect(ranks.get("b")).toBe(1);
     expect(ranks.get("c")).toBe(3);
+  });
+});
+
+describe("computeFractionalRanks", () => {
+  it("matches computeRanks exactly when there are no ties", () => {
+    const ranks = computeFractionalRanks({ a: 10, b: 5, c: 8 });
+    expect(ranks.get("a")).toBe(1);
+    expect(ranks.get("c")).toBe(2);
+    expect(ranks.get("b")).toBe(3);
+  });
+
+  it("gives a 2-way tie for 1st the average of ranks 1 and 2, not the shared-lowest rank 1", () => {
+    const ranks = computeFractionalRanks({ a: 10, b: 10, c: 5 });
+    expect(ranks.get("a")).toBe(1.5);
+    expect(ranks.get("b")).toBe(1.5);
+    expect(ranks.get("c")).toBe(3);
+  });
+
+  it("gives a 3-way tie for 1st among 5 the average of ranks 1, 2, 3", () => {
+    const ranks = computeFractionalRanks({ a: 10, b: 10, c: 10, d: 5, e: 1 });
+    expect(ranks.get("a")).toBe(2);
+    expect(ranks.get("b")).toBe(2);
+    expect(ranks.get("c")).toBe(2);
+    expect(ranks.get("d")).toBe(4);
+    expect(ranks.get("e")).toBe(5);
+  });
+
+  it("handles a tie not at the top of the standings (average of ranks 2 and 3)", () => {
+    const ranks = computeFractionalRanks({ a: 10, b: 5, c: 5, d: 1 });
+    expect(ranks.get("a")).toBe(1);
+    expect(ranks.get("b")).toBe(2.5);
+    expect(ranks.get("c")).toBe(2.5);
+    expect(ranks.get("d")).toBe(4);
+  });
+
+  it("keeps the population's average rank exactly at placementBaseline regardless of how many ties occur", () => {
+    // A 4-way tie for 1st, all four scores equal -- computeRanks would give every
+    // seat rank 1 (population average 1, well below baseline 2.5), mechanically
+    // "rewarding" every card in this game just because it ended in a tie.
+    const ranks = computeFractionalRanks({ a: 7, b: 7, c: 7, d: 7 });
+    const values = [...ranks.values()];
+    const avg = values.reduce((sum, r) => sum + r, 0) / values.length;
+    expect(avg).toBe(placementBaseline(4)); // 2.5, exactly the no-skill-differentiation baseline
   });
 });
 
