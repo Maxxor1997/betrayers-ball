@@ -166,7 +166,7 @@ describe("disruptionFor", () => {
 
   it("is positive for damage dealt to an opponent's card", () => {
     const board: Board = new Map();
-    const e = place(board, 1, 1, "Earthshaker", "p1");
+    const e = place(board, 1, 1, "Earthshaker", "p1", true);
     place(board, 0, 1, "Footman", "p2"); // same row -- takes Earthshaker's -2
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolved = cards.find((c) => c.instanceId === e.instanceId)!;
@@ -175,7 +175,7 @@ describe("disruptionFor", () => {
 
   it("subtracts damage dealt to the source's own side", () => {
     const board: Board = new Map();
-    const e = place(board, 1, 1, "Earthshaker", "p1");
+    const e = place(board, 1, 1, "Earthshaker", "p1", true);
     place(board, 0, 1, "Footman", "p2"); // opponent, same row
     place(board, 2, 1, "Footman", "p1"); // own side, same row, contiguous with the opponent -- also takes the -2
     const { cards } = resolveBoard(board, BOUNDS, 3);
@@ -189,8 +189,8 @@ describe("disruptionFor", () => {
     const board: Board = new Map();
     // Two Earthshakers, different owners, same row -- each hits every *other* card in
     // the row, including each other, plus a third neutral target.
-    const e1 = place(board, 0, 1, "Earthshaker", "p1");
-    const e2 = place(board, 1, 1, "Earthshaker", "p2");
+    const e1 = place(board, 0, 1, "Earthshaker", "p1", true);
+    const e2 = place(board, 1, 1, "Earthshaker", "p2", true);
     const target = place(board, 2, 1, "Footman", "p3");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolvedE1 = cards.find((c) => c.instanceId === e1.instanceId)!;
@@ -345,7 +345,7 @@ describe("tallyGame", () => {
   it("tallies disruptionSum per appearance, divided by that game's opponent count", () => {
     const stats = createEmptyStats();
     const board: Board = new Map();
-    place(board, 1, 1, "Earthshaker", "p1");
+    place(board, 1, 1, "Earthshaker", "p1", true);
     place(board, 0, 1, "Footman", "p2"); // same row -- takes the -2
     // 3 players -> 2 opponents; raw disruption is 2 (see disruptionFor's tests above).
     tallyGame(stats, resolveBoard(board, BOUNDS, 3).cards, { p1: 10, p2: 5, p3: 0 }, 3, 3);

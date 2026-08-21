@@ -420,9 +420,9 @@ describe("resolveBoard — Dying God", () => {
 });
 
 describe("resolveBoard — Earthshaker", () => {
-  it("gives -2 to every card in the unbroken run through it, in both row and column, not itself", () => {
+  it("gives -2 to every card in the unbroken run through it, in both row and column, not itself, while face-up", () => {
     const board: Board = new Map();
-    const e = place(board, 1, 1, "Earthshaker", "p1");
+    const e = place(board, 1, 1, "Earthshaker", "p1", true);
     const sameRow = place(board, 0, 1, "Footman", "p2"); // contiguous, same row
     const sameCol = place(board, 1, 2, "Footman", "p2"); // contiguous, same column
     const diagonal = place(board, 0, 0, "Footman", "p2"); // neither row nor column
@@ -435,7 +435,7 @@ describe("resolveBoard — Earthshaker", () => {
 
   it("a gap breaks the run -- a card two cells away with nothing in between is untouched", () => {
     const board: Board = new Map();
-    const e = place(board, 1, 1, "Earthshaker", "p1");
+    const e = place(board, 1, 1, "Earthshaker", "p1", true);
     const gapped = place(board, 3, 1, "Footman", "p2"); // same row, but (2,1) is empty
     const { cards } = resolveBoard(board, BOUNDS, 3);
     expect(find(cards, gapped.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
@@ -443,7 +443,7 @@ describe("resolveBoard — Earthshaker", () => {
 
   it("the run keeps going past the first hit card as long as cells stay occupied", () => {
     const board: Board = new Map();
-    const e = place(board, 0, 1, "Earthshaker", "p1");
+    const e = place(board, 0, 1, "Earthshaker", "p1", true);
     const near = place(board, 1, 1, "Footman", "p2");
     const far = place(board, 2, 1, "Footman", "p2"); // contiguous past `near`
     const { cards } = resolveBoard(board, BOUNDS, 3);
@@ -453,7 +453,7 @@ describe("resolveBoard — Earthshaker", () => {
 
   it("tags the resulting external contribution with the Earthshaker's own instanceId", () => {
     const board: Board = new Map();
-    const e = place(board, 1, 1, "Earthshaker", "p1");
+    const e = place(board, 1, 1, "Earthshaker", "p1", true);
     const hit = place(board, 0, 1, "Footman", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const contribution = find(cards, hit.instanceId).breakdown.find((d) => d.source === "external")!;

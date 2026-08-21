@@ -88,8 +88,8 @@ export interface CenterEffectDef {
  * CardInstance for the center and teaching every CardId-keyed lookup (deck building,
  * CARD_DEFS) to tolerate a non-drawable pseudo-card -- real rework, not additive. This
  * scopes it to the flat, identity-blind positional modifiers: Bannerman (+1 -- center
- * is never a Footman), Earthshaker (-1 if center shares its row), Skysplitter (-3 if
- * directly above/below).
+ * is never a Footman), Earthshaker (-1 if face-up and center shares its row),
+ * Skysplitter (-3 if directly above/below).
  */
 export function computeCenterModifier(board: Board, bounds: BoardBounds, negated: Set<string>): number {
   let delta = 0;
@@ -105,7 +105,7 @@ export function computeCenterModifier(board: Board, bounds: BoardBounds, negated
         if (dx + dy === 1) delta += 1;
         break;
       case "Earthshaker":
-        if (pos.y === center.y) delta -= 1;
+        if (c.faceUp && pos.y === center.y) delta -= 1;
         break;
       case "Skysplitter":
         if (pos.x === center.x && dy === 1) delta -= 3;

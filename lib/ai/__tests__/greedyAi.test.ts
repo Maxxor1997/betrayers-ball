@@ -947,6 +947,83 @@ describe("placementHeuristicAdjustment — Gloryseeker's flip-chance credit uses
   });
 });
 
+describe("placementHeuristicAdjustment — Earthshaker's flip-chance credit (own-flip AND opponent-flip channels)", () => {
+  it("credits 0 when there's nothing adjacent for it to hit even if flipped -- no benefit to weight a chance on", () => {
+    const position = { x: 3, y: 3 };
+    const earthshaker = card("Earthshaker", "p1", false);
+    const board: Board = new Map([[posKey(position), earthshaker]]); // isolated, nothing in its row/column
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    const preState = makeState({ round: 3, turnsThisRound: 0, players });
+    const postState = makeState({ round: 3, turnsThisRound: 0, players, board });
+
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: earthshaker.instanceId, position }, postState);
+    expect(adjustment).toBe(0);
+  });
+
+  it("credits 0 when already face-up -- its real effect already counts in the fair margin, nothing left to guess at", () => {
+    const position = { x: 3, y: 3 };
+    const earthshaker = card("Earthshaker", "p1", true); // forced face-up for this test, not a real placement rule
+    const board: Board = new Map([
+      [posKey(position), earthshaker],
+      [posKey({ x: 4, y: 3 }), card("Footman", "p2", true)],
+    ]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    const preState = makeState({ round: 3, turnsThisRound: 0, players });
+    const postState = makeState({ round: 3, turnsThisRound: 0, players, board });
+
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: earthshaker.instanceId, position }, postState);
+    expect(adjustment).toBe(0);
+  });
+
+  it("credits a real (nonzero) chance when flipping would genuinely help, combining both the owner's own deliberate flip and an opponent's blind one", () => {
+    const position = { x: 3, y: 3 };
+    const earthshaker = card("Earthshaker", "p1", false);
+    // Two opponent-owned neighbors in the same row -- flipping would land -2 on each,
+    // a clear net gain for p1's own margin.
+    const board: Board = new Map([
+      [posKey(position), earthshaker],
+      [posKey({ x: 2, y: 3 }), card("Footman", "p2", true)],
+      [posKey({ x: 4, y: 3 }), card("Footman", "p2", true)],
+    ]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    const preState = makeState({ round: 3, turnsThisRound: 0, players });
+    const postState = makeState({ round: 3, turnsThisRound: 0, players, board });
+
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: earthshaker.instanceId, position }, postState);
+    expect(adjustment).toBeGreaterThan(0);
+  });
+
+  it("credits exactly 0 when placed on the deterministic last turn of the game -- neither the owner nor any opponent has a future turn left to ever flip it", () => {
+    const position = { x: 3, y: 3 };
+    const earthshaker = card("Earthshaker", "p1", false);
+    const board: Board = new Map([
+      [posKey(position), earthshaker],
+      [posKey({ x: 4, y: 3 }), card("Footman", "p2", true)], // would clearly benefit from a flip, if only there were time left
+    ]);
+    const players = [
+      { id: "p1", hand: [], isAI: true },
+      { id: "p2", hand: [], isAI: true },
+    ];
+    // Same "last player to act at roundCap" setup as the Gloryseeker test above --
+    // exactRemainingOpponentTurns AND exactRemainingOwnTurns both hit 0 here, since
+    // both share the same "future rounds" range and roundCap leaves none.
+    const preState = makeState({ round: 6, turnsThisRound: 1, players });
+    const postState = makeState({ round: 6, turnsThisRound: 1, players, board });
+
+    const adjustment = placementHeuristicAdjustment(preState, "p1", { instanceId: earthshaker.instanceId, position }, postState);
+    expect(adjustment).toBe(0);
+  });
+});
+
 describe("placementHeuristicAdjustment — Facestealer's swap-risk discount", () => {
   // Padding face-down cards so INFILTRATOR_FEW_FACE_DOWN_PENALTY never fires in these
   // tests -- they're specifically about the swap-value-at-stake term, not the separate

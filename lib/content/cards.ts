@@ -283,10 +283,12 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     name: "Earthshaker",
     base: 4,
     bucket: "Control",
-    text: "−2 to connected row & col",
-    fullText: "−2 to every card (any owner, not itself) in the unbroken run of occupied cells extending along its row and its column.",
+    text: "If face-up: −2 to connected row & col",
+    fullText:
+      "−2 to every card (any owner, not itself) in the unbroken run of occupied cells extending along its row and its column, while this card is face-up.",
     count: [2, 2, 2, 4, 5, 5, 6],
     valueModifier: ({ board, pos, self, addDelta }) => {
+      if (!self.faceUp) return;
       function walk(dx: number, dy: number) {
         let x = pos.x + dx;
         let y = pos.y + dy;

@@ -168,11 +168,14 @@ describe("estimateMargin — fair, per-viewer evaluation", () => {
     // Bannerman, while Bannerman's own value is untouched (its effect only targets
     // neighbors, not itself). On top of that, expectedHiddenNeighborAdjustments now
     // also credits/discounts p1's own Bannerman for whatever that same hidden card
-    // might turn out to be once revealed (e.g. a hidden Skysplitter/Earthshaker would
-    // hit it, a hidden Bannerman would help it) -- see estimateMargin's doc comment.
-    // Not a round number since it's a deck-composition-weighted average, not a single
-    // card's printed rule.
-    expect(estimateMargin(makeState({ board }), "p1")).toBeCloseTo(-2.517543859649123);
+    // might turn out to be once revealed (e.g. a hidden Skysplitter would hit it, a
+    // hidden Bannerman would help it) -- see estimateMargin's doc comment. A hidden
+    // Earthshaker candidate contributes nothing here: its own valueModifier is now
+    // gated on being face-up (see cards.ts), and a still-hidden card is by definition
+    // face-down, so this correctly weighs it as having no effect yet, exactly like the
+    // genuine article would. Not a round number since it's a deck-composition-weighted
+    // average, not a single card's printed rule.
+    expect(estimateMargin(makeState({ board }), "p1")).toBeCloseTo(-2.447368421052632);
   });
 });
 

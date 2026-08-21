@@ -354,21 +354,24 @@ function warlordFlipDeterrenceBonus(state: GameState, playerId: string, target: 
  * edge over baseline is a clean, decisive one -- not just noise. Gloryseeker/Chronicler
  * are the two cards whose value depends most directly on self.faceUp, but both are
  * opponentOnlyFlip and so never appear as an own target at all. Nightjar (cardId
- * "Beacon") is the one remaining own-target card with a *real* direct self-value
+ * "Beacon") is the clearest remaining own-target card with a *real* direct self-value
  * dependency (it keys off matching its own face-up/down state against its neighbors --
  * see lib/content/cards.ts) -- flipping your own face-down Nightjar can swing its value
  * by more than this secondary noise all on its own, and hypotheticalFlipMargin already
  * captures that correctly since it's a real engine simulation, not a special-cased
- * shortcut. Every *other* own-target card has zero direct self-value dependency, so for
- * those, before expectedHiddenNeighborAdjustments existed, hypotheticalFlipMargin's
- * delta was always exactly 0 and this branch never fired. Now every own flip gets a
- * small secondary "defensive" delta too (revealing a card removes its exposure to a
- * hypothetical hidden face-down-only threat like Truthseeker -- see estimateMargin) --
- * real, but small, and it shouldn't be enough on its own to skip a potentially much
- * more valuable blind opponent flip. 1 matches the smallest single printed-effect
- * magnitude in the deck (e.g. Footman's own +1, Nightjar's +1/matching neighbor), so a
- * gain at or above it reads as a genuine, decisive
- * edge rather than this secondary noise.
+ * shortcut. Earthshaker is the same shape now too (its −2-to-connected-row/col is also
+ * gated on self.faceUp -- see lib/content/cards.ts): the swing there lands on its
+ * *neighbors*, not its own value, but hypotheticalFlipMargin nets that into the same
+ * fair margin either way, so it's caught by this branch exactly the same. Every *other*
+ * own-target card has zero direct self-value dependency, so for those, before
+ * expectedHiddenNeighborAdjustments existed, hypotheticalFlipMargin's delta was always
+ * exactly 0 and this branch never fired. Now every own flip gets a small secondary
+ * "defensive" delta too (revealing a card removes its exposure to a hypothetical hidden
+ * face-down-only threat like Truthseeker -- see estimateMargin) -- real, but small, and
+ * it shouldn't be enough on its own to skip a potentially much more valuable blind
+ * opponent flip. 1 matches the smallest single printed-effect magnitude in the deck
+ * (e.g. Footman's own +1, Nightjar's +1/matching neighbor), so a gain at or above it
+ * reads as a genuine, decisive edge rather than this secondary noise.
  */
 const OWN_FLIP_MIN_EDGE = 1;
 
@@ -491,6 +494,25 @@ const GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN = 0.18;
 const DOOMHERALD_FLIP_CHANCE_PER_OPPONENT_TURN = 0.18;
 
 /**
+ * Rough chance, per *own future turn* once flips are actually unlocked, that
+ * Earthshaker's owner deliberately flips it themselves. Unlike Gloryseeker/Doomherald
+ * (both `opponentOnlyFlip`), Earthshaker's own owner is a legal flipper too -- and
+ * unlike an opponent's blind exploration flip (a random guess among every hidden
+ * card), the owner's own flip decision is NOT blind: chooseFlip's own-target branch
+ * scores exactly this move via hypotheticalFlipMargin against the real board before
+ * deciding, so "is flipping this worth it" is answered accurately, not guessed at.
+ * That makes a deliberate self-flip meaningfully more likely per opportunity than a
+ * random opponent stumbling onto one specific hidden card among many -- hence a
+ * materially higher rate than GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN, not the same
+ * one. Still well under 1: even when flipping Earthshaker would help, chooseFlip only
+ * ever takes its single best-scoring own target each turn, so a turn where some other
+ * own card scores higher won't flip Earthshaker that turn even though it was "worth
+ * it" in isolation. Not proven/calibrated against real playtest data yet -- a
+ * reasonable starting prior, same caveat as Doomherald's own rate above.
+ */
+const EARTHSHAKER_SELF_FLIP_CHANCE_PER_OWN_TURN = 0.5;
+
+/**
  * Combines a per-opponent-turn flip rate across every opponent-turn still available
  * before scoring, as "at least one of N independent attempts lands on it"
  * (1 - (1-p)^N) -- saturating, not linear, so it never overshoots 1 the way naively
@@ -538,6 +560,24 @@ function exactRemainingOpponentTurns(state: GameState): number {
   }
   for (let r = round + 1; r <= config.roundCap; r++) {
     if (r >= config.flipUnlockRound) total += n - 1;
+  }
+  return total;
+}
+
+/**
+ * Same idea and same conservative-upper-bound reasoning as exactRemainingOpponentTurns
+ * above, but counting the acting player's own remaining turns instead -- exactly one
+ * per future round (this game's turn structure gives every seat one turn per round),
+ * from the round after this one through roundCap, counted only once flips are
+ * unlocked. The current turn itself (the action being evaluated right now) is
+ * deliberately excluded -- it's not a *future* opportunity to flip this placement,
+ * it's the placement happening. Used by Earthshaker's self-flip credit above.
+ */
+function exactRemainingOwnTurns(state: GameState): number {
+  const { round, config } = state;
+  let total = 0;
+  for (let r = round + 1; r <= config.roundCap; r++) {
+    if (r >= config.flipUnlockRound) total += 1;
   }
   return total;
 }
@@ -690,6 +730,31 @@ export function placementHeuristicAdjustment(
         if (placedCard.faceUp) return 0;
         const flipChance = saturatingFlipChance(GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN, exactRemainingOpponentTurns(preState));
         return 3 * flipChance;
+      }
+
+      case "Earthshaker": {
+        // Its own -2-to-connected-row/col effect is now gated on being face-up (see
+        // cards.ts) -- placed face-down (the common case), estimateMargin's immediate
+        // snapshot sees zero effect no matter which row/column it lands in, so there's
+        // nothing here for the fair margin to distinguish on its own. Credit the
+        // expected value of however it actually resolves if it ends up flipped before
+        // scoring -- computed for real (hypotheticalFlipMargin, the exact same check
+        // chooseFlip itself uses), not reimplemented as a row/column walk, so it
+        // automatically nets out self-damage against opponent damage exactly like the
+        // real rule does. Two independent flip channels feed into "ever gets flipped":
+        // the owner's own deliberate flip (real, board-aware, see
+        // EARTHSHAKER_SELF_FLIP_CHANCE_PER_OWN_TURN's doc comment for why that's not
+        // blind luck) and an opponent's blind exploration flip (Earthshaker isn't
+        // opponentOnlyFlip, so it's exposed to the same generic risk any hidden card
+        // is) -- combined as "at least one of these independent channels lands it,"
+        // not simply added.
+        if (placedCard.faceUp) return 0;
+        const marginIfFlipped = hypotheticalFlipMargin(postState, playerId, placedCard) - estimateMargin(postState, playerId);
+        if (marginIfFlipped <= 0) return 0; // never worth crediting a flip that would net hurt its own owner
+        const selfFlipChance = saturatingFlipChance(EARTHSHAKER_SELF_FLIP_CHANCE_PER_OWN_TURN, exactRemainingOwnTurns(preState));
+        const opponentFlipChance = saturatingFlipChance(GLORYSEEKER_FLIP_CHANCE_PER_OPPONENT_TURN, exactRemainingOpponentTurns(preState));
+        const everFlippedChance = 1 - (1 - selfFlipChance) * (1 - opponentFlipChance);
+        return marginIfFlipped * everFlippedChance;
       }
 
       case "Infiltrator": {
