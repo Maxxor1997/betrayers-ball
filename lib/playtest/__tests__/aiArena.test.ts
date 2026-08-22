@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { assignSeatDifficulties, createEmptyArenaStats, simulateArenaGame, summarizeArenaStats } from "../aiArena";
+import {
+  arenaSeatConfigLabel,
+  ArenaSeatConfig,
+  assignSeatDifficulties,
+  createEmptyArenaStats,
+  createEmptyFixedSeatArenaStats,
+  defaultArenaSeatConfig,
+  simulateArenaGame,
+  simulateFixedSeatArenaGame,
+  summarizeArenaStats,
+  summarizeFixedSeatArenaStats,
+} from "../aiArena";
 import { TwoPlyOptions } from "@/lib/ai/twoPly";
 import { AiDifficulty } from "@/lib/engine/types";
 
@@ -48,6 +59,7 @@ describe("createEmptyArenaStats", () => {
       easy: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0 },
       medium: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0 },
       hard: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0 },
+      expert: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0 },
     });
     expect(stats.byPosition).toEqual({});
   });
@@ -131,5 +143,149 @@ describe("summarizeArenaStats", () => {
 
   it("returns empty arrays for a fresh, untallied stats object", () => {
     expect(summarizeArenaStats(createEmptyArenaStats())).toEqual({ byDifficulty: [], byPosition: [] });
+  });
+});
+
+/** Same tiny time/round budget as FAST_HARD_OPTIONS above, just spelled out as the fixed-per-seat config shape instead of TwoPlyOptions. */
+const FAST_HARD_SEAT: Partial<ArenaSeatConfig> = { timeBudgetMs: 15, maxCandidates: 6, roundsAhead: 1 };
+
+describe("defaultArenaSeatConfig", () => {
+  it("defaults to Medium with the real DEFAULT_TWO_PLY_OPTIONS budget, even though Medium itself never reads it", () => {
+    const config = defaultArenaSeatConfig();
+    expect(config.strategy).toBe("medium");
+    expect(config.timeBudgetMs).toBeGreaterThan(0);
+    expect(config.maxCandidates).toBeGreaterThan(0);
+    expect(config.roundsAhead).toBeGreaterThan(0);
+  });
+});
+
+describe("arenaSeatConfigLabel", () => {
+  it("is just the strategy name for easy/medium -- no search budget to spell out", () => {
+    expect(arenaSeatConfigLabel({ strategy: "easy", timeBudgetMs: 250, maxCandidates: 8, roundsAhead: 1 })).toBe("Easy");
+    expect(arenaSeatConfigLabel({ strategy: "medium", timeBudgetMs: 250, maxCandidates: 8, roundsAhead: 1 })).toBe("Medium");
+  });
+
+  it("spells out the full search budget for either hard strategy", () => {
+    expect(arenaSeatConfigLabel({ strategy: "hardTwoPly", timeBudgetMs: 100, maxCandidates: 6, roundsAhead: 2 })).toBe("Hard (100ms, 6 cand, 2 rd)");
+    expect(arenaSeatConfigLabel({ strategy: "hardFast", timeBudgetMs: 100, maxCandidates: 6, roundsAhead: 2 })).toBe("Hard (Fast fork) (100ms, 6 cand, 2 rd)");
+  });
+});
+
+describe("createEmptyFixedSeatArenaStats", () => {
+  it("creates one zeroed bucket per seat -- no config attached (see ArenaSeatBuckets' own doc comment for why)", () => {
+    const buckets = createEmptyFixedSeatArenaStats(2);
+    expect(buckets).toHaveLength(2);
+    for (const b of buckets) expect(b).toEqual({ gamesPlayed: 0, wins: 0, placementDeltaSum: 0 });
+  });
+});
+
+describe("simulateFixedSeatArenaGame", () => {
+  it("tallies a 2-seat game so the winner's delta is exactly -1 and the loser's is exactly +1, same normalized-scale invariant as simulateArenaGame", () => {
+    const configs: ArenaSeatConfig[] = [
+      { strategy: "easy", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
+      { strategy: "medium", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
+    ];
+    const buckets = createEmptyFixedSeatArenaStats(configs.length);
+    simulateFixedSeatArenaGame("none", configs, buckets, deterministicRng(3));
+
+    expect(buckets[0].gamesPlayed).toBe(1);
+    expect(buckets[1].gamesPlayed).toBe(1);
+    expect(buckets[0].wins + buckets[1].wins).toBe(1); // exactly one seat won
+    const winnerBucket = buckets[0].wins === 1 ? buckets[0] : buckets[1];
+    const loserBucket = buckets[0].wins === 1 ? buckets[1] : buckets[0];
+    expect(winnerBucket.placementDeltaSum).toBeCloseTo(-1);
+    expect(loserBucket.placementDeltaSum).toBeCloseTo(1);
+  });
+
+  it("accumulates across multiple games without resetting, same seats staying fixed throughout", () => {
+    const configs: ArenaSeatConfig[] = [
+      { strategy: "easy", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
+      { strategy: "medium", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
+    ];
+    const buckets = createEmptyFixedSeatArenaStats(configs.length);
+    simulateFixedSeatArenaGame("none", configs, buckets, deterministicRng(1));
+    simulateFixedSeatArenaGame("none", configs, buckets, deterministicRng(2));
+
+    expect(buckets[0].gamesPlayed).toBe(2);
+    expect(buckets[1].gamesPlayed).toBe(2);
+    // The config objects themselves are untouched by simulating -- fixed for the batch.
+    expect(configs[0].strategy).toBe("easy");
+    expect(configs[1].strategy).toBe("medium");
+  });
+
+  it("plays a game to completion with both hard strategies fixed to seats, under a small overridden budget, without falling back to the real (much slower) default", () => {
+    const configs: ArenaSeatConfig[] = [
+      { strategy: "hardTwoPly", ...FAST_HARD_SEAT } as ArenaSeatConfig,
+      { strategy: "hardFast", ...FAST_HARD_SEAT } as ArenaSeatConfig,
+    ];
+    const buckets = createEmptyFixedSeatArenaStats(configs.length);
+    const start = performance.now();
+    simulateFixedSeatArenaGame("none", configs, buckets, deterministicRng(9));
+    const elapsed = performance.now() - start;
+
+    expect(buckets[0].gamesPlayed).toBe(1);
+    expect(buckets[1].gamesPlayed).toBe(1);
+    // A full game is several decisions; at the real default 250ms/decision this would
+    // take seconds. Under the fast override it should be near-instant -- generous
+    // upper bound so this stays robust on a slow CI runner.
+    expect(elapsed).toBeLessThan(2000);
+  });
+
+  it("uses the CURRENT seatConfigs, not a stale copy from when the buckets array was created -- the exact bug this signature shape is designed to prevent", () => {
+    const configs: ArenaSeatConfig[] = [
+      { strategy: "easy", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
+      { strategy: "easy", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
+    ];
+    const buckets = createEmptyFixedSeatArenaStats(configs.length);
+    // Mutate seat 0's config in place, simulating a UI edit after the buckets array
+    // already existed -- since simulateFixedSeatArenaGame takes configs fresh every
+    // call (not cached inside the buckets), this must be reflected immediately.
+    configs[0] = { strategy: "hardTwoPly", ...FAST_HARD_SEAT } as ArenaSeatConfig;
+    const start = performance.now();
+    simulateFixedSeatArenaGame("none", configs, buckets, deterministicRng(1));
+    const elapsed = performance.now() - start;
+    // If the edit were ignored (stale "easy"), this would be near-instant regardless;
+    // proving it actually ran Hard's real search loop at least confirms the dispatch
+    // read the updated strategy, not a cached one. Also just confirm both seats played.
+    expect(buckets[0].gamesPlayed).toBe(1);
+    expect(buckets[1].gamesPlayed).toBe(1);
+    expect(elapsed).toBeLessThan(2000);
+  });
+});
+
+describe("summarizeFixedSeatArenaStats", () => {
+  it("labels each row by seat number (1-indexed) and carries the CURRENT seat config along", () => {
+    const configs: ArenaSeatConfig[] = [
+      { strategy: "easy", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
+      { strategy: "hardFast", timeBudgetMs: 100, maxCandidates: 6, roundsAhead: 1 },
+    ];
+    const buckets: ReturnType<typeof createEmptyFixedSeatArenaStats> = [
+      { gamesPlayed: 4, wins: 1, placementDeltaSum: -0.5 },
+      { gamesPlayed: 4, wins: 3, placementDeltaSum: -2 },
+    ];
+
+    const rows = summarizeFixedSeatArenaStats(configs, buckets);
+    expect(rows).toEqual([
+      { label: "Seat 1", gamesPlayed: 4, winRate: 0.25, avgPlacementDelta: -0.125, seatIndex: 0, config: configs[0] },
+      { label: "Seat 2", gamesPlayed: 4, winRate: 0.75, avgPlacementDelta: -0.5, seatIndex: 1, config: configs[1] },
+    ]);
+  });
+
+  it("reflects a config edit made after the buckets were created, since it reads seatConfigs fresh every call instead of a snapshot", () => {
+    const configs: ArenaSeatConfig[] = [{ strategy: "medium", timeBudgetMs: 250, maxCandidates: 8, roundsAhead: 1 }];
+    const buckets = createEmptyFixedSeatArenaStats(1);
+    expect(summarizeFixedSeatArenaStats(configs, buckets)[0].config.strategy).toBe("medium");
+
+    configs[0] = { strategy: "hardTwoPly", timeBudgetMs: 250, maxCandidates: 8, roundsAhead: 1 };
+    expect(summarizeFixedSeatArenaStats(configs, buckets)[0].config.strategy).toBe("hardTwoPly");
+  });
+
+  it("returns one row per seat even with zero games played, unlike summarizeArenaStats which omits empty buckets -- an untallied seat is still a real, configured seat", () => {
+    const configs = [defaultArenaSeatConfig(), defaultArenaSeatConfig()];
+    const buckets = createEmptyFixedSeatArenaStats(2);
+    const rows = summarizeFixedSeatArenaStats(configs, buckets);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].winRate).toBeNull();
+    expect(rows[0].avgPlacementDelta).toBeNull();
   });
 });

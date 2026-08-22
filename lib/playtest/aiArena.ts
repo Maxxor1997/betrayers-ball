@@ -1,8 +1,11 @@
 import { chooseAiActionForDifficulty } from "@/lib/ai/difficulty";
-import { TwoPlyOptions } from "@/lib/ai/twoPly";
+import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
+import { chooseHardFastAction, HardFastOptions } from "@/lib/ai/hardFast";
+import { chooseRandomAiAction } from "@/lib/ai/randomAi";
+import { chooseTwoPlyAction, DEFAULT_TWO_PLY_OPTIONS, TwoPlyOptions } from "@/lib/ai/twoPly";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { currentPlayerId } from "@/lib/engine/turns";
-import { AiDifficulty, CenterEffectId } from "@/lib/engine/types";
+import { AiDifficulty, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
 import { computeRanks, placementBaseline, placementMaxDeviation } from "./cardStats";
 
 /** Running totals for one bucket (a difficulty, or a starting position) across however many arena games have tallied a seat into it. */
@@ -32,7 +35,7 @@ export interface ArenaStats {
 
 export function createEmptyArenaStats(): ArenaStats {
   return {
-    byDifficulty: { easy: emptyArenaBucket(), medium: emptyArenaBucket(), hard: emptyArenaBucket() },
+    byDifficulty: { easy: emptyArenaBucket(), medium: emptyArenaBucket(), hard: emptyArenaBucket(), expert: emptyArenaBucket() },
     byPosition: {},
   };
 }
@@ -54,7 +57,7 @@ function summarizeBucket(label: string, bucket: ArenaBucketStats): ArenaBucketRo
   };
 }
 
-const DIFFICULTY_LABELS: Record<AiDifficulty, string> = { easy: "Easy", medium: "Medium", hard: "Hard" };
+const DIFFICULTY_LABELS: Record<AiDifficulty, string> = { easy: "Easy", medium: "Medium", hard: "Hard", expert: "Expert" };
 
 /** Only buckets that actually have games -- a difficulty the caller never selected, or a position that never came up (shouldn't happen once every seat's been filled, but stays defensive), doesn't clutter the table with an all-"—" row. */
 export function summarizeArenaStats(stats: ArenaStats): { byDifficulty: ArenaBucketRow[]; byPosition: ArenaBucketRow[] } {
@@ -155,5 +158,134 @@ export function simulateArenaGame(
       bucket.placementDeltaSum += delta;
       if (won) bucket.wins++;
     }
+  });
+}
+
+/**
+ * A second, independent testing mode alongside simulateArenaGame above -- that one
+ * exists to answer "does a difficulty LABEL win more," and deliberately shuffles which
+ * seat gets which difficulty every game specifically so no single seat's results can
+ * be trusted (see assignSeatDifficulties). This mode answers a different question:
+ * "does THIS specific configuration (e.g. Hard-Fast at 150ms/6 candidates vs. real Hard
+ * at 250ms/8) actually perform differently" -- so seat assignment here is the opposite,
+ * fixed for the whole batch, not reshuffled. `firstPlayerIndex` is still randomized per
+ * game (see simulateFixedSeatArenaGame below), same as the shuffled mode, so a fixed
+ * seat's actual turn-order position still varies game to game -- that alone is enough
+ * to keep position bias from being mistaken for a real strength difference, without
+ * needing to also randomize which config sits in which seat.
+ */
+export type ArenaSeatStrategy = "easy" | "medium" | "hardTwoPly" | "hardFast";
+
+export const ARENA_SEAT_STRATEGY_LABELS: Record<ArenaSeatStrategy, string> = {
+  easy: "Easy",
+  medium: "Medium",
+  hardTwoPly: "Hard",
+  hardFast: "Hard (Fast fork)",
+};
+
+/** One seat's fixed AI configuration for the whole batch. `timeBudgetMs`/`maxCandidates`/`roundsAhead` only apply to (and are only ever shown in the UI for) the two "hard" strategies -- easy/medium have no search budget to configure. */
+export interface ArenaSeatConfig {
+  strategy: ArenaSeatStrategy;
+  timeBudgetMs: number;
+  maxCandidates: number;
+  roundsAhead: number;
+}
+
+/** A fresh seat, defaulted to Medium -- the same "no search budget to think about yet" starting point every difficulty picker in the app defaults new/unconfigured slots to. */
+export function defaultArenaSeatConfig(): ArenaSeatConfig {
+  return { strategy: "medium", timeBudgetMs: DEFAULT_TWO_PLY_OPTIONS.timeBudgetMs, maxCandidates: DEFAULT_TWO_PLY_OPTIONS.maxCandidates, roundsAhead: DEFAULT_TWO_PLY_OPTIONS.roundsAhead };
+}
+
+/** Short, human-readable summary of a seat's config -- easy/medium need nothing beyond their name; either hard strategy spells out exactly what it's running with, since that's the whole point of this mode (comparing configurations, not just labels). */
+export function arenaSeatConfigLabel(config: ArenaSeatConfig): string {
+  const name = ARENA_SEAT_STRATEGY_LABELS[config.strategy];
+  if (config.strategy !== "hardTwoPly" && config.strategy !== "hardFast") return name;
+  return `${name} (${config.timeBudgetMs}ms, ${config.maxCandidates} cand, ${config.roundsAhead} rd)`;
+}
+
+function dispatchArenaSeatAction(state: GameState, playerId: string, config: ArenaSeatConfig, rng: () => number): GameAction {
+  const hardOptions: TwoPlyOptions | HardFastOptions = {
+    timeBudgetMs: config.timeBudgetMs,
+    maxCandidates: config.maxCandidates,
+    roundsAhead: config.roundsAhead,
+  };
+  switch (config.strategy) {
+    case "easy":
+      return chooseRandomAiAction(state, playerId, rng);
+    case "medium":
+      return chooseGreedyAiAction(state, playerId, rng);
+    case "hardTwoPly":
+      return chooseTwoPlyAction(state, playerId, hardOptions, rng);
+    case "hardFast":
+      return chooseHardFastAction(state, playerId, hardOptions, rng);
+  }
+}
+
+/**
+ * Running totals for one fixed seat across a batch -- deliberately NOT bundled with
+ * that seat's ArenaSeatConfig (an earlier version of this did, and it was a real bug:
+ * the config living inside this array meant editing a seat in the UI updated the
+ * page's own seatConfigs state but left this array's copy stale until the next full
+ * rebuild, so a batch could silently keep simulating -- and displaying -- the OLD
+ * config after an edit). `seatConfigs` (React state, owned by the page) is the single
+ * source of truth for what each seat runs with; this array is just the running bucket
+ * totals, always zipped together with the CURRENT seatConfigs at simulate/summarize
+ * time (see simulateFixedSeatArenaGame/summarizeFixedSeatArenaStats below), never
+ * stored redundantly.
+ */
+export type ArenaSeatBuckets = ArenaBucketStats[];
+
+export function createEmptyFixedSeatArenaStats(playerCount: number): ArenaSeatBuckets {
+  return Array.from({ length: playerCount }, () => emptyArenaBucket());
+}
+
+export interface ArenaSeatBucketRow extends ArenaBucketRow {
+  seatIndex: number;
+  config: ArenaSeatConfig;
+}
+
+/** Same derivation as summarizeBucket/summarizeArenaStats above, just one row per fixed seat instead of per difficulty/position. Takes the current seatConfigs fresh, not a snapshot, so an edited-but-not-yet-simulated seat's config always shows accurately even before the next Run. */
+export function summarizeFixedSeatArenaStats(seatConfigs: ArenaSeatConfig[], buckets: ArenaSeatBuckets): ArenaSeatBucketRow[] {
+  return buckets.map((bucket, seatIndex) => ({
+    ...summarizeBucket(`Seat ${seatIndex + 1}`, bucket),
+    seatIndex,
+    config: seatConfigs[seatIndex],
+  }));
+}
+
+/**
+ * Plays one full AI-only game with each seat's strategy/options fixed for the whole
+ * batch (see this section's own doc comment for how this differs from
+ * simulateArenaGame above) and tallies each seat's outcome into `buckets`, mutated in
+ * place. `seatConfigs` and `buckets` must be the same length (the player count for
+ * this game) and correspond seat-for-seat -- the caller owns keeping both in sync with
+ * whatever playerCount it's running (see createEmptyFixedSeatArenaStats).
+ */
+export function simulateFixedSeatArenaGame(centerEffect: CenterEffectId, seatConfigs: ArenaSeatConfig[], buckets: ArenaSeatBuckets, rng: () => number): void {
+  const playerCount = seatConfigs.length;
+  const playerIds = Array.from({ length: playerCount }, (_, i) => `arena${i}`);
+  const config = configForPlayerCount(playerCount, centerEffect);
+  const firstPlayerIndex = Math.floor(rng() * playerIds.length);
+  let state = createGame(playerIds, config, rng, playerIds, firstPlayerIndex);
+
+  while (state.phase === "playing") {
+    const activeId = currentPlayerId(state);
+    const seatIndex = playerIds.indexOf(activeId);
+    const action = dispatchArenaSeatAction(state, activeId, seatConfigs[seatIndex], rng);
+    state = applyAction(state, action, rng);
+  }
+
+  const ranks = computeRanks(state.result!.scores);
+  const baseline = placementBaseline(playerCount);
+  const maxDeviation = placementMaxDeviation(playerCount);
+
+  playerIds.forEach((id, seatIndex) => {
+    const rank = ranks.get(id)!;
+    const delta = (rank - baseline) / maxDeviation;
+    const won = rank === 1;
+    const bucket = buckets[seatIndex];
+    bucket.gamesPlayed++;
+    bucket.placementDeltaSum += delta;
+    if (won) bucket.wins++;
   });
 }

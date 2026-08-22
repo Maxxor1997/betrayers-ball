@@ -93,8 +93,12 @@ export type CenterEffectId =
  * set of candidate placements, it simulates a full round of every opponent's actual
  * response (via "medium"'s own decision function) against a determinized guess at
  * hidden cards, and picks whichever candidate's simulated outcome averages best.
+ * "expert" (see lib/ai/hardFast.ts) is the same idea at the same wall-clock budget,
+ * but with a much cheaper (and deliberately less accurate) rollout for simulating
+ * those responses -- AI-Arena-validated to beat "hard" head-to-head at the same
+ * budget by reinvesting the savings into evaluating more candidate placements.
  */
-export type AiDifficulty = "easy" | "medium" | "hard";
+export type AiDifficulty = "easy" | "medium" | "hard" | "expert";
 
 export interface GameConfig {
   boardBounds: BoardBounds;

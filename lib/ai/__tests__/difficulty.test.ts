@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS, chooseAiActionForDifficulty, DEFAULT_AI_DIFFICULTY } from "../difficulty";
 import { chooseGreedyAiAction } from "../greedyAi";
 import { chooseRandomAiAction } from "../randomAi";
+import { chooseHardFastAction } from "../hardFast";
 import { chooseTwoPlyAction, TwoPlyOptions } from "../twoPly";
 import { applyAction, createGame, DEFAULT_2P_CONFIG } from "../../engine/game";
 import { currentPlayerId } from "../../engine/turns";
@@ -56,13 +57,20 @@ describe("chooseAiActionForDifficulty", () => {
     expect(viaDispatcher).toEqual(viaDirect);
   });
 
+  it("routes 'expert' to the hardFast strategy -- identical output to calling chooseHardFastAction directly with the same seed and options", () => {
+    const state = createGame(["p1", "p2"], DEFAULT_2P_CONFIG, deterministicRng(1));
+    const viaDispatcher = chooseAiActionForDifficulty(state, "p1", "expert", deterministicRng(5), FAST_TWO_PLY_OPTIONS);
+    const viaDirect = chooseHardFastAction(state, "p1", FAST_TWO_PLY_OPTIONS, deterministicRng(5));
+    expect(viaDispatcher).toEqual(viaDirect);
+  });
+
   it("defaults rng to Math.random when omitted -- doesn't throw", () => {
     const state = createGame(["p1", "p2"], DEFAULT_2P_CONFIG, deterministicRng(1));
     expect(() => chooseAiActionForDifficulty(state, "p1", "medium")).not.toThrow();
   });
 
   it("AI_DIFFICULTIES lists every difficulty exactly once, with a label for each", () => {
-    expect(AI_DIFFICULTIES).toEqual(["easy", "medium", "hard"]);
+    expect(AI_DIFFICULTIES).toEqual(["easy", "medium", "hard", "expert"]);
     for (const d of AI_DIFFICULTIES) expect(AI_DIFFICULTY_LABELS[d]).toBeTruthy();
   });
 
