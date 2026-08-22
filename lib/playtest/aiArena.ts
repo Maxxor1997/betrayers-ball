@@ -1,8 +1,8 @@
 import { chooseAiActionForDifficulty } from "@/lib/ai/difficulty";
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
-import { chooseHardFastAction, HardFastOptions } from "@/lib/ai/hardFast";
+import { benchmarkTimings, chooseHardFastAction, HardFastOptions } from "@/lib/ai/hardFast";
 import { chooseRandomAiAction } from "@/lib/ai/randomAi";
-import { chooseTwoPlyAction, DEFAULT_TWO_PLY_OPTIONS, TwoPlyOptions } from "@/lib/ai/twoPly";
+import { chooseTwoPlyAction, DEFAULT_TWO_PLY_OPTIONS, twoPlySearchStats, TwoPlyOptions } from "@/lib/ai/twoPly";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { currentPlayerId } from "@/lib/engine/turns";
 import { AiDifficulty, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
@@ -15,10 +15,20 @@ export interface ArenaBucketStats {
   wins: number;
   /** Sum of ((rank - placementBaseline) / placementMaxDeviation), the same fixed [-1, 1] scale cardStats.ts's own placementDeltaSum uses -- see its doc comment for why the normalization (not just the baseline subtraction) matters. */
   placementDeltaSum: number;
+  /**
+   * Sum of every hard/expert-strategy decision's sample count this bucket has seen --
+   * 0 for easy/medium (no search loop to sample). Currently only populated by the
+   * fixed-per-seat mode (see simulateFixedSeatArenaGame/dispatchArenaSeatAction) --
+   * the shuffled mode's byDifficulty/byPosition buckets don't track this yet, so it
+   * stays 0 there and summarizeBucket's avgSamplesPerCandidate correctly shows null.
+   */
+  searchSamplesSum: number;
+  /** Sum of the corresponding decisions' actual candidate counts (not just maxCandidates -- a late-game decision can have fewer legal candidates than configured) -- the denominator for avgSamplesPerCandidate. */
+  searchCandidatesSum: number;
 }
 
 function emptyArenaBucket(): ArenaBucketStats {
-  return { gamesPlayed: 0, wins: 0, placementDeltaSum: 0 };
+  return { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0 };
 }
 
 /**
@@ -46,6 +56,8 @@ export interface ArenaBucketRow {
   gamesPlayed: number;
   winRate: number | null;
   avgPlacementDelta: number | null;
+  /** Average samples evaluated per candidate across every hard/expert decision this bucket saw -- null for easy/medium or an untallied bucket (see ArenaBucketStats.searchCandidatesSum). */
+  avgSamplesPerCandidate: number | null;
 }
 
 function summarizeBucket(label: string, bucket: ArenaBucketStats): ArenaBucketRow {
@@ -54,6 +66,7 @@ function summarizeBucket(label: string, bucket: ArenaBucketStats): ArenaBucketRo
     gamesPlayed: bucket.gamesPlayed,
     winRate: bucket.gamesPlayed === 0 ? null : bucket.wins / bucket.gamesPlayed,
     avgPlacementDelta: bucket.gamesPlayed === 0 ? null : bucket.placementDeltaSum / bucket.gamesPlayed,
+    avgSamplesPerCandidate: bucket.searchCandidatesSum === 0 ? null : bucket.searchSamplesSum / bucket.searchCandidatesSum,
   };
 }
 
@@ -203,7 +216,14 @@ export function arenaSeatConfigLabel(config: ArenaSeatConfig): string {
   return `${name} (${config.timeBudgetMs}ms, ${config.maxCandidates} cand, ${config.roundsAhead} rd)`;
 }
 
-function dispatchArenaSeatAction(state: GameState, playerId: string, config: ArenaSeatConfig, rng: () => number): GameAction {
+/** A dispatched action, plus how many samples/candidates that one decision contributed to the AI's search loop -- 0/0 for easy/medium (no search loop) and for flip/vote/pass decisions (rankedPlacementCandidates/evaluateCandidateOnce never run). Deltas, not running totals -- read before/after the underlying strategy call from twoPly.ts's/hardFast.ts's own global counters, which is safe here since JS is single-threaded and every call is synchronous/sequential regardless of how seats/games interleave. */
+interface DispatchedSeatAction {
+  action: GameAction;
+  samplesDelta: number;
+  candidatesDelta: number;
+}
+
+function dispatchArenaSeatAction(state: GameState, playerId: string, config: ArenaSeatConfig, rng: () => number): DispatchedSeatAction {
   const hardOptions: TwoPlyOptions | HardFastOptions = {
     timeBudgetMs: config.timeBudgetMs,
     maxCandidates: config.maxCandidates,
@@ -211,13 +231,21 @@ function dispatchArenaSeatAction(state: GameState, playerId: string, config: Are
   };
   switch (config.strategy) {
     case "easy":
-      return chooseRandomAiAction(state, playerId, rng);
+      return { action: chooseRandomAiAction(state, playerId, rng), samplesDelta: 0, candidatesDelta: 0 };
     case "medium":
-      return chooseGreedyAiAction(state, playerId, rng);
-    case "hardTwoPly":
-      return chooseTwoPlyAction(state, playerId, hardOptions, rng);
-    case "hardFast":
-      return chooseHardFastAction(state, playerId, hardOptions, rng);
+      return { action: chooseGreedyAiAction(state, playerId, rng), samplesDelta: 0, candidatesDelta: 0 };
+    case "hardTwoPly": {
+      const samplesBefore = twoPlySearchStats.samples;
+      const candidatesBefore = twoPlySearchStats.candidatesEvaluated;
+      const action = chooseTwoPlyAction(state, playerId, hardOptions, rng);
+      return { action, samplesDelta: twoPlySearchStats.samples - samplesBefore, candidatesDelta: twoPlySearchStats.candidatesEvaluated - candidatesBefore };
+    }
+    case "hardFast": {
+      const samplesBefore = benchmarkTimings.samples;
+      const candidatesBefore = benchmarkTimings.candidatesEvaluated;
+      const action = chooseHardFastAction(state, playerId, hardOptions, rng);
+      return { action, samplesDelta: benchmarkTimings.samples - samplesBefore, candidatesDelta: benchmarkTimings.candidatesEvaluated - candidatesBefore };
+    }
   }
 }
 
@@ -271,7 +299,9 @@ export function simulateFixedSeatArenaGame(centerEffect: CenterEffectId, seatCon
   while (state.phase === "playing") {
     const activeId = currentPlayerId(state);
     const seatIndex = playerIds.indexOf(activeId);
-    const action = dispatchArenaSeatAction(state, activeId, seatConfigs[seatIndex], rng);
+    const { action, samplesDelta, candidatesDelta } = dispatchArenaSeatAction(state, activeId, seatConfigs[seatIndex], rng);
+    buckets[seatIndex].searchSamplesSum += samplesDelta;
+    buckets[seatIndex].searchCandidatesSum += candidatesDelta;
     state = applyAction(state, action, rng);
   }
 

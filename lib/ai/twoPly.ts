@@ -9,6 +9,27 @@ import { chooseGreedyAiAction, placementHeuristicAdjustment } from "./greedyAi";
 export type Rng = () => number;
 
 /**
+ * Minimal, purely additive sample-count bookkeeping -- deliberately not the full
+ * wall-clock timing breakdown hardFast.ts's own benchmarkTimings has (that file's
+ * whole purpose is speed experimentation; this exists only so AI Arena's fixed-per-
+ * seat mode can show "how many samples per candidate is this seat actually getting"
+ * for a real Hard seat too, not just Fast fork ones -- see aiArena.ts's
+ * dispatchArenaSeatAction). Never read or branched on by chooseTwoPlyAction itself --
+ * this file's actual decision-making behavior is completely unaffected.
+ */
+export const twoPlySearchStats = {
+  /** evaluateCandidateOnce calls, across every decision. */
+  samples: 0,
+  /** Sum of candidates.length across every decision that actually ran the round-robin loop (i.e. had more than one candidate to compare) -- the denominator for "samples per candidate". */
+  candidatesEvaluated: 0,
+};
+
+export function resetTwoPlySearchStats(): void {
+  twoPlySearchStats.samples = 0;
+  twoPlySearchStats.candidatesEvaluated = 0;
+}
+
+/**
  * Builds a fully-known "guessed" GameState consistent with everything `viewerId`
  * could honestly know right now -- their own hand, their own board cards (any face
  * state -- a player always knows their own card, even face-down), and any face-up
@@ -170,6 +191,7 @@ function rankedPlacementCandidates(state: GameState, playerId: string, maxCandid
  * already reflected in `round` by the time it ticks over.
  */
 function evaluateCandidateOnce(state: GameState, playerId: string, candidate: { instanceId: string; position: Position }, roundsAhead: number, rng: Rng): number {
+  twoPlySearchStats.samples++;
   let s = resolvePendingVotes(applyAction(determinize(state, playerId, rng), { type: "place", playerId, ...candidate }, rng), rng);
   const targetRound = s.round + roundsAhead;
   // Generous, player-count-aware safety cap -- not the real stopping condition
@@ -220,6 +242,7 @@ export function chooseTwoPlyAction(state: GameState, playerId: string, options: 
 
   const candidates = rankedPlacementCandidates(state, playerId, options.maxCandidates);
   if (candidates.length <= 1) return greedyChoice; // nothing to compare
+  twoPlySearchStats.candidatesEvaluated += candidates.length;
 
   const totals = candidates.map(() => ({ sum: 0, count: 0 }));
   const deadline = performance.now() + options.timeBudgetMs;

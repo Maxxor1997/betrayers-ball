@@ -56,10 +56,10 @@ describe("createEmptyArenaStats", () => {
   it("zeroes every difficulty and starts with no position buckets", () => {
     const stats = createEmptyArenaStats();
     expect(stats.byDifficulty).toEqual({
-      easy: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0 },
-      medium: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0 },
-      hard: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0 },
-      expert: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0 },
+      easy: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0 },
+      medium: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0 },
+      hard: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0 },
+      expert: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0 },
     });
     expect(stats.byPosition).toEqual({});
   });
@@ -123,21 +123,21 @@ describe("simulateArenaGame", () => {
 describe("summarizeArenaStats", () => {
   it("omits buckets with no games, and computes win rate / avg delta for the rest", () => {
     const stats = createEmptyArenaStats();
-    stats.byDifficulty.easy = { gamesPlayed: 4, wins: 1, placementDeltaSum: -0.5 };
-    stats.byDifficulty.medium = { gamesPlayed: 4, wins: 3, placementDeltaSum: -2 };
+    stats.byDifficulty.easy = { gamesPlayed: 4, wins: 1, placementDeltaSum: -0.5, searchSamplesSum: 0, searchCandidatesSum: 0 };
+    stats.byDifficulty.medium = { gamesPlayed: 4, wins: 3, placementDeltaSum: -2, searchSamplesSum: 0, searchCandidatesSum: 0 };
     // hard left at 0 games -- should be omitted entirely.
-    stats.byPosition[1] = { gamesPlayed: 2, wins: 2, placementDeltaSum: -2 };
-    stats.byPosition[11] = { gamesPlayed: 1, wins: 0, placementDeltaSum: 1 };
+    stats.byPosition[1] = { gamesPlayed: 2, wins: 2, placementDeltaSum: -2, searchSamplesSum: 0, searchCandidatesSum: 0 };
+    stats.byPosition[11] = { gamesPlayed: 1, wins: 0, placementDeltaSum: 1, searchSamplesSum: 0, searchCandidatesSum: 0 };
 
     const { byDifficulty, byPosition } = summarizeArenaStats(stats);
 
     expect(byDifficulty).toEqual([
-      { label: "Easy", gamesPlayed: 4, winRate: 0.25, avgPlacementDelta: -0.125 },
-      { label: "Medium", gamesPlayed: 4, winRate: 0.75, avgPlacementDelta: -0.5 },
+      { label: "Easy", gamesPlayed: 4, winRate: 0.25, avgPlacementDelta: -0.125, avgSamplesPerCandidate: null },
+      { label: "Medium", gamesPlayed: 4, winRate: 0.75, avgPlacementDelta: -0.5, avgSamplesPerCandidate: null },
     ]);
     expect(byPosition).toEqual([
-      { label: "1st", gamesPlayed: 2, winRate: 1, avgPlacementDelta: -1 },
-      { label: "11th", gamesPlayed: 1, winRate: 0, avgPlacementDelta: 1 }, // the 11th/12th/13th "th" exception, not "11st"
+      { label: "1st", gamesPlayed: 2, winRate: 1, avgPlacementDelta: -1, avgSamplesPerCandidate: null },
+      { label: "11th", gamesPlayed: 1, winRate: 0, avgPlacementDelta: 1, avgSamplesPerCandidate: null }, // the 11th/12th/13th "th" exception, not "11st"
     ]);
   });
 
@@ -175,7 +175,7 @@ describe("createEmptyFixedSeatArenaStats", () => {
   it("creates one zeroed bucket per seat -- no config attached (see ArenaSeatBuckets' own doc comment for why)", () => {
     const buckets = createEmptyFixedSeatArenaStats(2);
     expect(buckets).toHaveLength(2);
-    for (const b of buckets) expect(b).toEqual({ gamesPlayed: 0, wins: 0, placementDeltaSum: 0 });
+    for (const b of buckets) expect(b).toEqual({ gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0 });
   });
 });
 
@@ -231,6 +231,23 @@ describe("simulateFixedSeatArenaGame", () => {
     expect(elapsed).toBeLessThan(2000);
   });
 
+  it("accumulates samples/candidates for both hard strategies, so avgSamplesPerCandidate is derivable for either -- easy/medium seats stay at 0 (no search loop to sample)", () => {
+    const configs: ArenaSeatConfig[] = [
+      { strategy: "hardTwoPly", ...FAST_HARD_SEAT } as ArenaSeatConfig,
+      { strategy: "hardFast", ...FAST_HARD_SEAT } as ArenaSeatConfig,
+      { strategy: "easy", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
+    ];
+    const buckets = createEmptyFixedSeatArenaStats(configs.length);
+    simulateFixedSeatArenaGame("none", configs, buckets, deterministicRng(9));
+
+    expect(buckets[0].searchSamplesSum).toBeGreaterThan(0);
+    expect(buckets[0].searchCandidatesSum).toBeGreaterThan(0);
+    expect(buckets[1].searchSamplesSum).toBeGreaterThan(0);
+    expect(buckets[1].searchCandidatesSum).toBeGreaterThan(0);
+    expect(buckets[2].searchSamplesSum).toBe(0);
+    expect(buckets[2].searchCandidatesSum).toBe(0);
+  });
+
   it("uses the CURRENT seatConfigs, not a stale copy from when the buckets array was created -- the exact bug this signature shape is designed to prevent", () => {
     const configs: ArenaSeatConfig[] = [
       { strategy: "easy", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
@@ -260,14 +277,14 @@ describe("summarizeFixedSeatArenaStats", () => {
       { strategy: "hardFast", timeBudgetMs: 100, maxCandidates: 6, roundsAhead: 1 },
     ];
     const buckets: ReturnType<typeof createEmptyFixedSeatArenaStats> = [
-      { gamesPlayed: 4, wins: 1, placementDeltaSum: -0.5 },
-      { gamesPlayed: 4, wins: 3, placementDeltaSum: -2 },
+      { gamesPlayed: 4, wins: 1, placementDeltaSum: -0.5, searchSamplesSum: 0, searchCandidatesSum: 0 },
+      { gamesPlayed: 4, wins: 3, placementDeltaSum: -2, searchSamplesSum: 820, searchCandidatesSum: 20 },
     ];
 
     const rows = summarizeFixedSeatArenaStats(configs, buckets);
     expect(rows).toEqual([
-      { label: "Seat 1", gamesPlayed: 4, winRate: 0.25, avgPlacementDelta: -0.125, seatIndex: 0, config: configs[0] },
-      { label: "Seat 2", gamesPlayed: 4, winRate: 0.75, avgPlacementDelta: -0.5, seatIndex: 1, config: configs[1] },
+      { label: "Seat 1", gamesPlayed: 4, winRate: 0.25, avgPlacementDelta: -0.125, avgSamplesPerCandidate: null, seatIndex: 0, config: configs[0] },
+      { label: "Seat 2", gamesPlayed: 4, winRate: 0.75, avgPlacementDelta: -0.5, avgSamplesPerCandidate: 41, seatIndex: 1, config: configs[1] },
     ]);
   });
 

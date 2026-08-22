@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS } from "@/lib/ai/difficulty";
 import { DEFAULT_TWO_PLY_OPTIONS } from "@/lib/ai/twoPly";
 import { CENTER_EFFECTS, randomCenterEffectPool, selectableCenterEffects } from "@/lib/content/centerEffects";
@@ -27,13 +28,14 @@ import {
 import { loadArenaState, resetArenaState, saveArenaState } from "@/lib/playtest/arenaStore";
 
 /**
- * Hidden diagnostic tool -- deliberately not linked from anywhere (not home, not
- * /playtest itself), only reachable by typing this URL. Answers two questions the main
- * playtest page can't: does a higher AI difficulty actually win more, and does turn
- * order (who goes first) bias outcomes on its own? Every real entrypoint in the app
- * (home, /play, multiplayer, the main playtest simulator) deliberately stays one
- * difficulty per whole game -- this page is the one place that puts different
- * difficulties in the same game, purely to measure them against each other.
+ * A diagnostic tool, listed on the home page as "AI Arena" alongside Card Balance --
+ * answers two questions the main playtest page can't: does a higher AI difficulty
+ * actually win more, and does turn order (who goes first) bias outcomes on its own?
+ * Every real entrypoint in the app (home, /play, multiplayer, the main playtest
+ * simulator) deliberately stays one difficulty per whole game -- this page is the one
+ * place that puts different difficulties (or, in fixed-per-seat mode, different
+ * strategy/search-budget configurations of the *same* difficulty) in the same game,
+ * purely to measure them against each other.
  *
  * Persists across reloads via arenaStore.ts (localStorage), same as the main playtest
  * page's own running stats table -- a batch here is a deliberate, often long-running
@@ -53,6 +55,33 @@ const YIELD_INTERVAL_MS = 50;
  * question this diagnostic page exists for.
  */
 const ARENA_HARD_BUDGET_MAX_MS = 3000;
+
+/** One markdown table, shared by both modes' copy builders below. */
+function markdownTable(headers: string[], rows: string[][]): string {
+  const lines = [`| ${headers.join(" | ")} |`, `|${headers.map(() => "---").join("|")}|`];
+  for (const row of rows) lines.push(`| ${row.join(" | ")} |`);
+  return lines.join("\n") + "\n";
+}
+
+/** Copies whichever mode is currently active -- shuffle mode's two tables, or fixed mode's one -- since only one is ever visible/relevant at a time (see the mode toggle above). */
+function buildArenaMarkdown(mode: ArenaMode, byDifficulty: ArenaBucketRow[], byPosition: ArenaBucketRow[], bySeat: ArenaSeatBucketRow[]): string {
+  const bucketRows = (rows: ArenaBucketRow[]) => rows.map((r) => [r.label, String(r.gamesPlayed), fmtPercent(r.winRate), fmt(r.avgPlacementDelta), fmt(r.avgSamplesPerCandidate, 1)]);
+  const columns = ["Games", "Win rate", "Placement Δ", "Samples/cand"];
+
+  if (mode === "shuffle") {
+    return [
+      "By difficulty",
+      "",
+      markdownTable(["Difficulty", ...columns], bucketRows(byDifficulty)),
+      "By starting position",
+      "",
+      markdownTable(["Position", ...columns], bucketRows(byPosition)),
+    ].join("\n");
+  }
+
+  const seatRows = bySeat.map((r) => [r.label, arenaSeatConfigLabel(r.config), String(r.gamesPlayed), fmtPercent(r.winRate), fmt(r.avgPlacementDelta), fmt(r.avgSamplesPerCandidate, 1)]);
+  return ["By seat", "", markdownTable(["Seat", "Config", ...columns], seatRows)].join("\n");
+}
 
 function fmt(n: number | null, decimals = 2): string {
   return n === null ? "—" : n.toFixed(decimals);
@@ -175,7 +204,7 @@ function ResultsTable({ title, rows, firstColumnLabel }: { title: string; rows: 
   );
 }
 
-type SeatResultsSortKey = "label" | "config" | "gamesPlayed" | "winRate" | "avgPlacementDelta";
+type SeatResultsSortKey = "label" | "config" | "gamesPlayed" | "winRate" | "avgPlacementDelta" | "avgSamplesPerCandidate";
 
 /** Same shape as ResultsTable, but with an extra "Config" column spelling out exactly what each seat ran with -- the whole point of the fixed-per-seat mode is comparing configurations, not just labels, so that has to be visible right next to the results, not just set-and-forgotten in the config form above. */
 function SeatResultsTable({ rows }: { rows: ArenaSeatBucketRow[] }) {
@@ -204,6 +233,15 @@ function SeatResultsTable({ rows }: { rows: ArenaSeatBucketRow[] }) {
                   title="Average (rank - baseline) / (half the game's rank spread), on a fixed -1..+1 scale -- same normalized metric the main playtest page's Placement Δ uses."
                   onSort={onSort}
                 />
+                <SortableHeader
+                  label="Samples/cand"
+                  sortKey="avgSamplesPerCandidate"
+                  active={sortKey === "avgSamplesPerCandidate"}
+                  dir={dir}
+                  align="right"
+                  title="Average search samples evaluated per candidate placement, for Hard/Expert seats only (— for Easy/Medium, which have no search loop) -- how much lookahead depth this seat is actually getting at its configured time budget."
+                  onSort={onSort}
+                />
               </tr>
             </thead>
             <tbody>
@@ -214,6 +252,7 @@ function SeatResultsTable({ rows }: { rows: ArenaSeatBucketRow[] }) {
                   <td className="px-3 py-1.5 text-right">{row.gamesPlayed}</td>
                   <td className="px-3 py-1.5 text-right">{fmtPercent(row.winRate)}</td>
                   <td className="px-3 py-1.5 text-right">{fmt(row.avgPlacementDelta)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmt(row.avgSamplesPerCandidate, 1)}</td>
                 </tr>
               ))}
             </tbody>
@@ -344,6 +383,7 @@ function Arena() {
   const [seatBuckets, setSeatBuckets] = useState<ArenaSeatBuckets>(initial.seatBuckets);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [copyFeedback, setCopyFeedback] = useState(false);
   const cancelRef = useRef(false);
   const runInProgressRef = useRef(false);
 
@@ -451,18 +491,32 @@ function Arena() {
 
   const { byDifficulty, byPosition } = summarizeArenaStats(stats);
   const bySeat = summarizeFixedSeatArenaStats(seatConfigs, seatBuckets);
+  const hasResults = mode === "shuffle" ? byDifficulty.length > 0 || byPosition.length > 0 : bySeat.some((r) => r.gamesPlayed > 0);
+
+  function copyAll() {
+    navigator.clipboard.writeText(buildArenaMarkdown(mode, byDifficulty, byPosition, bySeat)).then(() => {
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 1500);
+    });
+  }
 
   return (
     <div className="flex flex-1 flex-col items-center gap-6 px-4 py-8">
-      <header className="flex w-full max-w-3xl flex-col gap-1">
-        <h1 className="text-lg font-semibold">AI Arena</h1>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          Pits the selected AI difficulties against each other in the same games (every other part of the app uses one difficulty per whole game --
-          this page is the exception, purely to measure them against each other). Not linked from anywhere else.{" "}
-          <Link href="/playtest" className="underline">
-            Back to playtest
+      <header className="flex w-full max-w-3xl flex-col gap-2">
+        <div className="flex w-full items-center justify-between gap-2">
+          <h1 className="text-lg font-semibold sm:text-xl">
+            Betrayer&apos;s Ball <span className="font-normal text-zinc-500">— AI arena</span>
+          </h1>
+          <ThemeToggle />
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-1.5">
+          <Link
+            href="/"
+            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            ◀ Home
           </Link>
-        </p>
+        </div>
       </header>
 
       <div className="flex w-full max-w-3xl flex-col gap-2 rounded-lg border border-zinc-300 p-4 dark:border-zinc-700">
@@ -619,6 +673,14 @@ function Arena() {
                 className="shrink-0 rounded-full border border-zinc-300 px-3 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
               >
                 Reset
+              </button>
+              <button
+                onClick={copyAll}
+                disabled={!hasResults}
+                title="Copies the currently active mode's result table(s) as markdown"
+                className="shrink-0 rounded-full border border-zinc-300 px-3 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+              >
+                {copyFeedback ? "Copied!" : "Copy all"}
               </button>
             </>
           )}

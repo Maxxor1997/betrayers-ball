@@ -48,6 +48,8 @@ export const benchmarkTimings = {
   samples: 0,
   /** How many top-level chooseHardFastAction decisions were timed -- for computing a per-decision average. */
   decisions: 0,
+  /** Sum of candidates.length across every decision that actually ran the round-robin loop (i.e. had more than one candidate to compare) -- the denominator for "samples per candidate", same purpose as twoPly.ts's own twoPlySearchStats.candidatesEvaluated. */
+  candidatesEvaluated: 0,
 };
 
 export function resetBenchmarkTimings(): void {
@@ -61,6 +63,7 @@ export function resetBenchmarkTimings(): void {
   benchmarkTimings.scoreResultMs = 0;
   benchmarkTimings.samples = 0;
   benchmarkTimings.decisions = 0;
+  benchmarkTimings.candidatesEvaluated = 0;
 }
 
 /**
@@ -370,6 +373,7 @@ export function chooseHardFastAction(
 
   const candidates = rankedPlacementCandidates(state, playerId, options.maxCandidates);
   if (candidates.length <= 1) return greedyChoice; // nothing to compare
+  benchmarkTimings.candidatesEvaluated += candidates.length;
 
   const totals = candidates.map(() => ({ sum: 0, count: 0 }));
   const deadline = performance.now() + options.timeBudgetMs;

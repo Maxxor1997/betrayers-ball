@@ -57,6 +57,14 @@ function PlaytestIcon() {
     </svg>
   );
 }
+function ArenaIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-5 w-5">
+      <path d="M6 3.5h8L17 8v4l-3 4.5H6L3 12V8z" strokeLinejoin="round" />
+      <circle cx="10" cy="10" r="2" />
+    </svg>
+  );
+}
 
 function PlayOption({
   href,
@@ -65,6 +73,7 @@ function PlayOption({
   description,
   icon,
   accentClass,
+  fullWidth,
 }: {
   href?: string;
   onClick?: () => void;
@@ -73,9 +82,12 @@ function PlayOption({
   icon: React.ReactNode;
   /** Precomputed Tailwind classes for the icon badge, passed whole (not built from a color name) so Tailwind's build-time scanner sees the literal class names. */
   accentClass: string;
+  /** Spans both columns of the sm:grid-cols-2 grid -- for a trailing odd-one-out tile that would otherwise sit alone, half-width, looking like a mistake rather than a deliberate option. */
+  fullWidth?: boolean;
 }) {
-  const className =
-    "group flex h-full items-start gap-3 rounded-xl border border-zinc-300 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md dark:border-zinc-700 dark:hover:border-zinc-600";
+  const className = `group flex h-full items-start gap-3 rounded-xl border border-zinc-300 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md dark:border-zinc-700 dark:hover:border-zinc-600 ${
+    fullWidth ? "sm:col-span-2" : ""
+  }`;
   const content = (
     <>
       <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${accentClass}`}>{icon}</span>
@@ -416,17 +428,25 @@ export default function HomePage() {
             />
             <PlayOption
               title="Screencast"
-              description="This device shows the board only, no hand of its own -- everyone else joins from their phone."
+              description="This device shows the board only -- everyone else joins from their phone."
               icon={<ScreencastIcon />}
               accentClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
               onClick={openDisplaySetup}
             />
             <PlayOption
               href="/playtest"
-              title="Playtest"
-              description="Simulate large numbers of AI-only games (or play one yourself) and tally per-card scoring/placement stats."
+              title="Card Balance"
+              description="Simulate large numbers of AI games and tally per-card stats."
               icon={<PlaytestIcon />}
               accentClass="bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
+            />
+            <PlayOption
+              href="/playtest/arena"
+              title="AI Arena"
+              description="Pit AI difficulties and configurations against each other."
+              icon={<ArenaIcon />}
+              accentClass="bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
+              fullWidth
             />
           </div>
           <ActiveSessions />
