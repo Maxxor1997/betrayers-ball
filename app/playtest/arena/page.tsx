@@ -20,6 +20,7 @@ import {
   createEmptyArenaStats,
   createEmptyFixedSeatArenaStats,
   defaultArenaSeatConfig,
+  defaultArenaSeatConfigFor,
   simulateArenaGame,
   simulateFixedSeatArenaGame,
   summarizeArenaStats,
@@ -65,8 +66,18 @@ function markdownTable(headers: string[], rows: string[][]): string {
 
 /** Copies whichever mode is currently active -- shuffle mode's two tables, or fixed mode's one -- since only one is ever visible/relevant at a time (see the mode toggle above). */
 function buildArenaMarkdown(mode: ArenaMode, byDifficulty: ArenaBucketRow[], byPosition: ArenaBucketRow[], bySeat: ArenaSeatBucketRow[]): string {
-  const bucketRows = (rows: ArenaBucketRow[]) => rows.map((r) => [r.label, String(r.gamesPlayed), fmtPercent(r.winRate), fmt(r.avgPlacementDelta), fmt(r.avgSamplesPerCandidate, 1)]);
-  const columns = ["Games", "Win rate", "Placement Δ", "Samples/cand"];
+  const bucketRows = (rows: ArenaBucketRow[]) =>
+    rows.map((r) => [
+      r.label,
+      String(r.gamesPlayed),
+      fmtPercent(r.winRate),
+      fmt(r.avgPlacementDelta),
+      fmt(r.avgSamplesPerCandidate, 1),
+      fmtPercent(r.avgEligibleFlipRate),
+      fmtPercent(r.avgVoteEndRate),
+      fmt(r.avgRoundLength, 1),
+    ]);
+  const columns = ["Games", "Win rate", "Placement Δ", "Samples/cand", "Flip % (eligible)", "Vote end %", "Avg rounds"];
 
   if (mode === "shuffle") {
     return [
@@ -79,7 +90,17 @@ function buildArenaMarkdown(mode: ArenaMode, byDifficulty: ArenaBucketRow[], byP
     ].join("\n");
   }
 
-  const seatRows = bySeat.map((r) => [r.label, arenaSeatConfigLabel(r.config), String(r.gamesPlayed), fmtPercent(r.winRate), fmt(r.avgPlacementDelta), fmt(r.avgSamplesPerCandidate, 1)]);
+  const seatRows = bySeat.map((r) => [
+    r.label,
+    arenaSeatConfigLabel(r.config),
+    String(r.gamesPlayed),
+    fmtPercent(r.winRate),
+    fmt(r.avgPlacementDelta),
+    fmt(r.avgSamplesPerCandidate, 1),
+    fmtPercent(r.avgEligibleFlipRate),
+    fmtPercent(r.avgVoteEndRate),
+    fmt(r.avgRoundLength, 1),
+  ]);
   return ["By seat", "", markdownTable(["Seat", "Config", ...columns], seatRows)].join("\n");
 }
 
@@ -158,7 +179,7 @@ function useSort<K extends string>(defaultKey: K | null = null) {
   return { sortKey, dir, onSort };
 }
 
-type ResultsSortKey = "label" | "gamesPlayed" | "winRate" | "avgPlacementDelta";
+type ResultsSortKey = "label" | "gamesPlayed" | "winRate" | "avgPlacementDelta" | "avgSamplesPerCandidate" | "avgEligibleFlipRate" | "avgVoteEndRate" | "avgRoundLength";
 
 function ResultsTable({ title, rows, firstColumnLabel }: { title: string; rows: ArenaBucketRow[]; firstColumnLabel: string }) {
   const { sortKey, dir, onSort } = useSort<ResultsSortKey>();
@@ -185,6 +206,42 @@ function ResultsTable({ title, rows, firstColumnLabel }: { title: string; rows: 
                   title="Average (rank - baseline) / (half the game's rank spread), on a fixed -1..+1 scale -- same normalized metric the main playtest page's Placement Δ uses."
                   onSort={onSort}
                 />
+                <SortableHeader
+                  label="Samples/cand"
+                  sortKey="avgSamplesPerCandidate"
+                  active={sortKey === "avgSamplesPerCandidate"}
+                  dir={dir}
+                  align="right"
+                  title="Average search samples evaluated per candidate placement, for Hard/Expert seats only (— for Easy/Medium, which have no search loop) -- how much lookahead depth this bucket is actually getting at its configured time budget."
+                  onSort={onSort}
+                />
+                <SortableHeader
+                  label="Flip % (eligible)"
+                  sortKey="avgEligibleFlipRate"
+                  active={sortKey === "avgEligibleFlipRate"}
+                  dir={dir}
+                  align="right"
+                  title="Of this bucket's decisions where flipping was even legal (not blocked by flip-lock or 'nothing face-down left'), what fraction actually resulted in a flip -- not flips / all decisions, since most decisions can't flip at all regardless of strategy."
+                  onSort={onSort}
+                />
+                <SortableHeader
+                  label="Vote end %"
+                  sortKey="avgVoteEndRate"
+                  active={sortKey === "avgVoteEndRate"}
+                  dir={dir}
+                  align="right"
+                  title="Of this bucket's round-boundary votes, what fraction were 'yes, end the game now' -- decided via each seat's own real difficulty logic, not a shared default."
+                  onSort={onSort}
+                />
+                <SortableHeader
+                  label="Avg rounds"
+                  sortKey="avgRoundLength"
+                  active={sortKey === "avgRoundLength"}
+                  dir={dir}
+                  align="right"
+                  title="Average ending round number of every game this bucket's seat(s) played -- a game-wide number, so every seat in the same game contributes the same value."
+                  onSort={onSort}
+                />
               </tr>
             </thead>
             <tbody>
@@ -194,6 +251,10 @@ function ResultsTable({ title, rows, firstColumnLabel }: { title: string; rows: 
                   <td className="px-3 py-1.5 text-right">{row.gamesPlayed}</td>
                   <td className="px-3 py-1.5 text-right">{fmtPercent(row.winRate)}</td>
                   <td className="px-3 py-1.5 text-right">{fmt(row.avgPlacementDelta)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmt(row.avgSamplesPerCandidate, 1)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmtPercent(row.avgEligibleFlipRate)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmtPercent(row.avgVoteEndRate)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmt(row.avgRoundLength, 1)}</td>
                 </tr>
               ))}
             </tbody>
@@ -204,7 +265,7 @@ function ResultsTable({ title, rows, firstColumnLabel }: { title: string; rows: 
   );
 }
 
-type SeatResultsSortKey = "label" | "config" | "gamesPlayed" | "winRate" | "avgPlacementDelta" | "avgSamplesPerCandidate";
+type SeatResultsSortKey = "label" | "config" | "gamesPlayed" | "winRate" | "avgPlacementDelta" | "avgSamplesPerCandidate" | "avgEligibleFlipRate" | "avgVoteEndRate" | "avgRoundLength";
 
 /** Same shape as ResultsTable, but with an extra "Config" column spelling out exactly what each seat ran with -- the whole point of the fixed-per-seat mode is comparing configurations, not just labels, so that has to be visible right next to the results, not just set-and-forgotten in the config form above. */
 function SeatResultsTable({ rows }: { rows: ArenaSeatBucketRow[] }) {
@@ -242,6 +303,33 @@ function SeatResultsTable({ rows }: { rows: ArenaSeatBucketRow[] }) {
                   title="Average search samples evaluated per candidate placement, for Hard/Expert seats only (— for Easy/Medium, which have no search loop) -- how much lookahead depth this seat is actually getting at its configured time budget."
                   onSort={onSort}
                 />
+                <SortableHeader
+                  label="Flip % (eligible)"
+                  sortKey="avgEligibleFlipRate"
+                  active={sortKey === "avgEligibleFlipRate"}
+                  dir={dir}
+                  align="right"
+                  title="Of this seat's decisions where flipping was even legal (not blocked by flip-lock or 'nothing face-down left'), what fraction actually resulted in a flip -- not flips / all decisions, since most decisions can't flip at all regardless of strategy."
+                  onSort={onSort}
+                />
+                <SortableHeader
+                  label="Vote end %"
+                  sortKey="avgVoteEndRate"
+                  active={sortKey === "avgVoteEndRate"}
+                  dir={dir}
+                  align="right"
+                  title="Of this seat's round-boundary votes, what fraction were 'yes, end the game now' -- decided via this seat's own strategy (chooseExpertVote for Hard (Fast fork), computeAiVote otherwise), not a shared default."
+                  onSort={onSort}
+                />
+                <SortableHeader
+                  label="Avg rounds"
+                  sortKey="avgRoundLength"
+                  active={sortKey === "avgRoundLength"}
+                  dir={dir}
+                  align="right"
+                  title="Average ending round number of every game this seat played -- a game-wide number, so every seat in the same game contributes the same value."
+                  onSort={onSort}
+                />
               </tr>
             </thead>
             <tbody>
@@ -253,6 +341,9 @@ function SeatResultsTable({ rows }: { rows: ArenaSeatBucketRow[] }) {
                   <td className="px-3 py-1.5 text-right">{fmtPercent(row.winRate)}</td>
                   <td className="px-3 py-1.5 text-right">{fmt(row.avgPlacementDelta)}</td>
                   <td className="px-3 py-1.5 text-right">{fmt(row.avgSamplesPerCandidate, 1)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmtPercent(row.avgEligibleFlipRate)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmtPercent(row.avgVoteEndRate)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmt(row.avgRoundLength, 1)}</td>
                 </tr>
               ))}
             </tbody>
@@ -282,7 +373,12 @@ function SeatConfigRow({
       <select
         value={config.strategy}
         disabled={disabled}
-        onChange={(e) => onChange({ ...config, strategy: e.target.value as ArenaSeatStrategy })}
+        // Resets the search-budget fields to their real defaults on every strategy
+        // change, instead of carrying over whatever numbers happened to be sitting
+        // there from a previous strategy -- e.g. switching from a seat someone had
+        // tuned to 250ms/70cand to a fresh "Hard" shouldn't silently start that seat
+        // at HardFast-scale numbers Hard was never validated at.
+        onChange={(e) => onChange(defaultArenaSeatConfigFor(e.target.value as ArenaSeatStrategy))}
         className="min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
       >
         {(Object.keys(ARENA_SEAT_STRATEGY_LABELS) as ArenaSeatStrategy[]).map((s) => (
@@ -383,6 +479,12 @@ function Arena() {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  // Defaults to "difficulty" -- that's what most batches are actually run to compare;
+  // "position" answers a narrower question (does turn order bias outcomes on its own)
+  // that's only occasionally what someone's checking. Kept as plain UI state, not
+  // persisted -- purely a display preference, not part of the batch's own
+  // config/results.
+  const [shuffleBreakdown, setShuffleBreakdown] = useState<"difficulty" | "position">("difficulty");
   const cancelRef = useRef(false);
   const runInProgressRef = useRef(false);
 
@@ -687,9 +789,25 @@ function Arena() {
       </div>
 
       {mode === "shuffle" ? (
-        <div className="flex w-full max-w-3xl flex-col gap-4 sm:flex-row">
-          <ResultsTable title="By difficulty" rows={byDifficulty} firstColumnLabel="Difficulty" />
-          <ResultsTable title="By starting position" rows={byPosition} firstColumnLabel="Position" />
+        <div className="flex w-full max-w-3xl flex-col gap-2">
+          <div className="flex items-center justify-end gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+            <label htmlFor="arena-breakdown">Breakdown</label>
+            <select
+              id="arena-breakdown"
+              value={shuffleBreakdown}
+              onChange={(e) => setShuffleBreakdown(e.target.value as "difficulty" | "position")}
+              title="'By difficulty' answers what most batches are run to check -- does a difficulty label win more. 'By starting position' answers a narrower question: whether turn order biases outcomes on its own, independent of difficulty."
+              className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm dark:border-zinc-700"
+            >
+              <option value="difficulty">By difficulty</option>
+              <option value="position">By starting position</option>
+            </select>
+          </div>
+          {shuffleBreakdown === "difficulty" ? (
+            <ResultsTable title="By difficulty" rows={byDifficulty} firstColumnLabel="Difficulty" />
+          ) : (
+            <ResultsTable title="By starting position" rows={byPosition} firstColumnLabel="Position" />
+          )}
         </div>
       ) : (
         <div className="w-full max-w-3xl">

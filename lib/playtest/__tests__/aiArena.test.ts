@@ -6,12 +6,14 @@ import {
   createEmptyArenaStats,
   createEmptyFixedSeatArenaStats,
   defaultArenaSeatConfig,
+  defaultArenaSeatConfigFor,
   simulateArenaGame,
   simulateFixedSeatArenaGame,
   summarizeArenaStats,
   summarizeFixedSeatArenaStats,
 } from "../aiArena";
-import { TwoPlyOptions } from "@/lib/ai/twoPly";
+import { DEFAULT_HARD_FAST_OPTIONS } from "@/lib/ai/hardFast";
+import { DEFAULT_TWO_PLY_OPTIONS, TwoPlyOptions } from "@/lib/ai/twoPly";
 import { AiDifficulty } from "@/lib/engine/types";
 
 /** A tiny time/round budget so tests exercising "hard" seats stay fast -- play strength isn't under test here. */
@@ -56,10 +58,10 @@ describe("createEmptyArenaStats", () => {
   it("zeroes every difficulty and starts with no position buckets", () => {
     const stats = createEmptyArenaStats();
     expect(stats.byDifficulty).toEqual({
-      easy: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0 },
-      medium: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0 },
-      hard: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0 },
-      expert: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0 },
+      easy: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0, roundLengthSum: 0 },
+      medium: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0, roundLengthSum: 0 },
+      hard: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0, roundLengthSum: 0 },
+      expert: { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0, roundLengthSum: 0 },
     });
     expect(stats.byPosition).toEqual({});
   });
@@ -118,26 +120,58 @@ describe("simulateArenaGame", () => {
     // generous upper bound so this stays robust on a slow CI runner.
     expect(elapsed).toBeLessThan(2000);
   });
+
+  it("tracks samples/candidates, flip-eligibility, and vote outcomes per bucket, same as the fixed-per-seat mode -- these aren't fixed-per-seat-only anymore", () => {
+    const stats = createEmptyArenaStats();
+    for (let i = 0; i < 5; i++) simulateArenaGame(4, "none", ["easy", "medium", "hard", "expert"], stats, deterministicRng(30 + i), FAST_HARD_OPTIONS);
+
+    for (const difficulty of ["hard", "expert"] as const) {
+      const bucket = stats.byDifficulty[difficulty];
+      expect(bucket.searchCandidatesSum).toBeGreaterThan(0);
+      expect(bucket.flipEligibleDecisions).toBeGreaterThan(0);
+      expect(bucket.flipsChosen).toBeLessThanOrEqual(bucket.flipEligibleDecisions);
+    }
+    // Every game reaches at least one round-boundary vote eventually (that's how the
+    // game ends), and every seat is AI, so every difficulty should have cast at least
+    // one vote across 5 games.
+    for (const difficulty of ["easy", "medium", "hard", "expert"] as const) {
+      const bucket = stats.byDifficulty[difficulty];
+      expect(bucket.votesCast).toBeGreaterThan(0);
+      expect(bucket.votesYes).toBeLessThanOrEqual(bucket.votesCast);
+    }
+  });
+
+  it("tallies the ending round number into every seat's bucket, same game-wide value for all four seats", () => {
+    const stats = createEmptyArenaStats();
+    simulateArenaGame(4, "none", ["easy"], stats, deterministicRng(11));
+
+    const bucket = stats.byDifficulty.easy;
+    expect(bucket.gamesPlayed).toBe(4);
+    expect(bucket.roundLengthSum).toBeGreaterThan(0);
+    // All 4 seats are the same difficulty in this game, so its roundLengthSum should
+    // be exactly 4x whatever single round number the game actually ended on.
+    expect(bucket.roundLengthSum % 4).toBe(0);
+  });
 });
 
 describe("summarizeArenaStats", () => {
   it("omits buckets with no games, and computes win rate / avg delta for the rest", () => {
     const stats = createEmptyArenaStats();
-    stats.byDifficulty.easy = { gamesPlayed: 4, wins: 1, placementDeltaSum: -0.5, searchSamplesSum: 0, searchCandidatesSum: 0 };
-    stats.byDifficulty.medium = { gamesPlayed: 4, wins: 3, placementDeltaSum: -2, searchSamplesSum: 0, searchCandidatesSum: 0 };
+    stats.byDifficulty.easy = { gamesPlayed: 4, wins: 1, placementDeltaSum: -0.5, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0, roundLengthSum: 0 };
+    stats.byDifficulty.medium = { gamesPlayed: 4, wins: 3, placementDeltaSum: -2, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0, roundLengthSum: 0 };
     // hard left at 0 games -- should be omitted entirely.
-    stats.byPosition[1] = { gamesPlayed: 2, wins: 2, placementDeltaSum: -2, searchSamplesSum: 0, searchCandidatesSum: 0 };
-    stats.byPosition[11] = { gamesPlayed: 1, wins: 0, placementDeltaSum: 1, searchSamplesSum: 0, searchCandidatesSum: 0 };
+    stats.byPosition[1] = { gamesPlayed: 2, wins: 2, placementDeltaSum: -2, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0, roundLengthSum: 0 };
+    stats.byPosition[11] = { gamesPlayed: 1, wins: 0, placementDeltaSum: 1, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0, roundLengthSum: 0 };
 
     const { byDifficulty, byPosition } = summarizeArenaStats(stats);
 
     expect(byDifficulty).toEqual([
-      { label: "Easy", gamesPlayed: 4, winRate: 0.25, avgPlacementDelta: -0.125, avgSamplesPerCandidate: null },
-      { label: "Medium", gamesPlayed: 4, winRate: 0.75, avgPlacementDelta: -0.5, avgSamplesPerCandidate: null },
+      { label: "Easy", gamesPlayed: 4, winRate: 0.25, avgPlacementDelta: -0.125, avgSamplesPerCandidate: null, avgEligibleFlipRate: null, avgVoteEndRate: null, avgRoundLength: 0 },
+      { label: "Medium", gamesPlayed: 4, winRate: 0.75, avgPlacementDelta: -0.5, avgSamplesPerCandidate: null, avgEligibleFlipRate: null, avgVoteEndRate: null, avgRoundLength: 0 },
     ]);
     expect(byPosition).toEqual([
-      { label: "1st", gamesPlayed: 2, winRate: 1, avgPlacementDelta: -1, avgSamplesPerCandidate: null },
-      { label: "11th", gamesPlayed: 1, winRate: 0, avgPlacementDelta: 1, avgSamplesPerCandidate: null }, // the 11th/12th/13th "th" exception, not "11st"
+      { label: "1st", gamesPlayed: 2, winRate: 1, avgPlacementDelta: -1, avgSamplesPerCandidate: null, avgEligibleFlipRate: null, avgVoteEndRate: null, avgRoundLength: 0 },
+      { label: "11th", gamesPlayed: 1, winRate: 0, avgPlacementDelta: 1, avgSamplesPerCandidate: null, avgEligibleFlipRate: null, avgVoteEndRate: null, avgRoundLength: 0 }, // the 11th/12th/13th "th" exception, not "11st"
     ]);
   });
 
@@ -159,6 +193,24 @@ describe("defaultArenaSeatConfig", () => {
   });
 });
 
+describe("defaultArenaSeatConfigFor", () => {
+  it("gives hardFast its own real defaults (DEFAULT_HARD_FAST_OPTIONS), not Hard's", () => {
+    const config = defaultArenaSeatConfigFor("hardFast");
+    expect(config).toEqual({ strategy: "hardFast", timeBudgetMs: DEFAULT_HARD_FAST_OPTIONS.timeBudgetMs, maxCandidates: DEFAULT_HARD_FAST_OPTIONS.maxCandidates, roundsAhead: DEFAULT_HARD_FAST_OPTIONS.roundsAhead });
+    expect(config.maxCandidates).not.toBe(DEFAULT_TWO_PLY_OPTIONS.maxCandidates);
+  });
+
+  it("gives hardTwoPly Hard's own real defaults (DEFAULT_TWO_PLY_OPTIONS)", () => {
+    const config = defaultArenaSeatConfigFor("hardTwoPly");
+    expect(config).toEqual({ strategy: "hardTwoPly", timeBudgetMs: DEFAULT_TWO_PLY_OPTIONS.timeBudgetMs, maxCandidates: DEFAULT_TWO_PLY_OPTIONS.maxCandidates, roundsAhead: DEFAULT_TWO_PLY_OPTIONS.roundsAhead });
+  });
+
+  it("never carries over numbers from a different strategy -- each call is a fresh default for the given strategy alone", () => {
+    expect(defaultArenaSeatConfigFor("easy").strategy).toBe("easy");
+    expect(defaultArenaSeatConfigFor("medium").strategy).toBe("medium");
+  });
+});
+
 describe("arenaSeatConfigLabel", () => {
   it("is just the strategy name for easy/medium -- no search budget to spell out", () => {
     expect(arenaSeatConfigLabel({ strategy: "easy", timeBudgetMs: 250, maxCandidates: 8, roundsAhead: 1 })).toBe("Easy");
@@ -175,7 +227,7 @@ describe("createEmptyFixedSeatArenaStats", () => {
   it("creates one zeroed bucket per seat -- no config attached (see ArenaSeatBuckets' own doc comment for why)", () => {
     const buckets = createEmptyFixedSeatArenaStats(2);
     expect(buckets).toHaveLength(2);
-    for (const b of buckets) expect(b).toEqual({ gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0 });
+    for (const b of buckets) expect(b).toEqual({ gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0, roundLengthSum: 0 });
   });
 });
 
@@ -195,6 +247,9 @@ describe("simulateFixedSeatArenaGame", () => {
     const loserBucket = buckets[0].wins === 1 ? buckets[1] : buckets[0];
     expect(winnerBucket.placementDeltaSum).toBeCloseTo(-1);
     expect(loserBucket.placementDeltaSum).toBeCloseTo(1);
+    // Both seats played the same game, so they must agree on how long it ran.
+    expect(buckets[0].roundLengthSum).toBe(buckets[1].roundLengthSum);
+    expect(buckets[0].roundLengthSum).toBeGreaterThan(0);
   });
 
   it("accumulates across multiple games without resetting, same seats staying fixed throughout", () => {
@@ -248,6 +303,39 @@ describe("simulateFixedSeatArenaGame", () => {
     expect(buckets[2].searchCandidatesSum).toBe(0);
   });
 
+  it("tracks flip-eligible decisions and flips chosen for every strategy, not just the hard ones -- flip is legal regardless of strategy", () => {
+    const configs: ArenaSeatConfig[] = [
+      { strategy: "hardFast", ...FAST_HARD_SEAT } as ArenaSeatConfig,
+      { strategy: "medium", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
+      { strategy: "easy", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
+    ];
+    const buckets = createEmptyFixedSeatArenaStats(configs.length);
+    // Several games, since flip only unlocks partway through -- one game might not
+    // reach a single flip-eligible decision for every seat.
+    for (let i = 0; i < 5; i++) simulateFixedSeatArenaGame("none", configs, buckets, deterministicRng(20 + i));
+
+    for (const bucket of buckets) {
+      expect(bucket.flipEligibleDecisions).toBeGreaterThan(0);
+      // flipsChosen can never exceed the number of decisions where flipping was even legal.
+      expect(bucket.flipsChosen).toBeLessThanOrEqual(bucket.flipEligibleDecisions);
+    }
+  });
+
+  it("tracks vote outcomes per seat, decided via each seat's own strategy (chooseExpertVote for hardFast, computeAiVote otherwise) -- not the plain computeAiVote applyAction defaults to", () => {
+    const configs: ArenaSeatConfig[] = [
+      { strategy: "hardFast", ...FAST_HARD_SEAT } as ArenaSeatConfig,
+      { strategy: "medium", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
+      { strategy: "easy", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
+    ];
+    const buckets = createEmptyFixedSeatArenaStats(configs.length);
+    for (let i = 0; i < 5; i++) simulateFixedSeatArenaGame("none", configs, buckets, deterministicRng(20 + i));
+
+    for (const bucket of buckets) {
+      expect(bucket.votesCast).toBeGreaterThan(0);
+      expect(bucket.votesYes).toBeLessThanOrEqual(bucket.votesCast);
+    }
+  });
+
   it("uses the CURRENT seatConfigs, not a stale copy from when the buckets array was created -- the exact bug this signature shape is designed to prevent", () => {
     const configs: ArenaSeatConfig[] = [
       { strategy: "easy", timeBudgetMs: 1, maxCandidates: 1, roundsAhead: 1 },
@@ -277,14 +365,14 @@ describe("summarizeFixedSeatArenaStats", () => {
       { strategy: "hardFast", timeBudgetMs: 100, maxCandidates: 6, roundsAhead: 1 },
     ];
     const buckets: ReturnType<typeof createEmptyFixedSeatArenaStats> = [
-      { gamesPlayed: 4, wins: 1, placementDeltaSum: -0.5, searchSamplesSum: 0, searchCandidatesSum: 0 },
-      { gamesPlayed: 4, wins: 3, placementDeltaSum: -2, searchSamplesSum: 820, searchCandidatesSum: 20 },
+      { gamesPlayed: 4, wins: 1, placementDeltaSum: -0.5, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0, roundLengthSum: 0 },
+      { gamesPlayed: 4, wins: 3, placementDeltaSum: -2, searchSamplesSum: 820, searchCandidatesSum: 20, flipEligibleDecisions: 10, flipsChosen: 4, votesCast: 5, votesYes: 2, roundLengthSum: 32 },
     ];
 
     const rows = summarizeFixedSeatArenaStats(configs, buckets);
     expect(rows).toEqual([
-      { label: "Seat 1", gamesPlayed: 4, winRate: 0.25, avgPlacementDelta: -0.125, avgSamplesPerCandidate: null, seatIndex: 0, config: configs[0] },
-      { label: "Seat 2", gamesPlayed: 4, winRate: 0.75, avgPlacementDelta: -0.5, avgSamplesPerCandidate: 41, seatIndex: 1, config: configs[1] },
+      { label: "Seat 1", gamesPlayed: 4, winRate: 0.25, avgPlacementDelta: -0.125, avgSamplesPerCandidate: null, avgEligibleFlipRate: null, avgVoteEndRate: null, avgRoundLength: 0, seatIndex: 0, config: configs[0] },
+      { label: "Seat 2", gamesPlayed: 4, winRate: 0.75, avgPlacementDelta: -0.5, avgSamplesPerCandidate: 41, avgEligibleFlipRate: 0.4, avgVoteEndRate: 0.4, avgRoundLength: 8, seatIndex: 1, config: configs[1] },
     ]);
   });
 

@@ -1,10 +1,11 @@
-import { chooseAiActionForDifficulty } from "@/lib/ai/difficulty";
+import { chooseAiActionForDifficulty, computeVoteForDifficulty } from "@/lib/ai/difficulty";
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
-import { benchmarkTimings, chooseHardFastAction, DEFAULT_HARD_FAST_OPTIONS, HardFastOptions } from "@/lib/ai/hardFast";
+import { benchmarkTimings, chooseExpertVote, chooseHardFastAction, DEFAULT_HARD_FAST_OPTIONS, HardFastOptions } from "@/lib/ai/hardFast";
 import { chooseRandomAiAction } from "@/lib/ai/randomAi";
 import { chooseTwoPlyAction, DEFAULT_TWO_PLY_OPTIONS, twoPlySearchStats, TwoPlyOptions } from "@/lib/ai/twoPly";
-import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
-import { currentPlayerId } from "@/lib/engine/turns";
+import { computeAiVote } from "@/lib/engine/endgame";
+import { applyAction, ComputeVoteFn, configForPlayerCount, createGame } from "@/lib/engine/game";
+import { currentPlayerId, getLegalFlipTargets } from "@/lib/engine/turns";
 import { AiDifficulty, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
 import { computeRanks, placementBaseline, placementMaxDeviation } from "./cardStats";
 
@@ -17,18 +18,45 @@ export interface ArenaBucketStats {
   placementDeltaSum: number;
   /**
    * Sum of every hard/expert-strategy decision's sample count this bucket has seen --
-   * 0 for easy/medium (no search loop to sample). Currently only populated by the
-   * fixed-per-seat mode (see simulateFixedSeatArenaGame/dispatchArenaSeatAction) --
-   * the shuffled mode's byDifficulty/byPosition buckets don't track this yet, so it
-   * stays 0 there and summarizeBucket's avgSamplesPerCandidate correctly shows null.
+   * 0 for easy/medium (no search loop to sample). Populated by both modes
+   * (simulateArenaGame and simulateFixedSeatArenaGame/dispatchArenaSeatAction).
    */
   searchSamplesSum: number;
   /** Sum of the corresponding decisions' actual candidate counts (not just maxCandidates -- a late-game decision can have fewer legal candidates than configured) -- the denominator for avgSamplesPerCandidate. */
   searchCandidatesSum: number;
+  /**
+   * How many of this bucket's turn decisions had at least one legal flip target --
+   * i.e. flipping was actually possible, not blocked by flip-lock or "nothing
+   * face-down left". The denominator for avgEligibleFlipRate -- deliberately not
+   * "flips / all decisions", since most decisions (before flip unlocks, or once
+   * nothing's left to flip) can never produce a flip regardless of how eager or
+   * reluctant a seat is.
+   */
+  flipEligibleDecisions: number;
+  /** How many of those flip-eligible decisions actually resulted in a flip. */
+  flipsChosen: number;
+  /** How many round-boundary votes this bucket's seat(s) cast, decided via each seat's own real difficulty/strategy logic (computeVoteForDifficulty for shuffle mode, an equivalent strategy dispatch for fixed-per-seat mode) -- not the plain computeAiVote applyAction defaults to when no override is given. The denominator for avgVoteEndRate. */
+  votesCast: number;
+  /** How many of those votes were "yes, end the game now". */
+  votesYes: number;
+  /** Sum of the ending round number (GameState.round at "ended") of every game this bucket's seat(s) played -- same per-game weighting cardStats.ts's own overall.roundLengthSum uses. A game-wide number, not a per-seat one: every seat in the same game contributes the same value, since round length isn't a property of any one seat's play. */
+  roundLengthSum: number;
 }
 
-function emptyArenaBucket(): ArenaBucketStats {
-  return { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0 };
+export function emptyArenaBucket(): ArenaBucketStats {
+  return { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0, roundLengthSum: 0 };
+}
+
+/**
+ * Fills in any field missing from a possibly-stale persisted bucket (e.g. one saved
+ * before votesCast/votesYes -- or any future field -- existed) with emptyArenaBucket's
+ * zero, instead of leaving it `undefined` -- see arenaStore.ts's loadArenaState, whose
+ * shallow merge takes a persisted `stats`/`seatBuckets` blob wholesale and would
+ * otherwise silently carry `undefined` fields through into `undefined / undefined`
+ * (NaN) arithmetic in summarizeBucket, rather than the intended "no data yet" null.
+ */
+export function normalizeArenaBucket(bucket: Partial<ArenaBucketStats> | null | undefined): ArenaBucketStats {
+  return { ...emptyArenaBucket(), ...bucket };
 }
 
 /**
@@ -58,6 +86,12 @@ export interface ArenaBucketRow {
   avgPlacementDelta: number | null;
   /** Average samples evaluated per candidate across every hard/expert decision this bucket saw -- null for easy/medium or an untallied bucket (see ArenaBucketStats.searchCandidatesSum). */
   avgSamplesPerCandidate: number | null;
+  /** Fraction of flip-eligible decisions (see ArenaBucketStats.flipEligibleDecisions) that actually resulted in a flip -- null if this bucket never saw a decision where flipping was even legal. Deliberately not "flips / all decisions": most decisions can't flip at all regardless of strategy, so that version would mostly just measure how much of the game happened before/after flip was ever possible, not how flip-happy a seat actually is. */
+  avgEligibleFlipRate: number | null;
+  /** Fraction of this bucket's round-boundary votes that were "yes" -- null if this bucket never cast one (e.g. a game that always ended some other way before a vote was ever needed). */
+  avgVoteEndRate: number | null;
+  /** Average ending round number of every game this bucket's seat(s) played -- null for an untallied bucket. */
+  avgRoundLength: number | null;
 }
 
 function summarizeBucket(label: string, bucket: ArenaBucketStats): ArenaBucketRow {
@@ -67,6 +101,9 @@ function summarizeBucket(label: string, bucket: ArenaBucketStats): ArenaBucketRo
     winRate: bucket.gamesPlayed === 0 ? null : bucket.wins / bucket.gamesPlayed,
     avgPlacementDelta: bucket.gamesPlayed === 0 ? null : bucket.placementDeltaSum / bucket.gamesPlayed,
     avgSamplesPerCandidate: bucket.searchCandidatesSum === 0 ? null : bucket.searchSamplesSum / bucket.searchCandidatesSum,
+    avgEligibleFlipRate: bucket.flipEligibleDecisions === 0 ? null : bucket.flipsChosen / bucket.flipEligibleDecisions,
+    avgRoundLength: bucket.gamesPlayed === 0 ? null : bucket.roundLengthSum / bucket.gamesPlayed,
+    avgVoteEndRate: bucket.votesCast === 0 ? null : bucket.votesYes / bucket.votesCast,
   };
 }
 
@@ -144,32 +181,67 @@ export function simulateArenaGame(
   const firstPlayerIndex = Math.floor(rng() * playerIds.length);
   let state = createGame(playerIds, config, rng, playerIds, firstPlayerIndex);
 
+  // Both bucket lookups below (difficulty + position) need a seat's index and its
+  // assigned difficulty repeatedly -- turn decisions, votes, and the final tally all
+  // resolve the same pair of buckets for the same playerId, so this is shared instead
+  // of re-deriving position's arithmetic three separate times.
+  const bucketsFor = (playerId: string): ArenaBucketStats[] => {
+    const seatIndex = playerIds.indexOf(playerId);
+    const position = ((seatIndex - firstPlayerIndex + playerCount) % playerCount) + 1;
+    if (!stats.byPosition[position]) stats.byPosition[position] = emptyArenaBucket();
+    return [stats.byDifficulty[difficultyByPlayerId.get(playerId)!], stats.byPosition[position]];
+  };
+
+  const computeVote: ComputeVoteFn = (voteState, playerId, voteRng) => {
+    const difficulty = difficultyByPlayerId.get(playerId)!;
+    const vote = hardOptions
+      ? computeVoteForDifficulty(voteState, playerId, difficulty, voteRng, hardOptions)
+      : computeVoteForDifficulty(voteState, playerId, difficulty, voteRng);
+    for (const bucket of bucketsFor(playerId)) {
+      bucket.votesCast++;
+      if (vote) bucket.votesYes++;
+    }
+    return vote;
+  };
+
   while (state.phase === "playing") {
     const activeId = currentPlayerId(state);
+    const difficulty = difficultyByPlayerId.get(activeId)!;
+    const flipEligible = getLegalFlipTargets(state).length > 0;
+    const twoPlySamplesBefore = twoPlySearchStats.samples;
+    const twoPlyCandidatesBefore = twoPlySearchStats.candidatesEvaluated;
+    const hardFastSamplesBefore = benchmarkTimings.samples;
+    const hardFastCandidatesBefore = benchmarkTimings.candidatesEvaluated;
     const action = hardOptions
-      ? chooseAiActionForDifficulty(state, activeId, difficultyByPlayerId.get(activeId)!, rng, hardOptions)
-      : chooseAiActionForDifficulty(state, activeId, difficultyByPlayerId.get(activeId)!, rng);
-    state = applyAction(state, action, rng);
+      ? chooseAiActionForDifficulty(state, activeId, difficulty, rng, hardOptions)
+      : chooseAiActionForDifficulty(state, activeId, difficulty, rng);
+    const samplesDelta = (twoPlySearchStats.samples - twoPlySamplesBefore) + (benchmarkTimings.samples - hardFastSamplesBefore);
+    const candidatesDelta = (twoPlySearchStats.candidatesEvaluated - twoPlyCandidatesBefore) + (benchmarkTimings.candidatesEvaluated - hardFastCandidatesBefore);
+    for (const bucket of bucketsFor(activeId)) {
+      bucket.searchSamplesSum += samplesDelta;
+      bucket.searchCandidatesSum += candidatesDelta;
+      if (flipEligible) {
+        bucket.flipEligibleDecisions++;
+        if (action.type === "flip") bucket.flipsChosen++;
+      }
+    }
+    state = applyAction(state, action, rng, computeVote);
   }
 
   const ranks = computeRanks(state.result!.scores);
   const baseline = placementBaseline(playerCount);
   const maxDeviation = placementMaxDeviation(playerCount);
 
-  playerIds.forEach((id, seatIndex) => {
+  playerIds.forEach((id) => {
     const rank = ranks.get(id)!;
     const delta = (rank - baseline) / maxDeviation;
     const won = rank === 1;
-    const position = ((seatIndex - firstPlayerIndex + playerCount) % playerCount) + 1;
 
-    const difficultyBucket = stats.byDifficulty[difficultyByPlayerId.get(id)!];
-    if (!stats.byPosition[position]) stats.byPosition[position] = emptyArenaBucket();
-    const positionBucket = stats.byPosition[position];
-
-    for (const bucket of [difficultyBucket, positionBucket]) {
+    for (const bucket of bucketsFor(id)) {
       bucket.gamesPlayed++;
       bucket.placementDeltaSum += delta;
       if (won) bucket.wins++;
+      bucket.roundLengthSum += state.round;
     }
   });
 }
@@ -206,7 +278,22 @@ export interface ArenaSeatConfig {
 
 /** A fresh seat, defaulted to Medium -- the same "no search budget to think about yet" starting point every difficulty picker in the app defaults new/unconfigured slots to. */
 export function defaultArenaSeatConfig(): ArenaSeatConfig {
-  return { strategy: "medium", timeBudgetMs: DEFAULT_TWO_PLY_OPTIONS.timeBudgetMs, maxCandidates: DEFAULT_TWO_PLY_OPTIONS.maxCandidates, roundsAhead: DEFAULT_TWO_PLY_OPTIONS.roundsAhead };
+  return defaultArenaSeatConfigFor("medium");
+}
+
+/**
+ * Same idea as defaultArenaSeatConfig, but the search-budget numbers actually match
+ * whichever strategy is given -- used when a seat's strategy changes (see the arena
+ * page's SeatConfigRow), so switching to "Hard (Fast fork)" resets to ITS OWN real
+ * defaults (DEFAULT_HARD_FAST_OPTIONS: 70 candidates, 200ms) instead of silently
+ * carrying over Hard's (DEFAULT_TWO_PLY_OPTIONS: 8 candidates, 250ms) or whatever
+ * numbers happened to be left over from the previously-selected strategy. Easy/Medium
+ * have no search budget to speak of, so they just get twoPly's numbers as an inert
+ * placeholder -- never shown or read for those two.
+ */
+export function defaultArenaSeatConfigFor(strategy: ArenaSeatStrategy): ArenaSeatConfig {
+  const defaults = strategy === "hardFast" ? DEFAULT_HARD_FAST_OPTIONS : DEFAULT_TWO_PLY_OPTIONS;
+  return { strategy, timeBudgetMs: defaults.timeBudgetMs, maxCandidates: defaults.maxCandidates, roundsAhead: defaults.roundsAhead };
 }
 
 /** Short, human-readable summary of a seat's config -- easy/medium need nothing beyond their name; either hard strategy spells out exactly what it's running with, since that's the whole point of this mode (comparing configurations, not just labels). */
@@ -216,40 +303,54 @@ export function arenaSeatConfigLabel(config: ArenaSeatConfig): string {
   return `${name} (${config.timeBudgetMs}ms, ${config.maxCandidates} cand, ${config.roundsAhead} rd)`;
 }
 
-/** A dispatched action, plus how many samples/candidates that one decision contributed to the AI's search loop -- 0/0 for easy/medium (no search loop) and for flip/vote/pass decisions (rankedPlacementCandidates/evaluateCandidateOnce never run). Deltas, not running totals -- read before/after the underlying strategy call from twoPly.ts's/hardFast.ts's own global counters, which is safe here since JS is single-threaded and every call is synchronous/sequential regardless of how seats/games interleave. */
+/** A dispatched action, plus how many samples/candidates that one decision contributed to the AI's search loop -- 0/0 for easy/medium (no search loop) and for flip/vote/pass decisions (rankedPlacementCandidates/evaluateCandidateOnce never run) -- and whether flipping was even legal for this decision, regardless of strategy. Deltas, not running totals -- read before/after the underlying strategy call from twoPly.ts's/hardFast.ts's own global counters, which is safe here since JS is single-threaded and every call is synchronous/sequential regardless of how seats/games interleave. */
 interface DispatchedSeatAction {
   action: GameAction;
   samplesDelta: number;
   candidatesDelta: number;
+  flipEligible: boolean;
 }
 
-function dispatchArenaSeatAction(state: GameState, playerId: string, config: ArenaSeatConfig, rng: () => number): DispatchedSeatAction {
+/** The seat config form doesn't expose flip/vote-search knobs (flipMaxCandidates/flipTimeBudgetMs/voteTimeBudgetMs/...) yet -- those stay at DEFAULT_HARD_FAST_OPTIONS' own starting point regardless of what this seat's placement search is set to, until that's deliberately added as its own tunable. Shared by dispatchArenaSeatAction and computeVoteForSeat so both agree on the same options for a given seat. */
+function hardFastOptionsForSeat(config: ArenaSeatConfig): HardFastOptions {
   const twoPlyOptions: TwoPlyOptions = {
     timeBudgetMs: config.timeBudgetMs,
     maxCandidates: config.maxCandidates,
     roundsAhead: config.roundsAhead,
   };
-  // The seat config form doesn't expose flip-search knobs (flipMaxCandidates/
-  // flipTimeBudgetMs) yet -- those stay at DEFAULT_HARD_FAST_OPTIONS' own starting
-  // point regardless of what this seat's placement search is set to, until that's
-  // deliberately added as its own tunable.
-  const hardFastOptions: HardFastOptions = { ...DEFAULT_HARD_FAST_OPTIONS, ...twoPlyOptions };
+  return { ...DEFAULT_HARD_FAST_OPTIONS, ...twoPlyOptions };
+}
+
+/** Fixed-per-seat mode's equivalent of computeVoteForDifficulty -- only "hardFast" has a real, distinct vote decision (chooseExpertVote); every other strategy falls back to the plain computeAiVote, same as difficulty.ts's own dispatch does for easy/medium/hard. */
+function computeVoteForSeat(state: GameState, playerId: string, config: ArenaSeatConfig, rng: () => number): boolean {
+  if (config.strategy === "hardFast") return chooseExpertVote(state, playerId, hardFastOptionsForSeat(config), rng);
+  return computeAiVote(state, playerId, rng);
+}
+
+function dispatchArenaSeatAction(state: GameState, playerId: string, config: ArenaSeatConfig, rng: () => number): DispatchedSeatAction {
+  const flipEligible = getLegalFlipTargets(state).length > 0;
+  const twoPlyOptions: TwoPlyOptions = {
+    timeBudgetMs: config.timeBudgetMs,
+    maxCandidates: config.maxCandidates,
+    roundsAhead: config.roundsAhead,
+  };
+  const hardFastOptions = hardFastOptionsForSeat(config);
   switch (config.strategy) {
     case "easy":
-      return { action: chooseRandomAiAction(state, playerId, rng), samplesDelta: 0, candidatesDelta: 0 };
+      return { action: chooseRandomAiAction(state, playerId, rng), samplesDelta: 0, candidatesDelta: 0, flipEligible };
     case "medium":
-      return { action: chooseGreedyAiAction(state, playerId, rng), samplesDelta: 0, candidatesDelta: 0 };
+      return { action: chooseGreedyAiAction(state, playerId, rng), samplesDelta: 0, candidatesDelta: 0, flipEligible };
     case "hardTwoPly": {
       const samplesBefore = twoPlySearchStats.samples;
       const candidatesBefore = twoPlySearchStats.candidatesEvaluated;
       const action = chooseTwoPlyAction(state, playerId, twoPlyOptions, rng);
-      return { action, samplesDelta: twoPlySearchStats.samples - samplesBefore, candidatesDelta: twoPlySearchStats.candidatesEvaluated - candidatesBefore };
+      return { action, samplesDelta: twoPlySearchStats.samples - samplesBefore, candidatesDelta: twoPlySearchStats.candidatesEvaluated - candidatesBefore, flipEligible };
     }
     case "hardFast": {
       const samplesBefore = benchmarkTimings.samples;
       const candidatesBefore = benchmarkTimings.candidatesEvaluated;
       const action = chooseHardFastAction(state, playerId, hardFastOptions, rng);
-      return { action, samplesDelta: benchmarkTimings.samples - samplesBefore, candidatesDelta: benchmarkTimings.candidatesEvaluated - candidatesBefore };
+      return { action, samplesDelta: benchmarkTimings.samples - samplesBefore, candidatesDelta: benchmarkTimings.candidatesEvaluated - candidatesBefore, flipEligible };
     }
   }
 }
@@ -301,13 +402,25 @@ export function simulateFixedSeatArenaGame(centerEffect: CenterEffectId, seatCon
   const firstPlayerIndex = Math.floor(rng() * playerIds.length);
   let state = createGame(playerIds, config, rng, playerIds, firstPlayerIndex);
 
+  const computeVote: ComputeVoteFn = (voteState, playerId, voteRng) => {
+    const seatIndex = playerIds.indexOf(playerId);
+    const vote = computeVoteForSeat(voteState, playerId, seatConfigs[seatIndex], voteRng);
+    buckets[seatIndex].votesCast++;
+    if (vote) buckets[seatIndex].votesYes++;
+    return vote;
+  };
+
   while (state.phase === "playing") {
     const activeId = currentPlayerId(state);
     const seatIndex = playerIds.indexOf(activeId);
-    const { action, samplesDelta, candidatesDelta } = dispatchArenaSeatAction(state, activeId, seatConfigs[seatIndex], rng);
+    const { action, samplesDelta, candidatesDelta, flipEligible } = dispatchArenaSeatAction(state, activeId, seatConfigs[seatIndex], rng);
     buckets[seatIndex].searchSamplesSum += samplesDelta;
     buckets[seatIndex].searchCandidatesSum += candidatesDelta;
-    state = applyAction(state, action, rng);
+    if (flipEligible) {
+      buckets[seatIndex].flipEligibleDecisions++;
+      if (action.type === "flip") buckets[seatIndex].flipsChosen++;
+    }
+    state = applyAction(state, action, rng, computeVote);
   }
 
   const ranks = computeRanks(state.result!.scores);
@@ -322,5 +435,6 @@ export function simulateFixedSeatArenaGame(centerEffect: CenterEffectId, seatCon
     bucket.gamesPlayed++;
     bucket.placementDeltaSum += delta;
     if (won) bucket.wins++;
+    bucket.roundLengthSum += state.round;
   });
 }

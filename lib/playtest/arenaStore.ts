@@ -1,11 +1,13 @@
 import { AiDifficulty, CenterEffectId } from "@/lib/engine/types";
 import {
+  ArenaBucketStats,
   ArenaSeatBuckets,
   ArenaSeatConfig,
   ArenaStats,
   createEmptyArenaStats,
   createEmptyFixedSeatArenaStats,
   defaultArenaSeatConfig,
+  normalizeArenaBucket,
 } from "./aiArena";
 
 /**
@@ -49,10 +51,14 @@ function defaultArenaState(): PersistedArenaState {
 }
 
 /**
- * Shallow-merges a parsed blob onto a fresh default -- no per-field migration math
- * like the main playtest store needs (nothing here is a derived/summed value that a
- * missing field would silently corrupt), so a field absent from an older saved shape
- * just falls back to its safe default instead of coming back `undefined`.
+ * Shallow-merges a parsed blob onto a fresh default for the top-level fields (mode,
+ * playerCount, ...) -- a field absent there just falls back to its safe default
+ * instead of coming back `undefined`. `stats`/`seatBuckets` need their own pass
+ * though: the shallow merge takes whichever nested bucket blob was persisted
+ * wholesale, so a bucket saved before a field (e.g. votesCast/votesYes) existed keeps
+ * that field `undefined` rather than 0 -- see normalizeArenaBucket, which fills any
+ * such gap back in so summarizeBucket's division never lands on `undefined /
+ * undefined` (NaN) where it means "no data yet" (null).
  */
 export function loadArenaState(): PersistedArenaState {
   const fallback = defaultArenaState();
@@ -62,10 +68,28 @@ export function loadArenaState(): PersistedArenaState {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return fallback;
-    return { ...fallback, ...parsed };
+    const merged: PersistedArenaState = { ...fallback, ...parsed };
+    return { ...merged, stats: normalizeStats(merged.stats), seatBuckets: normalizeSeatBuckets(merged.seatBuckets) };
   } catch {
     return fallback;
   }
+}
+
+function normalizeStats(stats: ArenaStats): ArenaStats {
+  const byDifficulty = { ...stats.byDifficulty };
+  for (const difficulty of Object.keys(byDifficulty) as AiDifficulty[]) {
+    byDifficulty[difficulty] = normalizeArenaBucket(byDifficulty[difficulty]);
+  }
+  const byPosition: Record<number, ArenaBucketStats> = {};
+  for (const [position, bucket] of Object.entries(stats.byPosition ?? {})) {
+    byPosition[Number(position)] = normalizeArenaBucket(bucket);
+  }
+  return { byDifficulty, byPosition };
+}
+
+function normalizeSeatBuckets(seatBuckets: ArenaSeatBuckets): ArenaSeatBuckets {
+  if (!Array.isArray(seatBuckets)) return [];
+  return seatBuckets.map(normalizeArenaBucket);
 }
 
 export function saveArenaState(state: PersistedArenaState): void {
