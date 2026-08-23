@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { AI_NAMES, playerAccentClass } from "@/lib/config/players";
-import { chooseAiActionForDifficulty } from "@/lib/ai/difficulty";
+import { chooseAiActionForDifficulty, computeVoteForDifficulty } from "@/lib/ai/difficulty";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { ResolutionResult, resolveBoard, ResolvedCard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
@@ -82,7 +82,7 @@ export function PlaySelf({
     setState((prev) => {
       if (!prev) return prev;
       try {
-        return applyAction(prev, action);
+        return applyAction(prev, action, Math.random, (state, playerId, rng) => computeVoteForDifficulty(state, playerId, prev.config.aiDifficulty, rng));
       } catch (err) {
         console.error("Illegal action rejected by engine:", err);
         return prev;

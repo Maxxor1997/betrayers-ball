@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chooseAiActionForDifficulty } from "@/lib/ai/difficulty";
+import { chooseAiActionForDifficulty, computeVoteForDifficulty } from "@/lib/ai/difficulty";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { Rng } from "@/lib/engine/deck";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
@@ -51,6 +51,13 @@ export class GameSession {
   private state: GameState | null = null;
   private aiTimer: ReturnType<typeof setTimeout> | null = null;
   private nextSeatIndex = 0;
+  /**
+   * Passed into every real applyAction call below -- without this, a round-boundary
+   * vote auto-fill would silently use plain computeAiVote regardless of aiDifficulty
+   * (see game.ts's ComputeVoteFn doc comment). An arrow-function field (not a method)
+   * so `this` stays bound when passed by reference as applyAction's 4th argument.
+   */
+  private computeVote = (state: GameState, playerId: string, rng: Rng): boolean => computeVoteForDifficulty(state, playerId, this.aiDifficulty, rng);
   /**
    * Cumulative per-seat record across every game this room has played -- see
    * RoomStatsEntry. Lives here (not on GameState) specifically so rematch()'s fresh
@@ -334,7 +341,7 @@ export class GameSession {
 
     let next: GameState;
     try {
-      next = applyAction(this.state, action, this.rng);
+      next = applyAction(this.state, action, this.rng, this.computeVote);
     } catch (err) {
       return { error: err instanceof Error ? err.message : "Illegal action." };
     }
@@ -382,7 +389,7 @@ export class GameSession {
       const activeId = currentPlayerId(this.state);
       if (this.seats.get(activeId)?.isAI !== true) return;
       const action = chooseAiActionForDifficulty(this.state, activeId, this.state.config.aiDifficulty, this.rng);
-      this.setState(applyAction(this.state, action, this.rng));
+      this.setState(applyAction(this.state, action, this.rng, this.computeVote));
       this.scheduleAiTurnIfNeeded();
     }, AI_TURN_DELAY_MS);
   }

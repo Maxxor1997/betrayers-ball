@@ -311,11 +311,10 @@ function SeatConfigRow({
             <input
               type="number"
               min={1}
-              max={40}
               value={config.maxCandidates}
               disabled={disabled}
               onChange={(e) => onChange({ ...config, maxCandidates: e.target.value === "" ? 0 : Number(e.target.value) })}
-              onBlur={() => onChange({ ...config, maxCandidates: Math.max(1, Math.min(40, config.maxCandidates || 1)) })}
+              onBlur={() => onChange({ ...config, maxCandidates: Math.max(1, config.maxCandidates || 1) })}
               className="w-14 min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
             />
           </label>

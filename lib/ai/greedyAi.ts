@@ -445,6 +445,33 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
   return null;
 }
 
+/**
+ * One flip target's heuristic worth, as a single comparable number -- the same
+ * underlying scoring chooseFlip itself uses (see its own doc comment for what each
+ * piece means), just factored out so a real search (see hardFast.ts's
+ * rankedFlipCandidates) can shortlist candidates worth a real simulated sample instead
+ * of only ever seeing chooseFlip's own threshold+probability-gated final answer.
+ *
+ * Own-target scores are genuine margin deltas (comparable to 0 = "flipping this is
+ * worse than not flipping at all" -- the same baseline chooseFlip compares against).
+ * Opponent-target scores are a priority heuristic (closeness to the flipper's own
+ * cards, plus a few card-specific adjustments) -- NOT a margin estimate, so it is not
+ * directly comparable in scale to an own-target score. A caller ranking across both
+ * pools needs to account for that (see rankedFlipCandidates's own doc comment for how
+ * it handles this by never merging them into one sort).
+ */
+export function flipCandidateScore(state: GameState, playerId: string, target: CardInstance): number {
+  if (target.ownerId === playerId) {
+    return hypotheticalFlipMargin(state, playerId, target) + berserkerFlipBaitBonus(state, playerId, target) + warlordFlipDeterrenceBonus(state, playerId, target);
+  }
+  return (
+    opponentTargetPriority(state.board, playerId, target) +
+    truthseekerBeaconFlipAdjustment(state.board, state.config.boardBounds, playerId, target) +
+    infiltratorDefenseAdjustment(state.board, state.config.boardBounds, playerId, target) +
+    doomheraldRiskAdjustment(state.board, state.config.boardBounds, playerId, target)
+  );
+}
+
 /** Empty (unoccupied, non-ownerless) cells orthogonally adjacent to `pos` -- candidate spots a future placement could still fill in before scoring. */
 function countEmptyAdjacentCells(board: Board, bounds: BoardBounds, pos: Position): number {
   return adjacentPositions(pos, bounds).filter((p) => !isOwnerlessPosition(p, bounds) && !board.has(posKey(p))).length;

@@ -276,6 +276,28 @@ describe("applyAction — voting", () => {
     expect(state.phase).toBe("ended");
     expect(state.voteHistory).toEqual([{ round: 1, votes: { bot1: true, bot2: true } }]);
   });
+
+  it("uses an injected computeVote override for a round-boundary AI vote auto-fill, instead of the default computeAiVote", () => {
+    const alwaysYes = () => true;
+    let state = createGame(["human", "bot"], config, deterministicRng(6), ["bot"]);
+    const cell1 = getLegalPlacementCells(state)[0];
+    state = applyAction(state, { type: "place", playerId: "human", instanceId: state.players[0].hand[0].instanceId, position: cell1 });
+    const cell2 = getLegalPlacementCells(state)[0];
+    // rng of 0.99 would make the DEFAULT computeAiVote vote no (see "continues if the
+    // AI itself voted no" above) -- with the override injected, the bot's vote should
+    // come from `alwaysYes` instead, proving the injected function actually won.
+    state = applyAction(state, { type: "place", playerId: "bot", instanceId: state.players[1].hand[0].instanceId, position: cell2 }, () => 0.99, alwaysYes);
+    expect(state.votes.bot).toBe(true);
+  });
+
+  it("omitting computeVote entirely still defaults to computeAiVote, unchanged from before the override existed", () => {
+    let state = createGame(["human", "bot"], config, deterministicRng(6), ["bot"]);
+    const cell1 = getLegalPlacementCells(state)[0];
+    state = applyAction(state, { type: "place", playerId: "human", instanceId: state.players[0].hand[0].instanceId, position: cell1 });
+    const cell2 = getLegalPlacementCells(state)[0];
+    state = applyAction(state, { type: "place", playerId: "bot", instanceId: state.players[1].hand[0].instanceId, position: cell2 }, () => 0.99);
+    expect(state.votes.bot).toBe(false);
+  });
 });
 
 describe("applyAction — centerEffect threads through to a real end-of-game result", () => {

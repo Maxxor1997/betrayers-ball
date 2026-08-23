@@ -5,6 +5,19 @@ import { computeAiVote, computeGameResult, shouldEndGame } from "./endgame";
 import { applyFlip, applyPass, applyPlace, currentPlayerId, mustPass } from "./turns";
 import { AiDifficulty, CastVoteAction, CenterEffectId, GameAction, GameConfig, GameState } from "./types";
 
+/**
+ * How advanceTurn decides an AI seat's vote when a round boundary auto-fills it (see
+ * its own doc comment) -- defaults to the plain computeAiVote, so every existing
+ * caller of applyAction/advanceTurn (every real single-player/multiplayer game, every
+ * test) is completely unaffected unless it explicitly passes something else. This is
+ * the seam that lets a specific AI difficulty (see lib/ai/difficulty.ts's
+ * computeVoteForDifficulty and lib/ai/hardFast.ts's chooseExpertVote) vote differently
+ * from computeAiVote's static heuristic, without this engine module needing to know
+ * anything about specific AI strategies -- it only ever sees this generic function
+ * shape, injected by whichever caller already knows the game's configured difficulty.
+ */
+export type ComputeVoteFn = (state: GameState, playerId: string, rng: Rng) => boolean;
+
 export function configForPlayerCount(playerCount: number, centerEffect: CenterEffectId = "none", aiDifficulty: AiDifficulty = "medium"): GameConfig {
   const baseBounds = BOARD_BOUNDS_BY_PLAYER_COUNT[playerCount];
   if (!baseBounds) throw new Error(`No board sizing configured for ${playerCount} players (supported: 2-6)`);
@@ -119,7 +132,7 @@ export function roundRotationShiftFor(playerCount: number): number {
   return playerCount === 8 ? 3 : 1;
 }
 
-function advanceTurn(state: GameState, rng: Rng): GameState {
+function advanceTurn(state: GameState, rng: Rng, computeVote: ComputeVoteFn = computeAiVote): GameState {
   const turnsThisRound = state.turnsThisRound + 1;
   const isRoundBoundary = turnsThisRound >= state.players.length;
   const roundRotationShift = isRoundBoundary ? roundRotationShiftFor(state.players.length) : 0;
@@ -142,7 +155,7 @@ function advanceTurn(state: GameState, rng: Rng): GameState {
     // pending in `votes` until cast via a castVote action.
     const votes: Record<string, boolean> = {};
     for (const player of state.players) {
-      if (player.isAI) votes[player.id] = computeAiVote(state, player.id, rng);
+      if (player.isAI) votes[player.id] = computeVote(state, player.id, rng);
     }
     const withVotes = { ...state, phase: "voting" as const, votes, currentPlayerIndex: nextIndex, hasFlippedThisTurn: false, turnsThisRound: 0 };
     // Every player might already be AI (e.g. a Jackbox-style display room where no
@@ -206,8 +219,13 @@ function applyCastVote(state: GameState, action: CastVoteAction, rng: Rng): Game
   return tallyVotes({ ...state, votes }, rng);
 }
 
-/** Pure reducer: applyAction(state, action) -> state. Throws on illegal actions. */
-export function applyAction(state: GameState, action: GameAction, rng: Rng = Math.random): GameState {
+/**
+ * Pure reducer: applyAction(state, action) -> state. Throws on illegal actions.
+ * `computeVote` is an optional override for how a round-boundary auto-fills AI seats'
+ * votes -- see ComputeVoteFn's own doc comment; every call site that omits it (which
+ * is most of them) gets the plain computeAiVote, unchanged from before this existed.
+ */
+export function applyAction(state: GameState, action: GameAction, rng: Rng = Math.random, computeVote: ComputeVoteFn = computeAiVote): GameState {
   if (state.phase === "ended") throw new Error("Game has already ended");
 
   // Voting isn't tied to turn order -- any player who hasn't voted yet may cast one,
@@ -221,9 +239,9 @@ export function applyAction(state: GameState, action: GameAction, rng: Rng = Mat
     case "flip":
       return applyFlip(state, action);
     case "place":
-      return advanceTurn(applyPlace(state, action), rng);
+      return advanceTurn(applyPlace(state, action), rng, computeVote);
     case "pass":
-      return advanceTurn(applyPass(state, action.playerId), rng);
+      return advanceTurn(applyPass(state, action.playerId), rng, computeVote);
     default:
       throw new Error(`Unknown action type: ${(action as GameAction).type}`);
   }

@@ -1,11 +1,11 @@
 import { countAdjacentOccupied } from "../engine/board";
 import { copiesForPlayerCount, CARD_DEFS } from "../content/cards";
 import { shuffle } from "../engine/deck";
-import { computeGameResult, estimateMargin } from "../engine/endgame";
+import { computeAiVote, computeGameResult, estimateMargin } from "../engine/endgame";
 import { applyAction } from "../engine/game";
 import { applyPlace, currentPlayerId, getLegalFlipTargets, getLegalPlacementCells } from "../engine/turns";
-import { CardId, GameAction, GameState, Position } from "../engine/types";
-import { chooseGreedyAiAction, placementHeuristicAdjustment } from "./greedyAi";
+import { CardId, CardInstance, GameAction, GameState, Position } from "../engine/types";
+import { chooseGreedyAiAction, flipCandidateScore, placementHeuristicAdjustment } from "./greedyAi";
 
 /**
  * Exact fork of twoPly.ts (Hard difficulty's current, AI-Arena-validated
@@ -180,26 +180,69 @@ export interface HardFastOptions {
    * depth per sample) -- this is "how many times has every candidate been sampled".
    */
   maxPasses?: number;
+  /**
+   * Same idea as maxCandidates, but for the separate flip-candidate search (see
+   * rankedFlipCandidates) -- deliberately smaller than maxCandidates. Flip is a
+   * secondary lever compared to placement (see chooseHardFastAction's own doc
+   * comment), and a flip sample is inherently a bit MORE expensive than a placement
+   * sample at the same roundsAhead: a flip doesn't consume the turn, so the forward
+   * loop's very first step is a real chooseGreedyAiAction call for the follow-up
+   * placement, unlike a placement candidate's own turn (already used up before the
+   * loop starts at roundsAhead=1, see evaluateCandidateOnce's doc comment) -- so
+   * fewer flip candidates is doubly justified, not just "flip matters less".
+   */
+  flipMaxCandidates: number;
+  /** Same idea as timeBudgetMs, but for the flip-candidate search -- deliberately smaller, same reasoning as flipMaxCandidates. */
+  flipTimeBudgetMs: number;
+  /** Same idea as maxPasses, but for the flip-candidate search. */
+  flipMaxPasses?: number;
+  /**
+   * How many game rounds forward chooseExpertVote simulates to decide whether
+   * continuing looks better than ending now -- independent of roundsAhead (that one's
+   * about a placement/flip decision's own lookahead), since "will the position keep
+   * improving" is naturally a longer-horizon question than "what should I do this
+   * turn".
+   */
+  voteRoundsAhead: number;
+  /** Wall-clock budget for chooseExpertVote's repeated "if we continue" sampling -- there's only one scenario being sampled here (not multiple candidates to compare), so this budget converts directly into how many independent hidden-info guesses get averaged, tightening the estimate rather than differentiating options. */
+  voteTimeBudgetMs: number;
+  /** Same idea as maxPasses/flipMaxPasses, for chooseExpertVote's sampling loop. */
+  voteMaxPasses?: number;
 }
 
 /**
- * AI-Arena-validated via the fixed-per-seat mode: at this exact budget, two Fast-fork
- * seats beat two real-Hard seats (twoPly's own DEFAULT_TWO_PLY_OPTIONS, 250ms/8cand/
- * 1rd) head-to-head in the same 4-player games -- 35%/34% win rate vs 23%/30% (n=500
- * each seat, two separate batches showing the same gap). Widening maxCandidates from
- * 8 to 16 (same 250ms budget) was the deciding factor -- see rankedPlacementCandidates
- * and evaluateCandidateOnce's own doc comments for why the cheaper rollout here
- * affords roughly an order of magnitude more samples per decision than twoPly at the
- * same wall-clock budget, and why spending that on breadth (more candidates) rather
- * than depth (roundsAhead) is currently the better trade -- doubling roundsAhead cost
- * noticeably more than 2x per sample (measured ~3.24x), so widening candidates buys
- * more signal per unit of budget than deepening rounds does. This is the config
- * wired into chooseAiActionForDifficulty's "expert" difficulty (see difficulty.ts).
+ * AI-Arena-validated via the fixed-per-seat mode: at 250ms, two Fast-fork seats beat
+ * two real-Hard seats (twoPly's own DEFAULT_TWO_PLY_OPTIONS, 250ms/8cand/1rd)
+ * head-to-head in the same 4-player games -- 35%/34% win rate vs 23%/30% (n=500 each
+ * seat, two separate batches showing the same gap). Widening maxCandidates from 8
+ * (see rankedPlacementCandidates and evaluateCandidateOnce's own doc comments for why
+ * the cheaper rollout here affords roughly an order of magnitude more samples per
+ * decision than twoPly at the same wall-clock budget) was the deciding factor, and why
+ * spending that on breadth (more candidates) rather than depth (roundsAhead) is
+ * currently the better trade -- doubling roundsAhead cost noticeably more than 2x per
+ * sample (measured ~3.24x), so widening candidates buys more signal per unit of budget
+ * than deepening rounds does. A further sweep (16/24/32/40 candidates, n=500 each)
+ * kept trending upward rather than plateauing, so maxCandidates was pushed to 70 --
+ * still comfortably within the samples-per-candidate headroom measured at this budget
+ * (see the real-budget check discussed in this file's own history). This is the
+ * config wired into chooseAiActionForDifficulty's "expert" difficulty (see
+ * difficulty.ts).
+ *
+ * flipMaxCandidates/flipTimeBudgetMs start deliberately small (4 candidates, 100ms) --
+ * not yet independently AI-Arena-validated the way the placement numbers above are,
+ * just a reasonable starting point given flip is a secondary lever (see
+ * HardFastOptions' own doc comment on flipMaxCandidates) -- tune from here once
+ * measured. voteRoundsAhead/voteTimeBudgetMs are similarly a first guess, not yet
+ * validated.
  */
 export const DEFAULT_HARD_FAST_OPTIONS: HardFastOptions = {
   timeBudgetMs: 250,
-  maxCandidates: 16,
+  maxCandidates: 70,
   roundsAhead: 1,
+  voteRoundsAhead: 1,
+  voteTimeBudgetMs: 100,
+  flipMaxCandidates: 4,
+  flipTimeBudgetMs: 100,
 };
 
 /** Same ranking Medium's own choosePlacement uses (estimateMargin + placementHeuristicAdjustment), kept to placements only -- see chooseHardFastAction for why flip/pass aren't touched here. Pruning to the top few keeps the round-robin evaluation loop below cheap enough to run several passes within budget. */
@@ -221,6 +264,25 @@ function rankedPlacementCandidates(state: GameState, playerId: string, maxCandid
   const result = scored.slice(0, maxCandidates).map((s) => s.candidate);
   benchmarkTimings.rankCandidatesMs += performance.now() - start;
   return result;
+}
+
+/**
+ * Shortlists which flip targets are worth a real simulated sample -- own-target
+ * candidates first (ranked by flipCandidateScore, a genuine margin delta for an own
+ * target), then opponent-target candidates (ranked by their own priority score),
+ * mirroring chooseFlip's own hierarchy (a good own flip always takes precedence over
+ * exploring an opponent's card) but without chooseFlip's threshold/probability gating
+ * -- here every plausible target gets a chance to prove itself via real simulation
+ * instead of a static heuristic cutoff deciding blind. Own and opponent scores aren't
+ * on the same scale (see flipCandidateScore's own doc comment), which is why they're
+ * two separately-sorted pools concatenated in priority order, not one merged sort.
+ */
+function rankedFlipCandidates(state: GameState, playerId: string, maxFlipCandidates: number): CardInstance[] {
+  const targets = getLegalFlipTargets(state);
+  const byScoreDesc = (a: CardInstance, b: CardInstance) => flipCandidateScore(state, playerId, b) - flipCandidateScore(state, playerId, a);
+  const own = targets.filter((t) => t.ownerId === playerId).sort(byScoreDesc);
+  const opponent = targets.filter((t) => t.ownerId !== playerId).sort(byScoreDesc);
+  return [...own, ...opponent].slice(0, maxFlipCandidates);
 }
 
 /**
@@ -287,16 +349,18 @@ function fastRolloutAction(state: GameState, playerId: string, rng: Rng): GameAc
 }
 
 /**
- * `roundsAhead` full extra rounds: this candidate placement, then every player's
- * next turn(s), evaluated against the real resulting totals of one freshly-
- * determinized hidden-info guess. Unlike Medium's own estimateMargin (which only
- * ever sees the position immediately after the acting player's own placement, with
- * every future move collapsed into "unknown"), this genuinely looks further ahead
- * and sees a concrete, played-out consequence. Uses GameState.round (not "count
- * turns until it's playerId's turn again") to detect a completed round -- correct
- * regardless of round-start seat rotation, voting, or a center effect like Reckoning
- * redrawing hands at round 4, since all of that is already reflected in `round` by
- * the time it ticks over.
+ * `roundsAhead` full extra rounds: this candidate action (a placement, or -- see
+ * chooseHardFastAction's flip-candidate search -- a flip, which doesn't consume the
+ * turn, so the forward loop's own first step naturally becomes the follow-up
+ * placement decision below), then every player's next turn(s), evaluated against the
+ * real resulting totals of one freshly-determinized hidden-info guess. Unlike
+ * Medium's own estimateMargin (which only ever sees the position immediately after
+ * the acting player's own placement, with every future move collapsed into
+ * "unknown"), this genuinely looks further ahead and sees a concrete, played-out
+ * consequence. Uses GameState.round (not "count turns until it's playerId's turn
+ * again") to detect a completed round -- correct regardless of round-start seat
+ * rotation, voting, or a center effect like Reckoning redrawing hands at round 4,
+ * since all of that is already reflected in `round` by the time it ticks over.
  *
  * Opponents' turns use the cheap fastRolloutAction above (see its own doc comment
  * for why a plausible-not-optimal guess is good enough there); `playerId`'s own
@@ -305,14 +369,36 @@ function fastRolloutAction(state: GameState, playerId: string, rng: Rng): GameAc
  * get to control in real play (unlike opponents', which are always a guess anyway),
  * so it's worth the extra cost to model them accurately rather than as a random
  * placement.
+ *
+ * `initialAction` is null for the vote-evaluation use case (see chooseExpertVote) --
+ * there's no placement/flip to apply first, just this pending vote (and any others
+ * still pending) resolving to "continue" (skipPendingVotes always votes "no"), then
+ * the same forward simulation as any other candidate.
+ *
+ * Returns null (a "this sample doesn't count", not an error) if applying
+ * `initialAction` fails against this one determinized guess -- the only known way
+ * this happens is a flip candidate that's legal against the TRUE state
+ * (rankedFlipCandidates/getLegalFlipTargets already filtered it there, which knows
+ * every card's real identity even hidden ones) but happens to land next to a card
+ * determinize randomly assigned "blocks adjacent flips" (e.g. Cyclops) in THIS
+ * sample's fabricated world -- an artifact of the guess, not a real illegal move;
+ * placement candidates (and the null/vote case) can't hit this, since this engine's
+ * placement legality never depends on neighbor identity. Safe to just skip: the
+ * candidate's average is still built from whichever samples didn't hit this, same as
+ * any other sample-to-sample variance.
  */
-function evaluateCandidateOnce(state: GameState, playerId: string, candidate: { instanceId: string; position: Position }, roundsAhead: number, rng: Rng): number {
+function evaluateCandidateOnce(state: GameState, playerId: string, initialAction: GameAction | null, roundsAhead: number, rng: Rng): number | null {
   let t = performance.now();
   const determinized = determinize(state, playerId, rng);
   benchmarkTimings.determinizeMs += performance.now() - t;
 
   t = performance.now();
-  let s = skipPendingVotes(applyAction(determinized, { type: "place", playerId, ...candidate }, rng), rng);
+  let s: GameState;
+  try {
+    s = skipPendingVotes(initialAction ? applyAction(determinized, initialAction, rng) : determinized, rng);
+  } catch {
+    return null;
+  }
   benchmarkTimings.applyCandidateMs += performance.now() - t;
 
   const targetRound = s.round + roundsAhead;
@@ -347,43 +433,28 @@ function evaluateCandidateOnce(state: GameState, playerId: string, candidate: { 
 }
 
 /**
- * HardFast's decision function -- same (state, playerId, rng) -> GameAction call
- * convention as the other AI strategies. Starts out byte-for-byte identical in
- * behavior to twoPly.ts's chooseTwoPlyAction; this is the copy to actually modify when
- * experimenting with making Hard faster, so twoPly.ts's own validated behavior never
- * has to be disturbed to try something new.
- *
- * Candidates are pruned to `options.maxCandidates` (ranked by Medium's own scoring --
- * see rankedPlacementCandidates) and evaluated round-robin -- one pass through every
- * candidate before any candidate gets a second sample -- so a tight time budget still
- * covers every plausible option at least once instead of exhausting itself deep-diving
- * the single best-ranked one. Each sample determinizes its own fresh hidden-info guess
- * (see determinize's doc comment) so no single wrong guess about hidden cards can
- * dominate one candidate's average.
+ * Round-robin-evaluates `candidates` (one pass through every candidate before any
+ * candidate gets a second sample, so a tight time budget still covers every plausible
+ * option at least once instead of exhausting itself deep-diving the single best-
+ * ranked one) and returns whichever averaged best, or null if the very first
+ * evaluation didn't even finish before the deadline (an extremely tight budget edge
+ * case) or `candidates` was empty to begin with. Shared by chooseHardFastAction's two
+ * independent searches below (placement and flip) so their round-robin bookkeeping
+ * can't silently drift apart from each other.
  */
-export function chooseHardFastAction(
-  state: GameState,
-  playerId: string,
-  options: HardFastOptions = DEFAULT_HARD_FAST_OPTIONS,
-  rng: Rng = Math.random
-): GameAction {
-  benchmarkTimings.decisions++;
-  const greedyChoice = chooseGreedyAiAction(state, playerId, rng);
-  if (greedyChoice.type !== "place") return greedyChoice; // voting/flip/pass -- Medium's existing logic is untouched
-
-  const candidates = rankedPlacementCandidates(state, playerId, options.maxCandidates);
-  if (candidates.length <= 1) return greedyChoice; // nothing to compare
+function searchBest<T>(candidates: T[], toAction: (candidate: T) => GameAction, roundsAhead: number, timeBudgetMs: number, maxPasses: number, state: GameState, playerId: string, rng: Rng): { action: GameAction; avg: number } | null {
+  if (candidates.length === 0) return null;
   benchmarkTimings.candidatesEvaluated += candidates.length;
 
   const totals = candidates.map(() => ({ sum: 0, count: 0 }));
-  const deadline = performance.now() + options.timeBudgetMs;
-  const maxPasses = options.maxPasses ?? Infinity;
+  const deadline = performance.now() + timeBudgetMs;
   let passes = 0;
 
   outer: while (performance.now() < deadline && passes < maxPasses) {
     for (let i = 0; i < candidates.length; i++) {
       if (performance.now() >= deadline) break outer;
-      const value = evaluateCandidateOnce(state, playerId, candidates[i], options.roundsAhead, rng);
+      const value = evaluateCandidateOnce(state, playerId, toAction(candidates[i]), roundsAhead, rng);
+      if (value === null) continue; // this determinized guess made the action illegal -- doesn't count as a sample
       totals[i].sum += value;
       totals[i].count++;
     }
@@ -400,9 +471,109 @@ export function chooseHardFastAction(
       bestIdx = i;
     }
   }
-  // bestIdx === -1 only if the very first evaluation didn't even finish before the
-  // deadline -- an extremely tight budget edge case -- fall back to Medium's own pick.
-  const chosen = bestIdx === -1 ? { instanceId: greedyChoice.instanceId, position: greedyChoice.position } : candidates[bestIdx];
+  if (bestIdx === -1) return null;
+  return { action: toAction(candidates[bestIdx]), avg: bestAvg };
+}
 
-  return { type: "place", playerId, instanceId: chosen.instanceId, position: chosen.position };
+/**
+ * HardFast's decision function -- same (state, playerId, rng) -> GameAction call
+ * convention as the other AI strategies. Started out byte-for-byte identical in
+ * behavior to twoPly.ts's chooseTwoPlyAction; this is the copy to actually modify when
+ * experimenting with making Hard faster, so twoPly.ts's own validated behavior never
+ * has to be disturbed to try something new.
+ *
+ * Runs two independent searches -- placement candidates (see rankedPlacementCandidates,
+ * options.maxCandidates/timeBudgetMs) and flip candidates (see rankedFlipCandidates,
+ * options.flipMaxCandidates/flipTimeBudgetMs, deliberately smaller -- flip is a
+ * secondary lever, see HardFastOptions' own doc comment) -- and takes whichever
+ * averaged best, replacing Medium's chooseFlip/choosePlacement's own static-heuristic
+ * choice of whether to flip at all with a real simulated comparison. A flip candidate's
+ * evaluateCandidateOnce call naturally ends up letting `playerId` immediately choose
+ * their own follow-up placement via chooseGreedyAiAction (see that function's own doc
+ * comment) -- a flip doesn't consume the turn, so the forward loop's first step is
+ * still this same player's turn. Each sample determinizes its own fresh hidden-info
+ * guess (see determinize's doc comment) so no single wrong guess about hidden cards can
+ * dominate one candidate's average.
+ */
+export function chooseHardFastAction(
+  state: GameState,
+  playerId: string,
+  options: HardFastOptions = DEFAULT_HARD_FAST_OPTIONS,
+  rng: Rng = Math.random
+): GameAction {
+  benchmarkTimings.decisions++;
+  const greedyChoice = chooseGreedyAiAction(state, playerId, rng);
+  if (greedyChoice.type === "castVote" || greedyChoice.type === "pass") return greedyChoice; // voting/pass -- Medium's existing logic is untouched
+
+  const placementCandidates = rankedPlacementCandidates(state, playerId, options.maxCandidates);
+  const placementResult =
+    placementCandidates.length > 1
+      ? searchBest(placementCandidates, (c) => ({ type: "place", playerId, ...c }), options.roundsAhead, options.timeBudgetMs, options.maxPasses ?? Infinity, state, playerId, rng)
+      : null;
+
+  const flipCandidates = rankedFlipCandidates(state, playerId, options.flipMaxCandidates);
+  const flipResult =
+    flipCandidates.length > 0
+      ? searchBest(
+          flipCandidates,
+          (target) => ({ type: "flip", playerId, instanceId: target.instanceId }),
+          options.roundsAhead,
+          options.flipTimeBudgetMs,
+          options.flipMaxPasses ?? Infinity,
+          state,
+          playerId,
+          rng
+        )
+      : null;
+
+  if (placementResult && flipResult) return flipResult.avg > placementResult.avg ? flipResult.action : placementResult.action;
+  return flipResult?.action ?? placementResult?.action ?? greedyChoice;
+}
+
+/**
+ * Expert's vote decision -- replaces computeAiVote's static current-margin snapshot
+ * (see endgame.ts) with a real simulated comparison. "End now" needs no simulation at
+ * all: it's just trueValues(state) on the real, authoritative state directly -- ending
+ * the game locks in every card's TRUE identity regardless of who currently knows it,
+ * same as the real engine's own tallyVotes/computeGameResult call, so there's no
+ * hidden info left to guess at for that branch. "Continue" is averaged across several
+ * determinized rollouts of voteRoundsAhead more rounds (see evaluateCandidateOnce with
+ * a null initialAction -- there's no placement/flip to apply first, just this vote
+ * resolving to "continue", same as any other pending vote skipPendingVotes handles).
+ * Votes yes only when ending now isn't worse than that simulated average --
+ * deliberately a hard comparison, not a probability curve like computeAiVote's
+ * marginToVoteYesProbability: every other decision in this file already just takes
+ * whichever averaged best with no artificial randomization layered on top, and the
+ * natural sample-to-sample noise from re-determinizing is variability enough.
+ *
+ * Called by the injected computeVote hook (see game.ts's applyAction/advanceTurn and
+ * difficulty.ts's computeVoteForDifficulty) -- not gated on `state.phase === "voting"`
+ * here since that's guaranteed by the only real call site.
+ */
+export function chooseExpertVote(state: GameState, playerId: string, options: HardFastOptions = DEFAULT_HARD_FAST_OPTIONS, rng: Rng = Math.random): boolean {
+  const values = trueValues(state);
+  const myScoreNow = values[playerId] ?? 0;
+  const bestOpponentNow = Math.max(0, ...state.players.filter((p) => p.id !== playerId).map((p) => values[p.id] ?? 0));
+  const endNowMargin = myScoreNow - bestOpponentNow;
+
+  const deadline = performance.now() + options.voteTimeBudgetMs;
+  const maxPasses = options.voteMaxPasses ?? Infinity;
+  let sum = 0;
+  let count = 0;
+  let passes = 0;
+  while (performance.now() < deadline && passes < maxPasses) {
+    const value = evaluateCandidateOnce(state, playerId, null, options.voteRoundsAhead, rng);
+    if (value !== null) {
+      sum += value;
+      count++;
+    }
+    passes++;
+  }
+
+  // No sample completed within budget (an extremely tight budget edge case) -- fall
+  // back to Medium's own heuristic, same "fall back to Medium" pattern chooseHardFastAction's
+  // own bestIdx === -1 case uses.
+  if (count === 0) return computeAiVote(state, playerId, rng);
+  const continuedMargin = sum / count;
+  return endNowMargin >= continuedMargin;
 }

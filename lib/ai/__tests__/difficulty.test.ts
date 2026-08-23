@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS, chooseAiActionForDifficulty, DEFAULT_AI_DIFFICULTY } from "../difficulty";
+import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS, chooseAiActionForDifficulty, computeVoteForDifficulty, DEFAULT_AI_DIFFICULTY } from "../difficulty";
+import { computeAiVote } from "../../engine/endgame";
 import { chooseGreedyAiAction } from "../greedyAi";
 import { chooseRandomAiAction } from "../randomAi";
-import { chooseHardFastAction } from "../hardFast";
+import { chooseExpertVote, chooseHardFastAction, DEFAULT_HARD_FAST_OPTIONS } from "../hardFast";
 import { chooseTwoPlyAction, TwoPlyOptions } from "../twoPly";
 import { applyAction, createGame, DEFAULT_2P_CONFIG } from "../../engine/game";
 import { currentPlayerId } from "../../engine/turns";
@@ -57,10 +58,10 @@ describe("chooseAiActionForDifficulty", () => {
     expect(viaDispatcher).toEqual(viaDirect);
   });
 
-  it("routes 'expert' to the hardFast strategy -- identical output to calling chooseHardFastAction directly with the same seed and options", () => {
+  it("routes 'expert' to the hardFast strategy -- identical output to calling chooseHardFastAction directly with the same seed, merging hardOptions onto DEFAULT_HARD_FAST_OPTIONS' own flip-search budget", () => {
     const state = createGame(["p1", "p2"], DEFAULT_2P_CONFIG, deterministicRng(1));
     const viaDispatcher = chooseAiActionForDifficulty(state, "p1", "expert", deterministicRng(5), FAST_TWO_PLY_OPTIONS);
-    const viaDirect = chooseHardFastAction(state, "p1", FAST_TWO_PLY_OPTIONS, deterministicRng(5));
+    const viaDirect = chooseHardFastAction(state, "p1", { ...DEFAULT_HARD_FAST_OPTIONS, ...FAST_TWO_PLY_OPTIONS }, deterministicRng(5));
     expect(viaDispatcher).toEqual(viaDirect);
   });
 
@@ -78,7 +79,7 @@ describe("chooseAiActionForDifficulty", () => {
     expect(DEFAULT_AI_DIFFICULTY).toBe("medium");
   });
 
-  it("plays a full game legally at every difficulty", () => {
+  it("plays a full game legally at every difficulty, including expert's simulated vote decisions at round boundaries", () => {
     for (const difficulty of AI_DIFFICULTIES) {
       const rng = deterministicRng(3);
       let state: GameState = createGame(["p1", "p2"], DEFAULT_2P_CONFIG, rng);
@@ -86,10 +87,33 @@ describe("chooseAiActionForDifficulty", () => {
       while (state.phase !== "ended" && iterations < 500) {
         const playerId = activePlayerId(state);
         const action = chooseAiActionForDifficulty(state, playerId, difficulty, rng, FAST_TWO_PLY_OPTIONS);
-        state = applyAction(state, action, rng);
+        state = applyAction(state, action, rng, (s, pId, r) => computeVoteForDifficulty(s, pId, difficulty, r, FAST_TWO_PLY_OPTIONS));
         iterations++;
       }
       expect(state.phase).toBe("ended");
+    }
+  });
+});
+
+describe("computeVoteForDifficulty", () => {
+  it("routes every non-expert difficulty to the plain computeAiVote -- identical output for the same seed", () => {
+    const state = createGame(["p1", "p2"], DEFAULT_2P_CONFIG, deterministicRng(1));
+    for (const difficulty of ["easy", "medium", "hard"] as const) {
+      expect(computeVoteForDifficulty(state, "p1", difficulty, deterministicRng(7))).toBe(computeAiVote(state, "p1", deterministicRng(7)));
+    }
+  });
+
+  it("routes 'expert' to chooseExpertVote -- identical output to calling it directly with the same seed, merging hardOptions onto DEFAULT_HARD_FAST_OPTIONS' own vote-search budget", () => {
+    const state = createGame(["p1", "p2"], DEFAULT_2P_CONFIG, deterministicRng(1));
+    const viaDispatcher = computeVoteForDifficulty(state, "p1", "expert", deterministicRng(5), FAST_TWO_PLY_OPTIONS);
+    const viaDirect = chooseExpertVote(state, "p1", { ...DEFAULT_HARD_FAST_OPTIONS, ...FAST_TWO_PLY_OPTIONS }, deterministicRng(5));
+    expect(viaDispatcher).toBe(viaDirect);
+  });
+
+  it("defaults rng to Math.random when omitted -- doesn't throw, for any difficulty", () => {
+    const state = createGame(["p1", "p2"], DEFAULT_2P_CONFIG, deterministicRng(1));
+    for (const difficulty of AI_DIFFICULTIES) {
+      expect(() => computeVoteForDifficulty(state, "p1", difficulty)).not.toThrow();
     }
   });
 });

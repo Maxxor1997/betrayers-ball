@@ -9,7 +9,7 @@ import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
 import { AiDifficulty, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
-import { AI_DIFFICULTIES, chooseAiActionForDifficulty, DEFAULT_AI_DIFFICULTY } from "@/lib/ai/difficulty";
+import { AI_DIFFICULTIES, chooseAiActionForDifficulty, computeVoteForDifficulty, DEFAULT_AI_DIFFICULTY } from "@/lib/ai/difficulty";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, playerAccentClass, playerDotColorClass } from "@/lib/config/players";
 import { NewGameSetup, PendingFlip } from "./types";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
@@ -286,7 +286,12 @@ function Game() {
   const dispatch = (action: GameAction) => {
     setState((prev) => {
       try {
-        return applyAction(prev, action);
+        // Threading computeVoteForDifficulty here (rather than leaving applyAction's
+        // default) is what actually makes "expert" vote via chooseExpertVote's real
+        // simulation in a real single-player game -- otherwise a round-boundary vote
+        // auto-fill would silently use plain computeAiVote regardless of difficulty
+        // (see game.ts's ComputeVoteFn doc comment).
+        return applyAction(prev, action, Math.random, (state, playerId, rng) => computeVoteForDifficulty(state, playerId, prev.config.aiDifficulty, rng));
       } catch (err) {
         console.error("Illegal action rejected by engine:", err);
         return prev;

@@ -1,6 +1,6 @@
 import { chooseAiActionForDifficulty } from "@/lib/ai/difficulty";
 import { chooseGreedyAiAction } from "@/lib/ai/greedyAi";
-import { benchmarkTimings, chooseHardFastAction, HardFastOptions } from "@/lib/ai/hardFast";
+import { benchmarkTimings, chooseHardFastAction, DEFAULT_HARD_FAST_OPTIONS, HardFastOptions } from "@/lib/ai/hardFast";
 import { chooseRandomAiAction } from "@/lib/ai/randomAi";
 import { chooseTwoPlyAction, DEFAULT_TWO_PLY_OPTIONS, twoPlySearchStats, TwoPlyOptions } from "@/lib/ai/twoPly";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
@@ -224,11 +224,16 @@ interface DispatchedSeatAction {
 }
 
 function dispatchArenaSeatAction(state: GameState, playerId: string, config: ArenaSeatConfig, rng: () => number): DispatchedSeatAction {
-  const hardOptions: TwoPlyOptions | HardFastOptions = {
+  const twoPlyOptions: TwoPlyOptions = {
     timeBudgetMs: config.timeBudgetMs,
     maxCandidates: config.maxCandidates,
     roundsAhead: config.roundsAhead,
   };
+  // The seat config form doesn't expose flip-search knobs (flipMaxCandidates/
+  // flipTimeBudgetMs) yet -- those stay at DEFAULT_HARD_FAST_OPTIONS' own starting
+  // point regardless of what this seat's placement search is set to, until that's
+  // deliberately added as its own tunable.
+  const hardFastOptions: HardFastOptions = { ...DEFAULT_HARD_FAST_OPTIONS, ...twoPlyOptions };
   switch (config.strategy) {
     case "easy":
       return { action: chooseRandomAiAction(state, playerId, rng), samplesDelta: 0, candidatesDelta: 0 };
@@ -237,13 +242,13 @@ function dispatchArenaSeatAction(state: GameState, playerId: string, config: Are
     case "hardTwoPly": {
       const samplesBefore = twoPlySearchStats.samples;
       const candidatesBefore = twoPlySearchStats.candidatesEvaluated;
-      const action = chooseTwoPlyAction(state, playerId, hardOptions, rng);
+      const action = chooseTwoPlyAction(state, playerId, twoPlyOptions, rng);
       return { action, samplesDelta: twoPlySearchStats.samples - samplesBefore, candidatesDelta: twoPlySearchStats.candidatesEvaluated - candidatesBefore };
     }
     case "hardFast": {
       const samplesBefore = benchmarkTimings.samples;
       const candidatesBefore = benchmarkTimings.candidatesEvaluated;
-      const action = chooseHardFastAction(state, playerId, hardOptions, rng);
+      const action = chooseHardFastAction(state, playerId, hardFastOptions, rng);
       return { action, samplesDelta: benchmarkTimings.samples - samplesBefore, candidatesDelta: benchmarkTimings.candidatesEvaluated - candidatesBefore };
     }
   }

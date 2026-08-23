@@ -1,6 +1,7 @@
+import { computeAiVote } from "../engine/endgame";
 import { AiDifficulty, GameAction, GameState } from "../engine/types";
 import { chooseGreedyAiAction } from "./greedyAi";
-import { chooseHardFastAction, DEFAULT_HARD_FAST_OPTIONS } from "./hardFast";
+import { chooseExpertVote, chooseHardFastAction, DEFAULT_HARD_FAST_OPTIONS } from "./hardFast";
 import { chooseRandomAiAction } from "./randomAi";
 import { chooseTwoPlyAction, DEFAULT_TWO_PLY_OPTIONS, TwoPlyOptions } from "./twoPly";
 
@@ -31,9 +32,13 @@ export const DEFAULT_AI_DIFFICULTY: AiDifficulty = "medium";
  * AI_TURN_DELAY_MS pacing beat), but worth knowing before selecting either for a large
  * AI Arena batch: hundreds of games each with dozens of hard/expert-difficulty turns
  * adds up fast. `hardOptions` is an escape hatch for exactly that case (and for
- * fast-running tests) -- it overrides whichever of the two is selected (they share the
- * same options shape); every real call site just omits it and each difficulty gets its
- * own real default. Ignored for easy/medium.
+ * fast-running tests) -- it overrides whichever of the two is selected; every real
+ * call site just omits it and each difficulty gets its own real default. Ignored for
+ * easy/medium. Only covers the shape "hard" and "expert" share (timeBudgetMs/
+ * maxCandidates/roundsAhead/maxPasses) -- "expert"'s separate flip-search budget
+ * (flipMaxCandidates/flipTimeBudgetMs/flipMaxPasses, see HardFastOptions) always stays
+ * at DEFAULT_HARD_FAST_OPTIONS' own values, even when `hardOptions` overrides the rest,
+ * since no real call site has needed to tune that independently yet.
  */
 export function chooseAiActionForDifficulty(
   state: GameState,
@@ -44,6 +49,21 @@ export function chooseAiActionForDifficulty(
 ): GameAction {
   if (difficulty === "easy") return chooseRandomAiAction(state, playerId, rng);
   if (difficulty === "hard") return chooseTwoPlyAction(state, playerId, hardOptions ?? DEFAULT_TWO_PLY_OPTIONS, rng);
-  if (difficulty === "expert") return chooseHardFastAction(state, playerId, hardOptions ?? DEFAULT_HARD_FAST_OPTIONS, rng);
+  if (difficulty === "expert") return chooseHardFastAction(state, playerId, hardOptions ? { ...DEFAULT_HARD_FAST_OPTIONS, ...hardOptions } : DEFAULT_HARD_FAST_OPTIONS, rng);
   return chooseGreedyAiAction(state, playerId, rng);
+}
+
+/**
+ * The vote-decision counterpart to chooseAiActionForDifficulty -- see
+ * game.ts's ComputeVoteFn for the injection seam this plugs into (advanceTurn's
+ * round-boundary auto-fill of every AI seat's vote, which has no difficulty awareness
+ * built into the engine itself). Every difficulty except "expert" keeps the exact same
+ * computeAiVote heuristic voting has always used; "expert" alone gets chooseExpertVote's
+ * real simulated comparison (see hardFast.ts). `hardOptions` overrides expert's vote
+ * search budget the same way it overrides chooseAiActionForDifficulty's -- an escape
+ * hatch for large AI Arena batches and fast tests, ignored for every other difficulty.
+ */
+export function computeVoteForDifficulty(state: GameState, playerId: string, difficulty: AiDifficulty, rng: Rng = Math.random, hardOptions?: TwoPlyOptions): boolean {
+  if (difficulty === "expert") return chooseExpertVote(state, playerId, hardOptions ? { ...DEFAULT_HARD_FAST_OPTIONS, ...hardOptions } : DEFAULT_HARD_FAST_OPTIONS, rng);
+  return computeAiVote(state, playerId, rng);
 }
