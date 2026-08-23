@@ -258,7 +258,7 @@ export const DEFAULT_HARD_FAST_OPTIONS: HardFastOptions = {
   timeBudgetMs: 200,
   maxCandidates: 70,
   roundsAhead: 1,
-  voteRoundsAhead: 1,
+  voteRoundsAhead: 2,
   voteTimeBudgetMs: 50,
   flipMaxCandidates: 4,
   flipTimeBudgetMs: 50,
