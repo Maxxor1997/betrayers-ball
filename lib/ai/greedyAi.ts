@@ -446,30 +446,56 @@ function chooseFlip(state: GameState, playerId: string, rng: Rng): string | null
 }
 
 /**
- * One flip target's heuristic worth, as a single comparable number -- the same
- * underlying scoring chooseFlip itself uses (see its own doc comment for what each
- * piece means), just factored out so a real search (see hardFast.ts's
- * rankedFlipCandidates) can shortlist candidates worth a real simulated sample instead
- * of only ever seeing chooseFlip's own threshold+probability-gated final answer.
+ * One flip target's heuristic worth, as a single comparable number for shortlisting
+ * which targets get a real simulated sample (see hardFast.ts's rankedFlipCandidates)
+ * -- deliberately NOT the same scoring chooseFlip itself uses. chooseFlip has no
+ * simulation to fall back on, so its own inline scoring leans on several card-specific
+ * guesses (hypotheticalFlipMargin plus Berserker/Warlord bait/deterrence bonuses for
+ * own targets; opponentTargetPriority plus Truthseeker/Infiltrator/Doomherald
+ * adjustments for opponent targets) to approximate risk and reward it has no other way
+ * to see. A real simulated sample doesn't have that limitation: whatever card
+ * determinize actually reveals gets resolved for real by trueValues, so any effect --
+ * Doomherald punishing a neighbor, Facestealer stealing a newly-eligible face-up
+ * neighbor, anything else -- is already honestly priced into the average once a
+ * candidate is simulated at all. Baking chooseFlip's own one-directional guesses into
+ * the SHORTLIST on top of that doesn't add real signal (the simulation already sees
+ * the full picture, not just the one direction each heuristic happens to know about)
+ * -- it just risks crowding out a candidate the simulation would have judged
+ * correctly, purely because a heuristic tuned for a different card guessed wrong.
+ *
+ * So this keeps only the generic, non-card-specific piece of each branch: an own
+ * target's real margin estimate (hypotheticalFlipMargin -- still a genuine value
+ * computed from the true engine) and an opponent target's plain proximity signal
+ * (opponentTargetPriority) -- plus one deliberate exception (see
+ * SPECULATIVE_OWN_FLIP_WEIGHT below).
+ *
+ * Warlord/Berserker's bait/deterrence rationale can never be validated by a real
+ * simulated sample (no simulated agent here reacts to a revealed card, so their real
+ * average always comes back ~0 same as hypotheticalFlipMargin alone would show) --
+ * but that's an argument for not trusting it as real value, not for excluding it from
+ * ever being TRIED. Without any nudge at all, they'd score identically to any other
+ * card with genuinely nothing to gain from flipping (e.g. a plain Footman with no
+ * face-state-dependent effect at all), and lose ties to those arbitrarily. A small
+ * fraction of the real bait/deterrence estimate (SPECULATIVE_OWN_FLIP_WEIGHT) breaks
+ * that tie in their favor -- enough to make them a real candidate ahead of targets
+ * with no upside whatsoever, nowhere near enough to compete with a target whose
+ * hypotheticalFlipMargin shows genuine, engine-computed value.
  *
  * Own-target scores are genuine margin deltas (comparable to 0 = "flipping this is
- * worse than not flipping at all" -- the same baseline chooseFlip compares against).
- * Opponent-target scores are a priority heuristic (closeness to the flipper's own
- * cards, plus a few card-specific adjustments) -- NOT a margin estimate, so it is not
- * directly comparable in scale to an own-target score. A caller ranking across both
- * pools needs to account for that (see rankedFlipCandidates's own doc comment for how
- * it handles this by never merging them into one sort).
+ * worse than not flipping at all"). Opponent-target scores are a plain priority
+ * heuristic, not a margin estimate, so it is not directly comparable in scale to an
+ * own-target score -- a caller ranking across both pools needs to account for that
+ * (see rankedFlipCandidates's own doc comment for how it handles this by never
+ * merging them into one sort).
  */
+const SPECULATIVE_OWN_FLIP_WEIGHT = 0.2;
+
 export function flipCandidateScore(state: GameState, playerId: string, target: CardInstance): number {
   if (target.ownerId === playerId) {
-    return hypotheticalFlipMargin(state, playerId, target) + berserkerFlipBaitBonus(state, playerId, target) + warlordFlipDeterrenceBonus(state, playerId, target);
+    const speculative = berserkerFlipBaitBonus(state, playerId, target) + warlordFlipDeterrenceBonus(state, playerId, target);
+    return hypotheticalFlipMargin(state, playerId, target) + SPECULATIVE_OWN_FLIP_WEIGHT * speculative;
   }
-  return (
-    opponentTargetPriority(state.board, playerId, target) +
-    truthseekerBeaconFlipAdjustment(state.board, state.config.boardBounds, playerId, target) +
-    infiltratorDefenseAdjustment(state.board, state.config.boardBounds, playerId, target) +
-    doomheraldRiskAdjustment(state.board, state.config.boardBounds, playerId, target)
-  );
+  return opponentTargetPriority(state.board, playerId, target);
 }
 
 /** Empty (unoccupied, non-ownerless) cells orthogonally adjacent to `pos` -- candidate spots a future placement could still fill in before scoring. */

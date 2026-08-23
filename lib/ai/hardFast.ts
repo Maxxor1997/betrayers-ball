@@ -181,21 +181,37 @@ export interface HardFastOptions {
    */
   maxPasses?: number;
   /**
-   * Same idea as maxCandidates, but for the separate flip-candidate search (see
-   * rankedFlipCandidates) -- deliberately smaller than maxCandidates. Flip is a
-   * secondary lever compared to placement (see chooseHardFastAction's own doc
-   * comment), and a flip sample is inherently a bit MORE expensive than a placement
-   * sample at the same roundsAhead: a flip doesn't consume the turn, so the forward
-   * loop's very first step is a real chooseGreedyAiAction call for the follow-up
-   * placement, unlike a placement candidate's own turn (already used up before the
-   * loop starts at roundsAhead=1, see evaluateCandidateOnce's doc comment) -- so
-   * fewer flip candidates is doubly justified, not just "flip matters less".
+   * How many flip targets get evaluated at all -- see rankedFlipCandidates. Split
+   * evenly between own-owned and opponent-owned targets (half each, rounded down),
+   * not "whichever pool scores higher" -- own and opponent scores aren't on the same
+   * scale (see flipCandidateScore's own doc comment), and an unconditional own-first
+   * fill previously meant opponent exploration could get crowded out of the
+   * shortlist entirely whenever there were enough own-owned targets to fill every
+   * slot. A fixed split guarantees both get a fair chance to be simulated, whenever
+   * targets of that kind exist.
    */
   flipMaxCandidates: number;
-  /** Same idea as timeBudgetMs, but for the flip-candidate search -- deliberately smaller, same reasoning as flipMaxCandidates. */
+  /** Same idea as timeBudgetMs, but for the flip-candidate search -- deliberately smaller. A flip sample is inherently a bit MORE expensive than a placement sample too: a flip doesn't consume the turn, so the forward loop's very first step is a real chooseGreedyAiAction call for the follow-up placement, unlike a placement candidate's own turn (already used up before the loop starts, see evaluateCandidateOnce's doc comment). */
   flipTimeBudgetMs: number;
   /** Same idea as maxPasses, but for the flip-candidate search. */
   flipMaxPasses?: number;
+  /**
+   * How many rounds forward the flip search simulates -- independent of roundsAhead
+   * (placement's own lookahead), and deliberately deeper (2, vs placement's 1):
+   * flipping is judged standalone against flipThreshold now (see
+   * chooseHardFastAction's own doc comment for why the old flip-vs-placement
+   * comparison was dropped), not against a same-depth placement baseline, so there's
+   * no reason its depth needs to match placement's.
+   */
+  flipRoundsAhead: number;
+  /**
+   * The bar a flip candidate's average simulated margin must clear (strictly) to
+   * actually get taken, now that flip is decided on its own terms instead of by
+   * comparison against a placement search that would otherwise have to run
+   * needlessly on every turn. 0 is a first guess ("only flip if it looks better than
+   * a dead-even game"), not yet AI-Arena-validated.
+   */
+  flipThreshold: number;
   /**
    * How many game rounds forward chooseExpertVote simulates to decide whether
    * continuing looks better than ending now -- independent of roundsAhead (that one's
@@ -234,8 +250,9 @@ export interface HardFastOptions {
  * only runs once per round), so its cost stacks additively onto the existing 550ms
  * AI_TURN_DELAY_MS pacing beat every single turn for a real but rare payoff (flips
  * get chosen occasionally, not often -- see hardFast.test.ts's own flip-search test).
- * Neither is independently AI-Arena-validated yet the way the placement numbers above
- * are -- tune from here once measured.
+ * flipRoundsAhead (2) and flipThreshold (0) are similarly a first guess. None of the
+ * flip/vote numbers are independently AI-Arena-validated yet the way the placement
+ * numbers above are -- tune from here once measured.
  */
 export const DEFAULT_HARD_FAST_OPTIONS: HardFastOptions = {
   timeBudgetMs: 200,
@@ -245,6 +262,8 @@ export const DEFAULT_HARD_FAST_OPTIONS: HardFastOptions = {
   voteTimeBudgetMs: 50,
   flipMaxCandidates: 4,
   flipTimeBudgetMs: 50,
+  flipRoundsAhead: 2,
+  flipThreshold: 0,
 };
 
 /** Same ranking Medium's own choosePlacement uses (estimateMargin + placementHeuristicAdjustment), kept to placements only -- see chooseHardFastAction for why flip/pass aren't touched here. Pruning to the top few keeps the round-robin evaluation loop below cheap enough to run several passes within budget. */
@@ -269,22 +288,25 @@ function rankedPlacementCandidates(state: GameState, playerId: string, maxCandid
 }
 
 /**
- * Shortlists which flip targets are worth a real simulated sample -- own-target
- * candidates first (ranked by flipCandidateScore, a genuine margin delta for an own
- * target), then opponent-target candidates (ranked by their own priority score),
- * mirroring chooseFlip's own hierarchy (a good own flip always takes precedence over
- * exploring an opponent's card) but without chooseFlip's threshold/probability gating
- * -- here every plausible target gets a chance to prove itself via real simulation
- * instead of a static heuristic cutoff deciding blind. Own and opponent scores aren't
- * on the same scale (see flipCandidateScore's own doc comment), which is why they're
- * two separately-sorted pools concatenated in priority order, not one merged sort.
+ * Shortlists which flip targets are worth a real simulated sample -- the top half of
+ * own-owned targets (ranked by flipCandidateScore, a genuine margin delta for an own
+ * target) and the top half of opponent-owned targets (ranked by their own priority
+ * score), evaluated via real simulation instead of chooseFlip's own static
+ * threshold/probability gating. A fixed even split, not "whichever pool scores
+ * higher fills first": own and opponent scores aren't on the same scale (see
+ * flipCandidateScore's own doc comment) so they're never merged into one ranking,
+ * and an unconditional own-first fill would let a handful of mediocre own-owned
+ * targets crowd every opponent-owned target out of the shortlist entirely, no matter
+ * how promising those looked on their own terms. Whichever pool comes up short of
+ * its half just contributes fewer candidates -- no backfilling from the other pool.
  */
 function rankedFlipCandidates(state: GameState, playerId: string, maxFlipCandidates: number): CardInstance[] {
   const targets = getLegalFlipTargets(state);
   const byScoreDesc = (a: CardInstance, b: CardInstance) => flipCandidateScore(state, playerId, b) - flipCandidateScore(state, playerId, a);
   const own = targets.filter((t) => t.ownerId === playerId).sort(byScoreDesc);
   const opponent = targets.filter((t) => t.ownerId !== playerId).sort(byScoreDesc);
-  return [...own, ...opponent].slice(0, maxFlipCandidates);
+  const perPool = Math.floor(maxFlipCandidates / 2);
+  return [...own.slice(0, perPool), ...opponent.slice(0, perPool)];
 }
 
 /**
@@ -484,18 +506,23 @@ function searchBest<T>(candidates: T[], toAction: (candidate: T) => GameAction, 
  * experimenting with making Hard faster, so twoPly.ts's own validated behavior never
  * has to be disturbed to try something new.
  *
- * Runs two independent searches -- placement candidates (see rankedPlacementCandidates,
- * options.maxCandidates/timeBudgetMs) and flip candidates (see rankedFlipCandidates,
- * options.flipMaxCandidates/flipTimeBudgetMs, deliberately smaller -- flip is a
- * secondary lever, see HardFastOptions' own doc comment) -- and takes whichever
- * averaged best, replacing Medium's chooseFlip/choosePlacement's own static-heuristic
- * choice of whether to flip at all with a real simulated comparison. A flip candidate's
- * evaluateCandidateOnce call naturally ends up letting `playerId` immediately choose
- * their own follow-up placement via chooseGreedyAiAction (see that function's own doc
- * comment) -- a flip doesn't consume the turn, so the forward loop's first step is
- * still this same player's turn. Each sample determinizes its own fresh hidden-info
- * guess (see determinize's doc comment) so no single wrong guess about hidden cards can
- * dominate one candidate's average.
+ * Flip is decided FIRST, standalone, against flipThreshold -- not by comparison
+ * against a placement search. An earlier version ran the full placement search
+ * (options.maxCandidates/timeBudgetMs) unconditionally every decision just to get a
+ * baseline to compare flip against, even though that result is completely discarded
+ * whenever flip wins: flipping doesn't consume the turn, so the very next call
+ * re-runs the placement search from scratch against the post-flip board anyway. That
+ * made the (expensive) placement search pure wasted work on every turn flip won, for
+ * no benefit -- its own result was never actually used. Now the (cheap) flip search
+ * runs first, and the (expensive) placement search only runs at all when flip isn't
+ * taken this turn, which is also the only time its result is ever needed.
+ *
+ * A flip candidate's evaluateCandidateOnce call naturally ends up letting `playerId`
+ * immediately choose their own follow-up placement via chooseGreedyAiAction (see that
+ * function's own doc comment) -- a flip doesn't consume the turn, so the forward
+ * loop's first step is still this same player's turn. Each sample determinizes its
+ * own fresh hidden-info guess (see determinize's doc comment) so no single wrong
+ * guess about hidden cards can dominate one candidate's average.
  */
 export function chooseHardFastAction(
   state: GameState,
@@ -507,29 +534,28 @@ export function chooseHardFastAction(
   const greedyChoice = chooseGreedyAiAction(state, playerId, rng);
   if (greedyChoice.type === "castVote" || greedyChoice.type === "pass") return greedyChoice; // voting/pass -- Medium's existing logic is untouched
 
+  const flipCandidates = rankedFlipCandidates(state, playerId, options.flipMaxCandidates);
+  if (flipCandidates.length > 0) {
+    const flipResult = searchBest(
+      flipCandidates,
+      (target) => ({ type: "flip", playerId, instanceId: target.instanceId }),
+      options.flipRoundsAhead,
+      options.flipTimeBudgetMs,
+      options.flipMaxPasses ?? Infinity,
+      state,
+      playerId,
+      rng
+    );
+    if (flipResult && flipResult.avg > options.flipThreshold) return flipResult.action;
+  }
+
   const placementCandidates = rankedPlacementCandidates(state, playerId, options.maxCandidates);
   const placementResult =
     placementCandidates.length > 1
       ? searchBest(placementCandidates, (c) => ({ type: "place", playerId, ...c }), options.roundsAhead, options.timeBudgetMs, options.maxPasses ?? Infinity, state, playerId, rng)
       : null;
 
-  const flipCandidates = rankedFlipCandidates(state, playerId, options.flipMaxCandidates);
-  const flipResult =
-    flipCandidates.length > 0
-      ? searchBest(
-          flipCandidates,
-          (target) => ({ type: "flip", playerId, instanceId: target.instanceId }),
-          options.roundsAhead,
-          options.flipTimeBudgetMs,
-          options.flipMaxPasses ?? Infinity,
-          state,
-          playerId,
-          rng
-        )
-      : null;
-
-  if (placementResult && flipResult) return flipResult.avg > placementResult.avg ? flipResult.action : placementResult.action;
-  return flipResult?.action ?? placementResult?.action ?? greedyChoice;
+  return placementResult?.action ?? greedyChoice;
 }
 
 /**

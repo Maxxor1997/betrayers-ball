@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { posKey } from "../../engine/board";
 import { computeAiVote } from "../../engine/endgame";
 import { applyAction, configForPlayerCount, createGame } from "../../engine/game";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, mustPass } from "../../engine/turns";
@@ -22,6 +23,8 @@ const FAST_OPTIONS: HardFastOptions = {
   flipMaxCandidates: 2,
   flipTimeBudgetMs: 20,
   flipMaxPasses: 2,
+  flipRoundsAhead: 2,
+  flipThreshold: 0,
   voteRoundsAhead: 1,
   voteTimeBudgetMs: 20,
   voteMaxPasses: 2,
@@ -125,6 +128,32 @@ describe("chooseHardFastAction", () => {
     }
 
     expect(flipsChosen).toBeGreaterThan(0);
+  });
+
+  it("takes a flip whenever flipThreshold is set low enough to guarantee it clears -- decided standalone, without ever needing a placement search", () => {
+    const config = configForPlayerCount(2, "none", "medium");
+    let state = createGame(["p1", "p2"], config, deterministicRng(5), [], 0);
+    const board = new Map(state.board);
+    const pos = { x: state.config.boardBounds.center.x, y: state.config.boardBounds.center.y + 1 };
+    board.set(posKey(pos), { instanceId: "own-1", cardId: "Footman", ownerId: "p1", faceUp: false });
+    state = { ...state, board, round: state.config.flipUnlockRound };
+
+    const options: HardFastOptions = { ...FAST_OPTIONS, flipThreshold: -1000 };
+    const action = chooseHardFastAction(state, "p1", options, deterministicRng(9));
+    expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: "own-1" });
+  });
+
+  it("never takes a flip when flipThreshold is set impossibly high, falling through to the placement search instead", () => {
+    const config = configForPlayerCount(2, "none", "medium");
+    let state = createGame(["p1", "p2"], config, deterministicRng(5), [], 0);
+    const board = new Map(state.board);
+    const pos = { x: state.config.boardBounds.center.x, y: state.config.boardBounds.center.y + 1 };
+    board.set(posKey(pos), { instanceId: "own-1", cardId: "Footman", ownerId: "p1", faceUp: false });
+    state = { ...state, board, round: state.config.flipUnlockRound };
+
+    const options: HardFastOptions = { ...FAST_OPTIONS, flipThreshold: 1000 };
+    const action = chooseHardFastAction(state, "p1", options, deterministicRng(9));
+    expect(action.type).not.toBe("flip");
   });
 });
 
