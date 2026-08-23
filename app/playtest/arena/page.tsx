@@ -75,9 +75,8 @@ function buildArenaMarkdown(mode: ArenaMode, byDifficulty: ArenaBucketRow[], byP
       fmt(r.avgSamplesPerCandidate, 1),
       fmtPercent(r.avgEligibleFlipRate),
       fmtPercent(r.avgVoteEndRate),
-      fmt(r.avgRoundLength, 1),
     ]);
-  const columns = ["Games", "Win rate", "Placement Δ", "Samples/cand", "Flip % (eligible)", "Vote end %", "Avg rounds"];
+  const columns = ["Games", "Win rate", "Placement Δ", "Samples/cand", "Flip % (eligible)", "Vote end %"];
 
   if (mode === "shuffle") {
     return [
@@ -99,7 +98,6 @@ function buildArenaMarkdown(mode: ArenaMode, byDifficulty: ArenaBucketRow[], byP
     fmt(r.avgSamplesPerCandidate, 1),
     fmtPercent(r.avgEligibleFlipRate),
     fmtPercent(r.avgVoteEndRate),
-    fmt(r.avgRoundLength, 1),
   ]);
   return ["By seat", "", markdownTable(["Seat", "Config", ...columns], seatRows)].join("\n");
 }
@@ -179,7 +177,7 @@ function useSort<K extends string>(defaultKey: K | null = null) {
   return { sortKey, dir, onSort };
 }
 
-type ResultsSortKey = "label" | "gamesPlayed" | "winRate" | "avgPlacementDelta" | "avgSamplesPerCandidate" | "avgEligibleFlipRate" | "avgVoteEndRate" | "avgRoundLength";
+type ResultsSortKey = "label" | "gamesPlayed" | "winRate" | "avgPlacementDelta" | "avgSamplesPerCandidate" | "avgEligibleFlipRate" | "avgVoteEndRate";
 
 function ResultsTable({ title, rows, firstColumnLabel }: { title: string; rows: ArenaBucketRow[]; firstColumnLabel: string }) {
   const { sortKey, dir, onSort } = useSort<ResultsSortKey>();
@@ -233,15 +231,6 @@ function ResultsTable({ title, rows, firstColumnLabel }: { title: string; rows: 
                   title="Of this bucket's round-boundary votes, what fraction were 'yes, end the game now' -- decided via each seat's own real difficulty logic, not a shared default."
                   onSort={onSort}
                 />
-                <SortableHeader
-                  label="Avg rounds"
-                  sortKey="avgRoundLength"
-                  active={sortKey === "avgRoundLength"}
-                  dir={dir}
-                  align="right"
-                  title="Average ending round number of every game this bucket's seat(s) played -- a game-wide number, so every seat in the same game contributes the same value."
-                  onSort={onSort}
-                />
               </tr>
             </thead>
             <tbody>
@@ -254,7 +243,6 @@ function ResultsTable({ title, rows, firstColumnLabel }: { title: string; rows: 
                   <td className="px-3 py-1.5 text-right">{fmt(row.avgSamplesPerCandidate, 1)}</td>
                   <td className="px-3 py-1.5 text-right">{fmtPercent(row.avgEligibleFlipRate)}</td>
                   <td className="px-3 py-1.5 text-right">{fmtPercent(row.avgVoteEndRate)}</td>
-                  <td className="px-3 py-1.5 text-right">{fmt(row.avgRoundLength, 1)}</td>
                 </tr>
               ))}
             </tbody>
@@ -265,7 +253,7 @@ function ResultsTable({ title, rows, firstColumnLabel }: { title: string; rows: 
   );
 }
 
-type SeatResultsSortKey = "label" | "config" | "gamesPlayed" | "winRate" | "avgPlacementDelta" | "avgSamplesPerCandidate" | "avgEligibleFlipRate" | "avgVoteEndRate" | "avgRoundLength";
+type SeatResultsSortKey = "label" | "config" | "gamesPlayed" | "winRate" | "avgPlacementDelta" | "avgSamplesPerCandidate" | "avgEligibleFlipRate" | "avgVoteEndRate";
 
 /** Same shape as ResultsTable, but with an extra "Config" column spelling out exactly what each seat ran with -- the whole point of the fixed-per-seat mode is comparing configurations, not just labels, so that has to be visible right next to the results, not just set-and-forgotten in the config form above. */
 function SeatResultsTable({ rows }: { rows: ArenaSeatBucketRow[] }) {
@@ -321,15 +309,6 @@ function SeatResultsTable({ rows }: { rows: ArenaSeatBucketRow[] }) {
                   title="Of this seat's round-boundary votes, what fraction were 'yes, end the game now' -- decided via this seat's own strategy (chooseExpertVote for Hard (Fast fork), computeAiVote otherwise), not a shared default."
                   onSort={onSort}
                 />
-                <SortableHeader
-                  label="Avg rounds"
-                  sortKey="avgRoundLength"
-                  active={sortKey === "avgRoundLength"}
-                  dir={dir}
-                  align="right"
-                  title="Average ending round number of every game this seat played -- a game-wide number, so every seat in the same game contributes the same value."
-                  onSort={onSort}
-                />
               </tr>
             </thead>
             <tbody>
@@ -343,7 +322,6 @@ function SeatResultsTable({ rows }: { rows: ArenaSeatBucketRow[] }) {
                   <td className="px-3 py-1.5 text-right">{fmt(row.avgSamplesPerCandidate, 1)}</td>
                   <td className="px-3 py-1.5 text-right">{fmtPercent(row.avgEligibleFlipRate)}</td>
                   <td className="px-3 py-1.5 text-right">{fmtPercent(row.avgVoteEndRate)}</td>
-                  <td className="px-3 py-1.5 text-right">{fmt(row.avgRoundLength, 1)}</td>
                 </tr>
               ))}
             </tbody>

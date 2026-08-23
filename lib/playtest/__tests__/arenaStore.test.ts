@@ -66,7 +66,7 @@ describe("loadArenaState", () => {
           ...loadArenaState().stats,
           byDifficulty: {
             ...loadArenaState().stats.byDifficulty,
-            easy: { gamesPlayed: 4, wins: 1, placementDeltaSum: -0.5, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 10, votesYes: 4, roundLengthSum: 20 },
+            easy: { gamesPlayed: 4, wins: 1, placementDeltaSum: -0.5, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 10, votesYes: 4 },
           },
         },
       };
@@ -74,7 +74,6 @@ describe("loadArenaState", () => {
       const loaded = loadArenaState();
       expect(loaded.stats.byDifficulty.easy.votesCast).toBe(10);
       expect(loaded.stats.byDifficulty.easy.votesYes).toBe(4);
-      expect(loaded.stats.byDifficulty.easy.roundLengthSum).toBe(20);
     });
   });
 

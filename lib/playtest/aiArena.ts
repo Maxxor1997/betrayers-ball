@@ -39,12 +39,10 @@ export interface ArenaBucketStats {
   votesCast: number;
   /** How many of those votes were "yes, end the game now". */
   votesYes: number;
-  /** Sum of the ending round number (GameState.round at "ended") of every game this bucket's seat(s) played -- same per-game weighting cardStats.ts's own overall.roundLengthSum uses. A game-wide number, not a per-seat one: every seat in the same game contributes the same value, since round length isn't a property of any one seat's play. */
-  roundLengthSum: number;
 }
 
 export function emptyArenaBucket(): ArenaBucketStats {
-  return { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0, roundLengthSum: 0 };
+  return { gamesPlayed: 0, wins: 0, placementDeltaSum: 0, searchSamplesSum: 0, searchCandidatesSum: 0, flipEligibleDecisions: 0, flipsChosen: 0, votesCast: 0, votesYes: 0 };
 }
 
 /**
@@ -90,8 +88,6 @@ export interface ArenaBucketRow {
   avgEligibleFlipRate: number | null;
   /** Fraction of this bucket's round-boundary votes that were "yes" -- null if this bucket never cast one (e.g. a game that always ended some other way before a vote was ever needed). */
   avgVoteEndRate: number | null;
-  /** Average ending round number of every game this bucket's seat(s) played -- null for an untallied bucket. */
-  avgRoundLength: number | null;
 }
 
 function summarizeBucket(label: string, bucket: ArenaBucketStats): ArenaBucketRow {
@@ -102,7 +98,6 @@ function summarizeBucket(label: string, bucket: ArenaBucketStats): ArenaBucketRo
     avgPlacementDelta: bucket.gamesPlayed === 0 ? null : bucket.placementDeltaSum / bucket.gamesPlayed,
     avgSamplesPerCandidate: bucket.searchCandidatesSum === 0 ? null : bucket.searchSamplesSum / bucket.searchCandidatesSum,
     avgEligibleFlipRate: bucket.flipEligibleDecisions === 0 ? null : bucket.flipsChosen / bucket.flipEligibleDecisions,
-    avgRoundLength: bucket.gamesPlayed === 0 ? null : bucket.roundLengthSum / bucket.gamesPlayed,
     avgVoteEndRate: bucket.votesCast === 0 ? null : bucket.votesYes / bucket.votesCast,
   };
 }
@@ -241,7 +236,6 @@ export function simulateArenaGame(
       bucket.gamesPlayed++;
       bucket.placementDeltaSum += delta;
       if (won) bucket.wins++;
-      bucket.roundLengthSum += state.round;
     }
   });
 }
@@ -435,6 +429,5 @@ export function simulateFixedSeatArenaGame(centerEffect: CenterEffectId, seatCon
     bucket.gamesPlayed++;
     bucket.placementDeltaSum += delta;
     if (won) bucket.wins++;
-    bucket.roundLengthSum += state.round;
   });
 }
