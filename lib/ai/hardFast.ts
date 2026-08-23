@@ -228,21 +228,23 @@ export interface HardFastOptions {
  * config wired into chooseAiActionForDifficulty's "expert" difficulty (see
  * difficulty.ts).
  *
- * flipMaxCandidates/flipTimeBudgetMs start deliberately small (4 candidates, 100ms) --
- * not yet independently AI-Arena-validated the way the placement numbers above are,
- * just a reasonable starting point given flip is a secondary lever (see
- * HardFastOptions' own doc comment on flipMaxCandidates) -- tune from here once
- * measured. voteRoundsAhead/voteTimeBudgetMs are similarly a first guess, not yet
- * validated.
+ * flipMaxCandidates/flipTimeBudgetMs (4 candidates, 50ms) and voteRoundsAhead/
+ * voteTimeBudgetMs (1 round, 50ms) are trimmed down from an initial 100ms each --
+ * flip search runs on essentially every turn once flip unlocks (unlike vote, which
+ * only runs once per round), so its cost stacks additively onto the existing 550ms
+ * AI_TURN_DELAY_MS pacing beat every single turn for a real but rare payoff (flips
+ * get chosen occasionally, not often -- see hardFast.test.ts's own flip-search test).
+ * Neither is independently AI-Arena-validated yet the way the placement numbers above
+ * are -- tune from here once measured.
  */
 export const DEFAULT_HARD_FAST_OPTIONS: HardFastOptions = {
-  timeBudgetMs: 250,
+  timeBudgetMs: 200,
   maxCandidates: 70,
   roundsAhead: 1,
   voteRoundsAhead: 1,
-  voteTimeBudgetMs: 100,
+  voteTimeBudgetMs: 50,
   flipMaxCandidates: 4,
-  flipTimeBudgetMs: 100,
+  flipTimeBudgetMs: 50,
 };
 
 /** Same ranking Medium's own choosePlacement uses (estimateMargin + placementHeuristicAdjustment), kept to placements only -- see chooseHardFastAction for why flip/pass aren't touched here. Pruning to the top few keeps the round-robin evaluation loop below cheap enough to run several passes within budget. */
