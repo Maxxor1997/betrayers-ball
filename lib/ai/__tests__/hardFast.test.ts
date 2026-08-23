@@ -173,6 +173,31 @@ describe("chooseExpertVote", () => {
     expect(chooseExpertVote(state, "p1", options, deterministicRng(2))).toBe(computeAiVote(state, "p1", deterministicRng(2)));
   });
 
+  it("evaluates 'end now' through the same fair, fog-of-war-respecting determinize() as 'continue' -- an opponent's hidden card can flip the vote across rng seeds even though the true board never changes", () => {
+    // p2's hidden DyingGod (base 10, the single highest-base card in the game) is a
+    // big threat if its true identity were known -- but a real player (and this
+    // evaluation) can't see it, only guess. With voteMaxPasses: 1, "end now" is
+    // scored off exactly one determinize() guess for that hidden card, so different
+    // rng seeds guess different replacement identities for it and should sometimes
+    // tip the vote to true and sometimes to false, purely from that guess -- not from
+    // anything about the (unchanging) true board. An earlier version scored "end now"
+    // straight off the true board (see chooseExpertVote's own doc comment), which
+    // would have made this branch's contribution to the vote identical across every
+    // seed instead.
+    const config = configForPlayerCount(2, "none", "medium");
+    let state = createGame(["p1", "p2"], config, deterministicRng(6), [], 0);
+    const board = new Map(state.board);
+    const center = state.config.boardBounds.center;
+    board.set(posKey({ x: center.x, y: center.y + 1 }), { instanceId: "opp-hidden", cardId: "DyingGod", ownerId: "p2", faceUp: false });
+    board.set(posKey({ x: center.x, y: center.y - 1 }), { instanceId: "own-1", cardId: "Footman", ownerId: "p1", faceUp: true });
+    state = { ...state, board, round: 3 };
+
+    const options: HardFastOptions = { ...FAST_OPTIONS, voteTimeBudgetMs: 20, voteMaxPasses: 1 };
+    const results = Array.from({ length: 40 }, (_, seed) => chooseExpertVote(state, "p1", options, deterministicRng(seed)));
+    expect(results).toContain(true);
+    expect(results).toContain(false);
+  });
+
   it("drives a short full game to completion without throwing when used as the vote decision at every round boundary", () => {
     const rng = deterministicRng(3);
     const config = configForPlayerCount(3, "none", "medium");

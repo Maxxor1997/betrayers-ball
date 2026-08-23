@@ -560,48 +560,61 @@ export function chooseHardFastAction(
 
 /**
  * Expert's vote decision -- replaces computeAiVote's static current-margin snapshot
- * (see endgame.ts) with a real simulated comparison. "End now" needs no simulation at
- * all: it's just trueValues(state) on the real, authoritative state directly -- ending
- * the game locks in every card's TRUE identity regardless of who currently knows it,
- * same as the real engine's own tallyVotes/computeGameResult call, so there's no
- * hidden info left to guess at for that branch. "Continue" is averaged across several
- * determinized rollouts of voteRoundsAhead more rounds (see evaluateCandidateOnce with
- * a null initialAction -- there's no placement/flip to apply first, just this vote
- * resolving to "continue", same as any other pending vote skipPendingVotes handles).
- * Votes yes only when ending now isn't worse than that simulated average --
- * deliberately a hard comparison, not a probability curve like computeAiVote's
- * marginToVoteYesProbability: every other decision in this file already just takes
- * whichever averaged best with no artificial randomization layered on top, and the
- * natural sample-to-sample noise from re-determinizing is variability enough.
+ * (see endgame.ts) with a real simulated comparison between "end now" and "continue",
+ * round-robined against each other over the shared voteTimeBudgetMs (same round-robin
+ * shape searchBest uses for placement/flip candidates, just two options here instead
+ * of a candidate list, and varying roundsAhead per option rather than the action).
+ *
+ * Both options go through the SAME evaluateCandidateOnce call -- initialAction null
+ * either way, since there's no placement/flip to apply first, just this pending vote
+ * resolving one way or the other -- and therefore the SAME determinize() on every
+ * sample. "End now" is just roundsAhead=0: skip the forward-rollout loop entirely and
+ * score the freshly-determinized board immediately. This is deliberate, not
+ * incidental -- an earlier version scored "end now" straight off trueValues(state),
+ * the real authoritative board with every hidden card's TRUE identity, while
+ * "continue" only ever saw a fair, fog-of-war-respecting determinized guess. That
+ * mismatch let "end now" quietly cheat: the acting player doesn't actually know
+ * what's under their opponents' face-down cards any more for an end-now decision than
+ * for a continue decision, so comparing an omniscient number against a foggy estimate
+ * biased the comparison rather than fairly measuring which option this player should
+ * actually prefer given what they truly know. Sampling both the same way (many
+ * independent determinize() guesses, averaged) fixes that -- and averaging several
+ * guesses for "end now" instead of reading the board once also means one lucky/unlucky
+ * guess about a hidden neighbor can't dominate the estimate, same noise-reduction
+ * reasoning as any other candidate's average here.
+ *
+ * Votes yes only when ending now isn't worse than continuing -- deliberately a hard
+ * comparison, not a probability curve like computeAiVote's marginToVoteYesProbability:
+ * every other decision in this file already just takes whichever averaged best with no
+ * artificial randomization layered on top, and the natural sample-to-sample noise from
+ * re-determinizing is variability enough.
  *
  * Called by the injected computeVote hook (see game.ts's applyAction/advanceTurn and
  * difficulty.ts's computeVoteForDifficulty) -- not gated on `state.phase === "voting"`
  * here since that's guaranteed by the only real call site.
  */
 export function chooseExpertVote(state: GameState, playerId: string, options: HardFastOptions = DEFAULT_HARD_FAST_OPTIONS, rng: Rng = Math.random): boolean {
-  const values = trueValues(state);
-  const myScoreNow = values[playerId] ?? 0;
-  const bestOpponentNow = Math.max(0, ...state.players.filter((p) => p.id !== playerId).map((p) => values[p.id] ?? 0));
-  const endNowMargin = myScoreNow - bestOpponentNow;
-
+  const roundsAheadByOption = [0, options.voteRoundsAhead]; // [end now, continue]
+  const totals = roundsAheadByOption.map(() => ({ sum: 0, count: 0 }));
   const deadline = performance.now() + options.voteTimeBudgetMs;
   const maxPasses = options.voteMaxPasses ?? Infinity;
-  let sum = 0;
-  let count = 0;
   let passes = 0;
-  while (performance.now() < deadline && passes < maxPasses) {
-    const value = evaluateCandidateOnce(state, playerId, null, options.voteRoundsAhead, rng);
-    if (value !== null) {
-      sum += value;
-      count++;
+
+  outer: while (performance.now() < deadline && passes < maxPasses) {
+    for (let i = 0; i < roundsAheadByOption.length; i++) {
+      if (performance.now() >= deadline) break outer;
+      const value = evaluateCandidateOnce(state, playerId, null, roundsAheadByOption[i], rng);
+      if (value === null) continue; // this determinized guess made something illegal -- doesn't count as a sample
+      totals[i].sum += value;
+      totals[i].count++;
     }
     passes++;
   }
 
-  // No sample completed within budget (an extremely tight budget edge case) -- fall
-  // back to Medium's own heuristic, same "fall back to Medium" pattern chooseHardFastAction's
-  // own bestIdx === -1 case uses.
-  if (count === 0) return computeAiVote(state, playerId, rng);
-  const continuedMargin = sum / count;
-  return endNowMargin >= continuedMargin;
+  const [endNow, continued] = totals;
+  // Either option never got a single sample within budget (an extremely tight budget
+  // edge case) -- fall back to Medium's own heuristic, same "fall back to Medium"
+  // pattern chooseHardFastAction's own bestIdx === -1 case uses.
+  if (endNow.count === 0 || continued.count === 0) return computeAiVote(state, playerId, rng);
+  return endNow.sum / endNow.count >= continued.sum / continued.count;
 }
