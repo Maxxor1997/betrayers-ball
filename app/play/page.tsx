@@ -165,12 +165,6 @@ function buildBoardStateMarkdown(state: GameState, endResult: ResolutionResult |
     for (const p of state.players) lines.push(`| ${ownerDisplayName(state, p.id)} | ${gameResult.scores[p.id]} |`);
     lines.push("");
 
-    if (endResult.centerAward) {
-      lines.push(
-        `${CENTER_EFFECTS.championOfTheWeak.label}: the center (value ${endResult.centerAward.value}) went to ${ownerDisplayName(state, endResult.centerAward.ownerId)}.`,
-        ""
-      );
-    }
     if (endResult.kingslayerHit.length > 0) {
       const hit = endResult.kingslayerHit
         .map((id) => {

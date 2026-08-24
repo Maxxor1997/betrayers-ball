@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveBoard, ResolvedCard } from "../resolution";
 import { Board, BoardBounds, CardId, CardInstance, posKey } from "../types";
 import { CARD_DEFS } from "@/lib/content/cards";
-import { CENTER_EFFECTS, PSEUDO_CARD_BASE_VALUE } from "@/lib/content/centerEffects";
+import { CENTER_EFFECTS, KINGSLAYER_BASE_VALUE } from "@/lib/content/centerEffects";
 
 const BOUNDS: BoardBounds = { width: 9, height: 9, center: { x: 4, y: 4 } };
 
@@ -177,15 +177,15 @@ describe("resolveBoard — scoring breakdown", () => {
 
   it("appends a Kingslayer adjustment entry that still sums to finalValue", () => {
     const board: Board = new Map();
-    const big = place(board, 1, 0, "Exile", "p2", true); // face-up so it's eligible
+    const big = place(board, 1, 0, "Exile", "p2", true);
     place(board, 0, 0, "Footman", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3, "kingslayer");
     const resolved = find(cards, big.instanceId);
     // base - 1 (1 neighbor, open adjacent tile still left) - the Kingslayer pseudo-card's value
-    const expected = CARD_DEFS.Exile.base - 1 - PSEUDO_CARD_BASE_VALUE;
+    const expected = CARD_DEFS.Exile.base - 1 - KINGSLAYER_BASE_VALUE;
     expect(resolved.finalValue).toBe(expected);
     const last = resolved.breakdown[resolved.breakdown.length - 1];
-    expect(last.label).toBe("Kingslayer (highest face-up value)");
+    expect(last.label).toBe("Kingslayer (highest value)");
     expect(resolved.breakdown.reduce((sum, d) => sum + d.amount, 0)).toBe(expected);
   });
 });
@@ -1083,125 +1083,167 @@ describe("resolveBoard — center effect: The Frontier", () => {
 });
 
 describe("resolveBoard — center effect: Champion of the Weak", () => {
-  it("transfers the center's value to the owner of the single lowest-valued card", () => {
+  it("doubles a player's single lowest-valued face-down card", () => {
     const board: Board = new Map();
-    place(board, 0, 0, "Footman", "p1");
-    place(board, 1, 0, "Footman", "p1"); // p1's cards are all Footman-base
-    place(board, 5, 5, "Berserker", "p2"); // no rival Berserker -- unique lowest card on the board
-    const { totalsByOwner, centerAward } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1", "p2"]);
-    expect(centerAward).toEqual({ value: PSEUDO_CARD_BASE_VALUE, ownerId: "p2" });
-    expect(totalsByOwner.p2).toBe(CARD_DEFS.Berserker.base + PSEUDO_CARD_BASE_VALUE);
+    const low = place(board, 0, 0, "Footman", "p1", false);
+    const high = place(board, 1, 0, "Giant", "p1", false); // higher value, same owner -- not the target
+    const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1"]);
+    expect(find(cards, low.instanceId).finalValue).toBe(CARD_DEFS.Footman.base * 2);
+    expect(find(cards, high.instanceId).finalValue).toBe(CARD_DEFS.Giant.base); // untouched
+    expect(totalsByOwner.p1).toBe(CARD_DEFS.Footman.base * 2 + CARD_DEFS.Giant.base);
   });
 
-  it("makes no transfer on a tie for the lowest card value", () => {
+  it("doubles each player's own lowest face-down card independently, not just one winner board-wide", () => {
     const board: Board = new Map();
-    place(board, 0, 0, "Footman", "p1");
-    place(board, 1, 0, "Footman", "p2");
-    const { totalsByOwner, centerAward } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1", "p2"]);
-    expect(centerAward).toBeNull();
+    const p1card = place(board, 0, 0, "Footman", "p1", false);
+    const p2card = place(board, 8, 5, "Giant", "p2", false); // higher value than p1's card, but a different owner
+    const { cards } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1", "p2"]);
+    expect(find(cards, p1card.instanceId).finalValue).toBe(CARD_DEFS.Footman.base * 2);
+    expect(find(cards, p2card.instanceId).finalValue).toBe(CARD_DEFS.Giant.base * 2);
+  });
+
+  it("ignores face-up cards even if they'd otherwise be the lowest value", () => {
+    const board: Board = new Map();
+    const shown = place(board, 0, 0, "Berserker", "p1", true); // lowest value, but face-up -- ineligible
+    const hidden = place(board, 5, 5, "Footman", "p1", false); // only face-down card
+    const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1"]);
+    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Berserker.base); // untouched
+    expect(find(cards, hidden.instanceId).finalValue).toBe(CARD_DEFS.Footman.base * 2); // doubled as the only eligible card
+    expect(totalsByOwner.p1).toBe(CARD_DEFS.Berserker.base + CARD_DEFS.Footman.base * 2);
+  });
+
+  it("gives no bonus to a player whose only cards are face-up", () => {
+    const board: Board = new Map();
+    place(board, 0, 0, "Footman", "p1", true);
+    const { totalsByOwner } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1"]);
     expect(totalsByOwner.p1).toBe(CARD_DEFS.Footman.base);
-    expect(totalsByOwner.p2).toBe(CARD_DEFS.Footman.base);
   });
 
-  it("a player with zero cards has no card to compare, so can't win", () => {
+  it("on a tie for lowest, doubles whichever was placed last -- same tiebreak as the Summit", () => {
     const board: Board = new Map();
-    place(board, 0, 0, "Footman", "p1");
-    const { totalsByOwner, centerAward } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1", "p2"]);
-    expect(centerAward).toEqual({ value: PSEUDO_CARD_BASE_VALUE, ownerId: "p1" });
-    expect(totalsByOwner.p1).toBe(CARD_DEFS.Footman.base + PSEUDO_CARD_BASE_VALUE);
+    const first = place(board, 0, 0, "Footman", "p1", false);
+    const second = place(board, 1, 0, "Footman", "p1", false); // same value, placed later
+    const { cards } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1"]);
+    expect(find(cards, first.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+    expect(find(cards, second.instanceId).finalValue).toBe(CARD_DEFS.Footman.base * 2);
   });
 
-  it("center value is a flat award, unaffected by adjacent Bannerman/Earthshaker/Skysplitter", () => {
+  it("appends a breakdown entry for the doubled card", () => {
     const board: Board = new Map();
-    // Bannerman directly adjacent to center (4,4) would give Kingslayer's pseudo-card
-    // +1 (center is never a Footman) -- Lazaret's award ignores it entirely.
-    place(board, 4, 3, "Bannerman", "p2");
-    place(board, 0, 0, "Footman", "p1");
-    const { centerAward } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1", "p2"]);
-    expect(centerAward?.value).toBe(PSEUDO_CARD_BASE_VALUE);
+    const only = place(board, 0, 0, "Footman", "p1", false);
+    const { cards } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1"]);
+    const resolved = find(cards, only.instanceId);
+    const last = resolved.breakdown[resolved.breakdown.length - 1];
+    expect(last).toEqual({
+      label: `${CENTER_EFFECTS.championOfTheWeak.label} (lowest face-down, doubled)`,
+      amount: CARD_DEFS.Footman.base,
+      source: "external",
+    });
   });
 });
 
 describe("resolveBoard — center effect: Kingslayer", () => {
-  it("subtracts its value from the single highest-value face-up card and adjusts totals", () => {
+  it("subtracts its value from the single highest-value card and adjusts totals", () => {
     const board: Board = new Map();
     const small = place(board, 0, 0, "Footman", "p1", true);
     const big = place(board, 1, 0, "Exile", "p2", true); // -1 for its 1 neighbor
     const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "kingslayer");
-    const bigExpected = CARD_DEFS.Exile.base - 1 - PSEUDO_CARD_BASE_VALUE;
+    const bigExpected = CARD_DEFS.Exile.base - 1 - KINGSLAYER_BASE_VALUE;
     expect(find(cards, big.instanceId).finalValue).toBe(bigExpected);
     expect(find(cards, small.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
     expect(totalsByOwner.p2).toBe(bigExpected);
     expect(totalsByOwner.p1).toBe(CARD_DEFS.Footman.base);
   });
 
-  it("hits all tied-for-highest face-up cards", () => {
+  it("hits all tied-for-highest cards", () => {
     const board: Board = new Map();
     const a = place(board, 0, 0, "Footman", "p1", true);
     const b = place(board, 5, 5, "Footman", "p2", true);
     const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "kingslayer");
-    const expected = CARD_DEFS.Footman.base - PSEUDO_CARD_BASE_VALUE;
+    const expected = CARD_DEFS.Footman.base - KINGSLAYER_BASE_VALUE;
     expect(find(cards, a.instanceId).finalValue).toBe(expected);
     expect(find(cards, b.instanceId).finalValue).toBe(expected);
     expect(totalsByOwner.p1).toBe(expected);
     expect(totalsByOwner.p2).toBe(expected);
   });
 
-  it("ignores face-down cards even if they'd otherwise be the highest value", () => {
+  it("hits the highest-value card regardless of face-up/face-down state", () => {
     const board: Board = new Map();
-    const hidden = place(board, 0, 0, "Exile", "p1", false);
-    const shown = place(board, 5, 5, "Footman", "p2", true); // only face-up card
+    const hidden = place(board, 0, 0, "Exile", "p1", false); // higher value, face-down
+    const shown = place(board, 5, 5, "Footman", "p2", true);
     const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "kingslayer");
-    const shownExpected = CARD_DEFS.Footman.base - PSEUDO_CARD_BASE_VALUE;
-    expect(find(cards, hidden.instanceId).finalValue).toBe(CARD_DEFS.Exile.base); // untouched
-    expect(find(cards, shown.instanceId).finalValue).toBe(shownExpected); // hit as the only eligible card
-    expect(totalsByOwner.p1).toBe(CARD_DEFS.Exile.base);
-    expect(totalsByOwner.p2).toBe(shownExpected);
-  });
-
-  it("makes no adjustment when no card is face-up", () => {
-    const board: Board = new Map();
-    place(board, 0, 0, "Footman", "p1", false);
-    const { totalsByOwner } = resolveBoard(board, BOUNDS, 3, "kingslayer");
-    expect(totalsByOwner.p1).toBe(CARD_DEFS.Footman.base);
+    const hiddenExpected = CARD_DEFS.Exile.base - KINGSLAYER_BASE_VALUE; // isolated -- no neighbors
+    expect(find(cards, hidden.instanceId).finalValue).toBe(hiddenExpected); // hit despite being face-down
+    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Footman.base); // untouched
+    expect(totalsByOwner.p1).toBe(hiddenExpected);
+    expect(totalsByOwner.p2).toBe(CARD_DEFS.Footman.base);
   });
 
   it("Kingslayer's own value is modified by adjacent Bannerman/Earthshaker/Skysplitter, same as the center", () => {
     const board: Board = new Map();
     place(board, 4, 3, "Bannerman", "p1", true); // adjacent to center (4,4) -> +1
-    const shown = place(board, 0, 0, "Footman", "p2", true);
+    const shown = place(board, 0, 0, "Exile", "p2", true); // isolated, no neighbor penalty -- high enough base to survive the boosted hit without flooring
     const { cards } = resolveBoard(board, BOUNDS, 3, "kingslayer");
-    // Footman is the unique highest face-up card, so it's the target -- its
-    // subtraction should reflect Kingslayer's Bannerman-boosted value, not the
-    // unmodified PSEUDO_CARD_BASE_VALUE.
-    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - (PSEUDO_CARD_BASE_VALUE + 1));
+    // Exile is the unique highest-value card, so it's the target -- its subtraction
+    // should reflect Kingslayer's Bannerman-boosted value, not the unmodified
+    // KINGSLAYER_BASE_VALUE.
+    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - (KINGSLAYER_BASE_VALUE + 1));
+  });
+
+  it("floors a hit card at 0 instead of letting it go negative, same universal floor every card's own rule gets", () => {
+    const board: Board = new Map();
+    const only = place(board, 0, 0, "Berserker", "p1", true); // low base -- the hit alone would drive it negative
+    const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    const resolved = find(cards, only.instanceId);
+    expect(CARD_DEFS.Berserker.base - KINGSLAYER_BASE_VALUE).toBeLessThan(0); // sanity-check the setup actually exercises the floor
+    expect(resolved.finalValue).toBe(0);
+    expect(resolved.breakdown[resolved.breakdown.length - 1].label).toBe("Floored at 0");
+    expect(resolved.breakdown.reduce((sum, d) => sum + d.amount, 0)).toBe(0);
+    expect(totalsByOwner.p1).toBe(0);
   });
 });
 
 describe("resolveBoard — center effect: The Summit", () => {
-  it("doubles a player's single highest-valued card", () => {
+  it("doubles a player's single highest-valued face-up card", () => {
     const board: Board = new Map();
-    const low = place(board, 0, 0, "Footman", "p1");
-    const high = place(board, 8, 5, "Giant", "p1");
+    const low = place(board, 0, 0, "Footman", "p1", true);
+    const high = place(board, 8, 5, "Giant", "p1", true); // forceFaceUp is applied at placement time (turns.ts), not resolution -- set explicitly here since this test builds the board directly
     const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "summit");
     expect(find(cards, low.instanceId).finalValue).toBe(CARD_DEFS.Footman.base); // untouched
     expect(find(cards, high.instanceId).finalValue).toBe(CARD_DEFS.Giant.base * 2);
     expect(totalsByOwner.p1).toBe(CARD_DEFS.Footman.base + CARD_DEFS.Giant.base * 2);
   });
 
-  it("only doubles each player's own highest card, not a rival's", () => {
+  it("only doubles each player's own highest face-up card, not a rival's", () => {
     const board: Board = new Map();
-    const p1card = place(board, 0, 0, "Footman", "p1");
-    const p2card = place(board, 8, 5, "Giant", "p2"); // higher than p1's card, but a different owner
+    const p1card = place(board, 0, 0, "Footman", "p1", true);
+    const p2card = place(board, 8, 5, "Giant", "p2", true); // higher than p1's card, but a different owner
     const { cards } = resolveBoard(board, BOUNDS, 3, "summit");
     expect(find(cards, p1card.instanceId).finalValue).toBe(CARD_DEFS.Footman.base * 2);
     expect(find(cards, p2card.instanceId).finalValue).toBe(CARD_DEFS.Giant.base * 2);
   });
 
+  it("ignores face-down cards even if they'd otherwise be the highest value", () => {
+    const board: Board = new Map();
+    const hidden = place(board, 0, 0, "Exile", "p1", false); // higher value, face-down -- ineligible
+    const shown = place(board, 5, 5, "Footman", "p1", true); // only face-up card
+    const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "summit");
+    expect(find(cards, hidden.instanceId).finalValue).toBe(CARD_DEFS.Exile.base); // untouched
+    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Footman.base * 2); // doubled as the only eligible card
+    expect(totalsByOwner.p1).toBe(CARD_DEFS.Exile.base + CARD_DEFS.Footman.base * 2);
+  });
+
+  it("gives no bonus to a player whose only cards are face-down", () => {
+    const board: Board = new Map();
+    place(board, 0, 0, "Footman", "p1", false);
+    const { totalsByOwner } = resolveBoard(board, BOUNDS, 3, "summit");
+    expect(totalsByOwner.p1).toBe(CARD_DEFS.Footman.base);
+  });
+
   it("on a tie for highest, doubles whichever was placed last", () => {
     const board: Board = new Map();
-    const first = place(board, 0, 0, "Footman", "p1");
-    const second = place(board, 1, 0, "Footman", "p1"); // same value, placed later
+    const first = place(board, 0, 0, "Footman", "p1", true);
+    const second = place(board, 1, 0, "Footman", "p1", true); // same value, placed later
     const { cards } = resolveBoard(board, BOUNDS, 3, "summit");
     expect(find(cards, first.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
     expect(find(cards, second.instanceId).finalValue).toBe(CARD_DEFS.Footman.base * 2);
@@ -1209,12 +1251,12 @@ describe("resolveBoard — center effect: The Summit", () => {
 
   it("appends a breakdown entry for the doubled card", () => {
     const board: Board = new Map();
-    const only = place(board, 0, 0, "Footman", "p1");
+    const only = place(board, 0, 0, "Footman", "p1", true);
     const { cards } = resolveBoard(board, BOUNDS, 3, "summit");
     const resolved = find(cards, only.instanceId);
     const last = resolved.breakdown[resolved.breakdown.length - 1];
     expect(last).toEqual({
-      label: `${CENTER_EFFECTS.summit.label} (highest card, doubled)`,
+      label: `${CENTER_EFFECTS.summit.label} (highest face-up card, doubled)`,
       amount: CARD_DEFS.Footman.base,
       source: "external",
     });

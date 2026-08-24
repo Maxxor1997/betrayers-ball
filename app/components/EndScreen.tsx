@@ -3,7 +3,6 @@
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
-import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { PLAYER_BORDER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 import { ResolutionResult, ResolvedCard } from "@/lib/engine/resolution";
 import { GameState } from "@/lib/engine/types";
@@ -44,7 +43,6 @@ function PlayerTable({
   colorClass,
   borderColorClass,
   cards,
-  extraRow,
   votesByRound,
 }: {
   /** Drives the header's hover/tap-to-highlight -- see the `player:${ownerId}` tooltip id below, which Board.tsx also watches for to highlight every one of this player's cards, same as hovering their row in the in-game turn-order tracker. */
@@ -58,7 +56,6 @@ function PlayerTable({
   colorClass: string;
   borderColorClass: string;
   cards: ResolvedCard[];
-  extraRow?: { label: string; value: number };
   /**
    * This player's vote in round N, keyed by round number -- approximates "the vote
    * taken right after this row's card was placed" by matching the card's row index
@@ -152,15 +149,6 @@ function PlayerTable({
               </tr>
             );
           })}
-          {extraRow && (
-            <tr className="border-b border-zinc-100 italic dark:border-zinc-800">
-              <td className="py-1 pr-2 text-zinc-500">—</td>
-              <td className="py-1 pr-2">{extraRow.label}</td>
-              <td className="py-1 pr-2">—</td>
-              <td className="py-1 pr-2 font-semibold">{extraRow.value}</td>
-              <td className="py-1 pr-2">—</td>
-            </tr>
-          )}
         </tbody>
       </table>
     </div>
@@ -183,7 +171,7 @@ export function EndScreen({
   footer?: React.ReactNode;
 }) {
   const gameResult = state.result!;
-  const { cards, centerAward, kingslayerHit } = result;
+  const { cards, kingslayerHit } = result;
 
   const orderIndex = new Map(state.placementOrder.map((id, i) => [id, i]));
   const byTurnPlayed = (ownerId: string) =>
@@ -219,11 +207,6 @@ export function EndScreen({
         <h2 className="text-lg font-semibold">Game over — {winnerLabel}</h2>
         {footer}
       </div>
-      {centerAward && (
-        <p className="-mb-2 text-xs text-zinc-500">
-          {CENTER_EFFECTS.championOfTheWeak.label}: the center (value {centerAward.value}) went to {nameFor(centerAward.ownerId)}.
-        </p>
-      )}
       {kingslayerHit.length > 0 && (
         <p className="-mb-2 text-xs text-zinc-500">
           Kingslayer hit:{" "}
@@ -247,7 +230,6 @@ export function EndScreen({
             colorClass={ownerTextColorClass(state, id)}
             borderColorClass={ownerBorderColorClass(state, id)}
             cards={byTurnPlayed(id)}
-            extraRow={centerAward && centerAward.ownerId === id ? { label: "Center", value: centerAward.value } : undefined}
             votesByRound={new Map(state.voteHistory.filter(({ votes }) => id in votes).map(({ round, votes }) => [round, votes[id]]))}
           />
         ))}

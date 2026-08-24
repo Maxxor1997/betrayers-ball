@@ -122,8 +122,6 @@ export interface ResolvedCard {
 export interface ResolutionResult {
   cards: ResolvedCard[];
   totalsByOwner: Record<string, number>;
-  /** Which player the center pseudo-card's (possibly modified) value transferred to and for how much, if the active center effect makes that kind of transfer. */
-  centerAward: { value: number; ownerId: string } | null;
   /** instanceIds of any card(s) hit by a center effect that subtracts from the board's highest value, if the active center effect does that. */
   kingslayerHit: string[];
 }
@@ -411,7 +409,6 @@ export function resolveBoard(
   return {
     cards,
     totalsByOwner,
-    centerAward: postResult?.centerAward ?? null,
     kingslayerHit: postResult?.kingslayerHit ?? [],
   };
 }

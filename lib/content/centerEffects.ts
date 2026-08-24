@@ -1,6 +1,6 @@
 import { getAdjacentCards, inBounds, parsePosKey, posKey } from "@/lib/engine/board";
 import { redrawHands, Rng } from "@/lib/engine/deck";
-import type { ResolvedCard } from "@/lib/engine/resolution";
+import { FLOORED_AT_ZERO_LABEL, type ResolvedCard } from "@/lib/engine/resolution";
 import { Board, BoardBounds, CardInstance, CenterEffectId, GameConfig, GameState, Position } from "@/lib/engine/types";
 
 /**
@@ -56,7 +56,7 @@ export interface CenterEffectDef {
     cards: ResolvedCard[];
     totalsByOwner: Record<string, number>;
     playerIds?: string[];
-  }) => { centerAward?: { value: number; ownerId: string } | null; kingslayerHit?: string[] };
+  }) => { kingslayerHit?: string[] };
 
   /** Overrides the default `round >= flipUnlockRound` gate. Unused by any current effect -- kept for a future round-gating effect. */
   flipGate?: (round: number, config: GameConfig) => boolean;
@@ -81,15 +81,13 @@ export interface CenterEffectDef {
 }
 
 /**
- * Kingslayer only (Champion of the Weak/Lazaret pays out a flat PSEUDO_CARD_BASE_VALUE
- * with no adjacency modifier -- see its postResolution below): the center is "a
- * scorable card worth PSEUDO_CARD_BASE_VALUE (modifiable by adjacent buff/dent effects
- * during resolution)". A fully general version would mean synthesizing a fake
- * CardInstance for the center and teaching every CardId-keyed lookup (deck building,
- * CARD_DEFS) to tolerate a non-drawable pseudo-card -- real rework, not additive. This
- * scopes it to the flat, identity-blind positional modifiers: Bannerman (+1 -- center
- * is never a Footman), Earthshaker (-1 if face-up and center shares its row),
- * Skysplitter (-3 if directly above/below).
+ * Kingslayer only: the center is "a scorable card worth KINGSLAYER_BASE_VALUE
+ * (modifiable by adjacent buff/dent effects during resolution)". A fully general
+ * version would mean synthesizing a fake CardInstance for the center and teaching
+ * every CardId-keyed lookup (deck building, CARD_DEFS) to tolerate a non-drawable
+ * pseudo-card -- real rework, not additive. This scopes it to the flat, identity-blind
+ * positional modifiers: Bannerman (+1 -- center is never a Footman), Earthshaker (-1 if
+ * face-up and center shares its row), Skysplitter (-3 if directly above/below).
  */
 export function computeCenterModifier(board: Board, bounds: BoardBounds, negated: Set<string>): number {
   let delta = 0;
@@ -121,22 +119,23 @@ export function computeCenterModifier(board: Board, bounds: BoardBounds, negated
 const RECKONING_TRIGGER_ROUND = 4;
 
 /**
- * Base "value" of the Champion of the Weak / Kingslayer pseudo-card, before
- * computeCenterModifier's adjacency adjustments -- exported so tests can compute
- * expected totals from this instead of duplicating the literal.
+ * Base "value" of the Kingslayer pseudo-card, before computeCenterModifier's adjacency
+ * adjustments -- exported so tests can compute expected totals from this instead of
+ * duplicating the literal.
  */
-export const PSEUDO_CARD_BASE_VALUE = 3;
+export const KINGSLAYER_BASE_VALUE = 5;
 
 /**
- * Live (pre-resolution) value of the center pseudo-card for Champion of the Weak /
- * Kingslayer, for UI display -- same base + computeCenterModifier math postResolution
- * uses, just run against the board as it currently sits instead of at scoring time.
- * Null for every other center effect, which has no pseudo-card to show a value for.
+ * Live (pre-resolution) value of the center pseudo-card for Kingslayer, for UI
+ * display -- same base + computeCenterModifier math postResolution uses, just run
+ * against the board as it currently sits instead of at scoring time. Null for every
+ * other center effect, including Champion of the Weak (The Lazaret) -- it doubles an
+ * already-placed card's value rather than awarding a pseudo-card of its own, so there's
+ * nothing to show a live value for.
  */
 export function pseudoCardLiveValue(id: CenterEffectId, board: Board, bounds: BoardBounds, negated: Set<string>): number | null {
-  if (id === "championOfTheWeak") return PSEUDO_CARD_BASE_VALUE;
   if (id !== "kingslayer") return null;
-  return PSEUDO_CARD_BASE_VALUE + computeCenterModifier(board, bounds, negated);
+  return KINGSLAYER_BASE_VALUE + computeCenterModifier(board, bounds, negated);
 }
 
 /** Splits a location's label around its titleHighlight for a two-tone title (default-color prefix/suffix, themeColorClass-colored highlight) -- see CenterEffectDef.titleHighlight. Falls back to the whole label as the highlight if it's somehow not found (shouldn't happen for any real entry below). */
@@ -197,15 +196,31 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "The Lazaret",
     themeColorClass: "text-lime-700 dark:text-lime-500",
     titleHighlight: "Lazaret",
-    description: `At the end of scoring, the single lowest-valued card on the board gains ${PSEUDO_CARD_BASE_VALUE} points -- a tie for lowest means no transfer.`,
+    description: "At the end of the game, each player's single lowest-valued face-down card is worth double (a tie is broken by whichever was placed last).",
     postResolution: ({ cards, totalsByOwner }) => {
-      if (cards.length === 0) return {};
-      const minValue = Math.min(...cards.map((c) => c.finalValue));
-      const lowest = cards.filter((c) => c.finalValue === minValue);
-      if (lowest.length !== 1) return {};
-      const ownerId = lowest[0].ownerId;
-      totalsByOwner[ownerId] = (totalsByOwner[ownerId] ?? 0) + PSEUDO_CARD_BASE_VALUE;
-      return { centerAward: { value: PSEUDO_CARD_BASE_VALUE, ownerId } };
+      const byOwner = new Map<string, ResolvedCard[]>();
+      for (const c of cards) {
+        if (c.faceUp) continue;
+        const list = byOwner.get(c.ownerId);
+        if (list) list.push(c);
+        else byOwner.set(c.ownerId, [c]);
+      }
+      for (const ownerCards of byOwner.values()) {
+        // `cards` (and so `ownerCards`) follows board.entries() iteration order, which
+        // is placement order (a Map preserves insertion order) -- `<=` (not `<`) means
+        // a later card that merely ties the current lowest still overwrites it, so
+        // this deterministically lands on whichever tied-for-lowest card was placed
+        // last, same tiebreak convention as the Summit, no RNG needed.
+        let lowest = ownerCards[0];
+        for (const c of ownerCards) {
+          if (c.finalValue <= lowest.finalValue) lowest = c;
+        }
+        const bonus = lowest.finalValue;
+        lowest.breakdown.push({ label: `${CENTER_EFFECTS.championOfTheWeak.label} (lowest face-down, doubled)`, amount: bonus, source: "external" });
+        lowest.finalValue += bonus;
+        totalsByOwner[lowest.ownerId] = (totalsByOwner[lowest.ownerId] ?? 0) + bonus;
+      }
+      return {};
     },
   },
 
@@ -213,10 +228,11 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "Dragon Gate",
     themeColorClass: "text-purple-700 dark:text-purple-500",
     titleHighlight: "Dragon",
-    description: "At the end of the game, each player's single highest-valued card is worth double (a tie is broken by whichever was placed last).",
+    description: "At the end of the game, each player's single highest-valued face-up card is worth double (a tie is broken by whichever was placed last).",
     postResolution: ({ cards, totalsByOwner }) => {
       const byOwner = new Map<string, ResolvedCard[]>();
       for (const c of cards) {
+        if (!c.faceUp) continue;
         const list = byOwner.get(c.ownerId);
         if (list) list.push(c);
         else byOwner.set(c.ownerId, [c]);
@@ -232,7 +248,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
           if (c.finalValue >= highest.finalValue) highest = c;
         }
         const bonus = highest.finalValue;
-        highest.breakdown.push({ label: `${CENTER_EFFECTS.summit.label} (highest card, doubled)`, amount: bonus, source: "external" });
+        highest.breakdown.push({ label: `${CENTER_EFFECTS.summit.label} (highest face-up card, doubled)`, amount: bonus, source: "external" });
         highest.finalValue += bonus;
         totalsByOwner[highest.ownerId] = (totalsByOwner[highest.ownerId] ?? 0) + bonus;
       }
@@ -310,18 +326,25 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     // The board tile itself just says "Kingslayer" -- "Kingslayer's Court" is the
     // location's full name (catalog, New Game picker), too long to sit on the tile.
     ownerlessLabel: "Kingslayer",
-    description: `Kingslayer counts as a card worth ${PSEUDO_CARD_BASE_VALUE} (modified by buffs/debuffs). After scoring, its value is subtracted from the highest-value face-up card(s) on the board -- tied cards all get hit.`,
+    description: `Kingslayer counts as a card worth ${KINGSLAYER_BASE_VALUE} (modified by buffs/debuffs). After scoring, its value is subtracted from the highest-value card(s) on the board -- tied cards all get hit.`,
     postResolution: ({ board, bounds, negated, cards, totalsByOwner }) => {
-      const faceUpCards = cards.filter((c) => c.faceUp);
-      if (faceUpCards.length === 0) return {};
-      const kingslayerValue = PSEUDO_CARD_BASE_VALUE + computeCenterModifier(board, bounds, negated);
-      const maxValue = Math.max(...faceUpCards.map((c) => c.finalValue));
+      if (cards.length === 0) return {};
+      const kingslayerValue = KINGSLAYER_BASE_VALUE + computeCenterModifier(board, bounds, negated);
+      const maxValue = Math.max(...cards.map((c) => c.finalValue));
       const kingslayerHit: string[] = [];
-      for (const c of faceUpCards) {
+      for (const c of cards) {
         if (c.finalValue === maxValue) {
-          totalsByOwner[c.ownerId] = (totalsByOwner[c.ownerId] ?? 0) - kingslayerValue;
-          c.breakdown.push({ label: `${CENTER_EFFECTS.kingslayer.ownerlessLabel} (highest face-up value)`, amount: -kingslayerValue, source: "external" });
+          const preHitValue = c.finalValue;
+          c.breakdown.push({ label: `${CENTER_EFFECTS.kingslayer.ownerlessLabel} (highest value)`, amount: -kingslayerValue, source: "external" });
           c.finalValue -= kingslayerValue;
+          // Same universal "never scores negative" floor the main resolution pass
+          // applies to every card's own printed rule -- a post-resolution hit is no
+          // exception, so a big enough Kingslayer value can't drive a card negative.
+          if (c.finalValue < 0) {
+            c.breakdown.push({ label: FLOORED_AT_ZERO_LABEL, amount: -c.finalValue, source: "self" });
+            c.finalValue = 0;
+          }
+          totalsByOwner[c.ownerId] = (totalsByOwner[c.ownerId] ?? 0) - (preHitValue - c.finalValue);
           kingslayerHit.push(c.instanceId);
         }
       }
