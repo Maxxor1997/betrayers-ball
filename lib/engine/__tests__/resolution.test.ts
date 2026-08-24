@@ -519,15 +519,15 @@ describe("resolveBoard — Bannerman", () => {
 });
 
 describe("resolveBoard — Plague Bearer", () => {
-  it("steals 3 from each of 2+ same-type neighbors, gaining 3 per point stolen", () => {
+  it("steals 2 from each of 2+ same-type neighbors, gaining 2 per point stolen", () => {
     const board: Board = new Map();
     const pb = place(board, 1, 1, "PlagueBearer", "p1");
     const f1 = place(board, 0, 1, "Footman", "p2");
     const f2 = place(board, 2, 1, "Footman", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 3);
-    expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 3);
-    expect(find(cards, pb.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base + 6);
+    expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+    expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+    expect(find(cards, pb.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base + 4);
   });
 
   it("does nothing with only 1 neighbor of a given type", () => {
@@ -547,11 +547,11 @@ describe("resolveBoard — Plague Bearer", () => {
     const g1 = place(board, 2, 1, "Giant", "p2", true);
     const g2 = place(board, 2, 3, "Giant", "p2", true);
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 3);
-    expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 3);
-    expect(find(cards, g1.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 3);
-    expect(find(cards, g2.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 3);
-    expect(find(cards, pb.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base + 12);
+    expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+    expect(find(cards, f2.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+    expect(find(cards, g1.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 2);
+    expect(find(cards, g2.instanceId).finalValue).toBe(CARD_DEFS.Giant.base - 2);
+    expect(find(cards, pb.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base + 8);
   });
 
   it("counts another Plague Bearer as a matching neighbor type -- 'same type' includes its own", () => {
@@ -560,10 +560,9 @@ describe("resolveBoard — Plague Bearer", () => {
     const left = place(board, 0, 1, "PlagueBearer", "p2");
     const right = place(board, 2, 1, "PlagueBearer", "p3");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    // base 3 - 3 = 0.
-    expect(find(cards, left.instanceId).finalValue).toBe(0);
-    expect(find(cards, right.instanceId).finalValue).toBe(0);
-    expect(find(cards, center.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base + 6);
+    expect(find(cards, left.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base - 2);
+    expect(find(cards, right.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base - 2);
+    expect(find(cards, center.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base + 4);
   });
 });
 

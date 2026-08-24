@@ -245,7 +245,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Chronicler: {
     id: "Chronicler",
     name: "Doomherald",
-    base: 4,
+    base: 5,
     bucket: "Control",
     text: "If face-up: −3 to adj. Can't be self-flipped",
     fullText:
@@ -281,7 +281,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Earthshaker: {
     id: "Earthshaker",
     name: "Earthshaker",
-    base: 4,
+    base: 5,
     bucket: "Control",
     text: "If face-up: −2 to connected row & col",
     fullText:
@@ -343,12 +343,12 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   PlagueBearer: {
     id: "PlagueBearer",
     name: "Noctule",
-    base: 3,
+    base: 4,
     bucket: "Control",
-    text: "Steals 3 from matching adj. pairs",
+    text: "Steals 2 from matching adj. pairs",
     get fullText() {
       const self = CARD_DEFS.PlagueBearer.name;
-      return `If 2 or more of the cards adjacent to it are the same card type (any owner), ${self} steals 3 points from each of them. This can happen for more than one matching type at once.`;
+      return `If 2 or more of the cards adjacent to it are the same card type (any owner), ${self} steals 2 points from each of them. This can happen for more than one matching type at once.`;
     },
     count: [2, 2, 2, 2, 3, 3, 4],
     valueModifier: ({ board, bounds, pos, self, addDelta }) => {
@@ -362,8 +362,8 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
       for (const group of neighborsByType.values()) {
         if (group.length < 2) continue;
         for (const n of group) {
-          addDelta(n.instanceId, -3, `${CARD_DEFS.PlagueBearer.name} (stolen)`);
-          stolen += 3;
+          addDelta(n.instanceId, -2, `${CARD_DEFS.PlagueBearer.name} (stolen)`);
+          stolen += 2;
         }
       }
       if (stolen > 0) addDelta(self.instanceId, stolen, `${CARD_DEFS.PlagueBearer.name} (stole ${stolen})`);
@@ -457,7 +457,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   PlagueRat: {
     id: "PlagueRat",
     name: "Plague Rat",
-    base: 4,
+    base: 5,
     bucket: "Control",
     text: "Afflicts adj. cards with Plague",
     get fullText() {
