@@ -189,7 +189,7 @@ export function InstructionsModal({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">How to play</h2>
+          <h2 className="text-lg font-semibold">Rules</h2>
           <button
             onClick={onClose}
             className="rounded-full border border-zinc-300 px-3 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"

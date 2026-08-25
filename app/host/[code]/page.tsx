@@ -92,7 +92,7 @@ function Display() {
             onClick={() => setShowInstructions(true)}
             className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
           >
-            How to play
+            Rules
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -101,7 +101,7 @@ function Display() {
               onClick={() => setShowRoomStats(true)}
               className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
             >
-              Room Stats
+              Stats
             </button>
           )}
           {showGame && session.lobby && session.gameState && (
