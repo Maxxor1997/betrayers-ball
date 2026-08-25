@@ -16,62 +16,7 @@ import {
   restoreHumanStatsBackup,
 } from "@/lib/playtest/humanStats";
 import { LOCATION_COMPLEXITY_ORDER } from "./CardCatalog";
-
-function fmtSigned(n: number | null, decimals = 2): string {
-  if (n === null) return "—";
-  const s = n.toFixed(decimals);
-  return n > 0 ? `+${s}` : s;
-}
-
-type SortDir = 1 | -1;
-
-/** One sort-state hook per table (not one shared across all three) -- each table's columns are independent, so sorting "By card" shouldn't touch "By location"'s order. */
-function useTableSort<K extends string>(defaultKey: K, defaultDir: SortDir = 1) {
-  const [sort, setSort] = useState<{ key: K; dir: SortDir }>({ key: defaultKey, dir: defaultDir });
-  const toggle = (key: K) => setSort((prev) => (prev.key === key ? { key, dir: (prev.dir * -1) as SortDir } : { key, dir: 1 }));
-  return [sort, toggle] as const;
-}
-
-function sortRows<T>(rows: T[], keyFn: (row: T) => number | string, dir: SortDir): T[] {
-  return [...rows].sort((a, b) => {
-    const av = keyFn(a);
-    const bv = keyFn(b);
-    if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * dir;
-    return ((av as number) - (bv as number)) * dir;
-  });
-}
-
-/** Clickable column header -- click sorts by this column ascending, click again for descending. Arrow only shown on the currently-active column. */
-function SortTh<K extends string>({
-  label,
-  sortKey,
-  active,
-  dir,
-  onClick,
-  align = "left",
-  title,
-}: {
-  label: string;
-  sortKey: K;
-  active: boolean;
-  dir: SortDir;
-  onClick: (key: K) => void;
-  align?: "left" | "right";
-  title?: string;
-}) {
-  return (
-    <th
-      className={`cursor-pointer px-3 py-2 select-none hover:text-zinc-700 dark:hover:text-zinc-300 ${align === "right" ? "text-right" : "text-left"}`}
-      onClick={() => onClick(sortKey)}
-      title={title}
-    >
-      <span className={`inline-flex items-center gap-1 whitespace-nowrap ${align === "right" ? "flex-row-reverse" : ""}`}>
-        {label}
-        <span className={`text-[8px] ${active ? "" : "opacity-0"}`}>{dir === 1 ? "▲" : "▼"}</span>
-      </span>
-    </th>
-  );
-}
+import { CardStatsTable, fmtSigned, SortTh, sortRows, useTableSort } from "./CardStatsTable";
 
 /** Markdown export of everything in the modal -- same "one paste" spirit as the playtest page's own copy button. */
 function buildMarkdown(placementStats: HumanPlacementStats, cardRows: CardStatsRow[]): string {
@@ -152,7 +97,6 @@ export function MyStatsModal({ onClose }: { onClose: () => void }) {
     .map(Number)
     .sort((a, b) => a - b);
   const locations = LOCATION_COMPLEXITY_ORDER.filter((id) => placementStats.byCenterEffect[id]);
-  const playedCardRows = [...cardRows].filter((r) => r.played > 0);
 
   const [pcSort, togglePcSort] = useTableSort<PlacementSortKey>("label");
   const playerCountRows = sortRows(
@@ -167,14 +111,6 @@ export function MyStatsModal({ onClose }: { onClose: () => void }) {
     PLACEMENT_KEY_FNS[locSort.key],
     locSort.dir
   );
-
-  const [cardSort, toggleCardSort] = useTableSort<"label" | "played" | "delta">("played", -1);
-  const cardKeyFns: Record<"label" | "played" | "delta", (r: CardStatsRow) => number | string> = {
-    label: (r) => CARD_DEFS[r.cardId].name,
-    played: (r) => r.played,
-    delta: (r) => r.avgPlacementDelta ?? -Infinity,
-  };
-  const sortedPlayedCardRows = sortRows(playedCardRows, cardKeyFns[cardSort.key], cardSort.dir);
 
   function copyStats() {
     navigator.clipboard.writeText(buildMarkdown(placementStats, cardRows)).then(() => {
@@ -380,46 +316,7 @@ export function MyStatsModal({ onClose }: { onClose: () => void }) {
               </section>
             )}
 
-            {playedCardRows.length > 0 && (
-              <section>
-                <h3 className="mb-1.5 font-semibold">By card</h3>
-                <div className="w-full overflow-x-auto rounded-lg border border-zinc-300 dark:border-zinc-700">
-                  <table className="w-full text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-zinc-300 bg-zinc-50 text-xs text-zinc-500 uppercase dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
-                        <SortTh label="Card" sortKey="label" active={cardSort.key === "label"} dir={cardSort.dir} onClick={toggleCardSort} />
-                        <SortTh
-                          label="Played"
-                          sortKey="played"
-                          active={cardSort.key === "played"}
-                          dir={cardSort.dir}
-                          onClick={toggleCardSort}
-                          align="right"
-                        />
-                        <SortTh
-                          label="Placement Δ"
-                          sortKey="delta"
-                          active={cardSort.key === "delta"}
-                          dir={cardSort.dir}
-                          onClick={toggleCardSort}
-                          align="right"
-                          title="Average (your rank - baseline) / (half the game's rank spread), on a fixed -1..+1 scale, when this card's in play -- negative means you tend to place better than a random seat would, positive means worse."
-                        />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedPlayedCardRows.map((row) => (
-                        <tr key={row.cardId} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
-                          <td className="px-3 py-1.5 font-medium whitespace-nowrap">{CARD_DEFS[row.cardId].name}</td>
-                          <td className="px-3 py-1.5 text-right">{row.played}</td>
-                          <td className="px-3 py-1.5 text-right">{fmtSigned(row.avgPlacementDelta)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
+            <CardStatsTable rows={cardRows} />
 
             <section className="flex items-center justify-end gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-800">
               {confirmingClear ? (

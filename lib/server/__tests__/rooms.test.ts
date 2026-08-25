@@ -71,7 +71,7 @@ describe("RoomRegistry", () => {
     session.addPlayer("Bob");
 
     const summaries = registry.listSummaries();
-    expect(summaries).toEqual([{ roomCode: session.roomCode, hostName: "Alice", hostIsDisplay: false, seatedCount: 2, playerCount: 3, centerEffect: "none", started: false, hasPassword: false }]);
+    expect(summaries).toEqual([{ roomCode: session.roomCode, hostPlayerId: session.hostPlayerId, hostName: "Alice", hostIsDisplay: false, seatedCount: 2, playerCount: 3, centerEffect: "none", started: false, hasPassword: false }]);
   });
 
   it("listSummaries still includes a room once it has started -- so a player who went back to home can find their way back in", () => {
@@ -80,7 +80,7 @@ describe("RoomRegistry", () => {
     session.start(session.hostToken);
 
     const summaries = registry.listSummaries();
-    expect(summaries).toEqual([{ roomCode: session.roomCode, hostName: "Alice", hostIsDisplay: false, seatedCount: 1, playerCount: 2, centerEffect: "none", started: true, hasPassword: false }]);
+    expect(summaries).toEqual([{ roomCode: session.roomCode, hostPlayerId: session.hostPlayerId, hostName: "Alice", hostIsDisplay: false, seatedCount: 1, playerCount: 2, centerEffect: "none", started: true, hasPassword: false }]);
   });
 
   it("delete removes a room from both get() and listSummaries()", () => {
@@ -90,6 +90,39 @@ describe("RoomRegistry", () => {
 
     expect(registry.get(session.roomCode)).toBeUndefined();
     expect(registry.listSummaries()).toEqual([]);
+  });
+});
+
+describe("RoomRegistry -- one hosted room per device", () => {
+  it("hasActiveRoomForDevice is false for a device that's never hosted anything", () => {
+    const registry = new RoomRegistry();
+    expect(registry.hasActiveRoomForDevice("device-1")).toBe(false);
+  });
+
+  it("hasActiveRoomForDevice is false for undefined -- callers with no real device id skip the check entirely", () => {
+    const registry = new RoomRegistry();
+    registry.create((roomCode) => new GameSession(roomCode, "Alice", 2, "none", "http://test.local:3000", noopHandlers()), "device-1");
+    expect(registry.hasActiveRoomForDevice(undefined)).toBe(false);
+  });
+
+  it("becomes true once a device's room is created, and stays scoped to that device", () => {
+    const registry = new RoomRegistry();
+    registry.create((roomCode) => new GameSession(roomCode, "Alice", 2, "none", "http://test.local:3000", noopHandlers()), "device-1");
+    expect(registry.hasActiveRoomForDevice("device-1")).toBe(true);
+    expect(registry.hasActiveRoomForDevice("device-2")).toBe(false);
+  });
+
+  it("clears once that room is deleted, freeing the device to host again", () => {
+    const registry = new RoomRegistry();
+    const session = registry.create((roomCode) => new GameSession(roomCode, "Alice", 2, "none", "http://test.local:3000", noopHandlers()), "device-1");
+    registry.delete(session.roomCode);
+    expect(registry.hasActiveRoomForDevice("device-1")).toBe(false);
+  });
+
+  it("a device with no hostDeviceId passed to create() never registers, same as never hosting", () => {
+    const registry = new RoomRegistry();
+    registry.create((roomCode) => new GameSession(roomCode, "Alice", 2, "none", "http://test.local:3000", noopHandlers()));
+    expect(registry.hasActiveRoomForDevice("device-1")).toBe(false);
   });
 });
 

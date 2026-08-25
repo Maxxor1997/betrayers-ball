@@ -41,8 +41,11 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
   }
 
   io.on("connection", (socket: IOSocket) => {
-    socket.on("room:create", ({ hostName, playerCount, centerEffect, asDisplay, aiDifficulty, password }, ack) => {
+    socket.on("room:create", ({ hostName, playerCount, centerEffect, asDisplay, aiDifficulty, password, deviceId }, ack) => {
       try {
+        if (registry.hasActiveRoomForDevice(deviceId)) {
+          return ack({ ok: false, error: "This device already hosts an active room. Close it before starting another." });
+        }
         const session = registry.create(
           (roomCode) =>
             new GameSession(
@@ -58,8 +61,10 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
               undefined,
               asDisplay,
               aiDifficulty,
-              password
-            )
+              password,
+              deviceId
+            ),
+          deviceId
         );
         attach(socket, session.roomCode, session.hostPlayerId);
         // Unlike addPlayer/rejoin, GameSession's constructor never calls
@@ -73,7 +78,7 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
       }
     });
 
-    socket.on("room:join", ({ roomCode, name, password }, ack) => {
+    socket.on("room:join", ({ roomCode, name, password, deviceId }, ack) => {
       const session = registry.get(roomCode);
       if (!session) return ack({ ok: false, error: "No game found at that room code." });
       // GameSession.addPlayer broadcasts lobby:update synchronously, as part of the
@@ -82,7 +87,7 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
       // broadcast reaches everyone *already* in the room, but not this socket, so the
       // explicit emit after attach() below is this joiner's only guaranteed copy of
       // the lobby state their own join just caused.
-      const result = session.addPlayer(name?.trim() || "Player", password);
+      const result = session.addPlayer(name?.trim() || "Player", password, deviceId);
       if ("error" in result) return ack({ ok: false, error: result.error });
       attach(socket, session.roomCode, result.playerId);
       socket.emit("lobby:update", session.getLobbyState());

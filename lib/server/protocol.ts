@@ -1,4 +1,5 @@
 import { AiDifficulty, CardInstance, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
+import { CardStatsRow } from "@/lib/playtest/cardStats";
 
 /**
  * Reserved pseudo-playerId for a "shared screen" host -- see board_game_design.md's
@@ -56,6 +57,8 @@ export interface LobbyState {
   serverOrigin: string;
   /** Every seat that's finished at least one game in this room -- see RoomStatsEntry. Empty until the first game in the room ends. */
   roomStats: RoomStatsEntry[];
+  /** Per-card breakdown across every game played in this room so far (including past rematches) -- same shape as MyStatsModal's single-player "By card" table, just scoped to this room instead of one browser's history. Empty until the first game in the room ends. */
+  roomCardStats: CardStatsRow[];
 }
 
 /**
@@ -97,6 +100,8 @@ export interface CreateRoomPayload {
   aiDifficulty: AiDifficulty;
   /** Optional, blank/omitted means no password (existing behavior, unchanged) -- gates room:join only. Doesn't hide the room from rooms:list, and a seat's saved reconnect token (room:rejoin) bypasses it entirely -- once you've been seated, you don't need to keep re-proving it. */
   password?: string;
+  /** See app/hooks/deviceId.ts -- lets RoomRegistry enforce one hosted room per device. Optional so older/test callers without a real device id just skip that check. */
+  deviceId?: string;
 }
 export interface CreateRoomResult {
   roomCode: string;
@@ -112,6 +117,8 @@ export interface JoinRoomPayload {
   name: string;
   /** Required (and checked) only if the room was created with one -- see CreateRoomPayload.password. */
   password?: string;
+  /** See app/hooks/deviceId.ts -- lets GameSession enforce one seat per device per room (fresh joins only -- room:rejoin is unaffected, see its own payload). Optional so older/test callers without a real device id just skip that check. */
+  deviceId?: string;
 }
 export interface JoinRoomResult {
   playerId: string;
@@ -164,6 +171,7 @@ export interface GameActionPayload {
  */
 export interface RoomSummary {
   roomCode: string;
+  hostPlayerId: string;
   hostName: string;
   hostIsDisplay: boolean;
   seatedCount: number;

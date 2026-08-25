@@ -6,7 +6,8 @@ import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game
 import { redactedStateFor } from "@/lib/engine/playerView";
 import { currentPlayerId } from "@/lib/engine/turns";
 import { AiDifficulty, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
-import { computeRanks, placementBaseline, placementMaxDeviation } from "@/lib/playtest/cardStats";
+import { resolveBoard } from "@/lib/engine/resolution";
+import { computeRanks, createEmptyStats, placementBaseline, placementMaxDeviation, PlaytestStats, statsSummary, tallyGame } from "@/lib/playtest/cardStats";
 import { DISPLAY_VIEWER_ID, LobbyState, RoomStatsEntry, RoomSummary, SeatInfo, toWireState, WireGameState } from "./protocol";
 
 /** Same pacing as the single-player AI turn effect in app/play/page.tsx, so a mixed human/AI room feels consistent regardless of mode. */
@@ -21,6 +22,8 @@ export const ENDED_IDLE_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 interface Seat extends SeatInfo {
   /** Undefined for AI seats -- never dealt a token since nothing ever authenticates as them. */
   token?: string;
+  /** See app/hooks/deviceId.ts. Undefined for AI seats, same as token -- nothing real connects as them. Used by addPlayer to reject a second fresh join from a device that already holds a seat here (rejoin, which reuses this same seat via its token, is unaffected). */
+  deviceId?: string;
 }
 
 /**
@@ -65,6 +68,8 @@ export class GameSession {
    * result. Never reset by rematch, only implicitly by the room itself going away.
    */
   private readonly roomStats = new Map<string, { games: number; wins: number; placementDeltaSum: number }>();
+  /** Per-card breakdown for this room only, same shape/tallying as the bulk playtest simulator's own stats -- see RoomStatsModal's collapsed "By card" section. */
+  private readonly roomCardStats: PlaytestStats = createEmptyStats();
   /** Last time anyone actually did something in this room -- see touch()/isReapable(). Starts at creation time, since a freshly-created lobby is itself a form of activity. */
   private lastActivityAt = Date.now();
 
@@ -87,7 +92,9 @@ export class GameSession {
     /** Trailing optional, defaulting to "medium" -- so every existing call site (including tests) that predates AI difficulty keeps working unchanged. */
     aiDifficulty: AiDifficulty = "medium",
     /** Trailing optional -- blank/undefined means no password, same as every call site that predates this feature. Trimmed here (not by the caller) so " " isn't treated as a real password. */
-    password?: string
+    password?: string,
+    /** The host's own device id (see app/hooks/deviceId.ts) -- undefined for a display-hosted room (no host seat to attach it to) or any call site that predates this feature. */
+    hostDeviceId?: string
   ) {
     if (!Number.isInteger(playerCount) || playerCount < MIN_PLAYERS || playerCount > MAX_PLAYERS) {
       throw new Error(`playerCount must be an integer between ${MIN_PLAYERS} and ${MAX_PLAYERS}`);
@@ -112,17 +119,17 @@ export class GameSession {
       this.hostPlayerId = DISPLAY_VIEWER_ID;
       this.hostTokenValue = randomUUID();
     } else {
-      const host = this.newSeat(hostName, false);
+      const host = this.newSeat(hostName, false, hostDeviceId);
       this.hostPlayerId = host.playerId;
       this.seats.set(host.playerId, host);
       this.hostTokenValue = host.token!;
     }
   }
 
-  private newSeat(name: string, isAI: boolean): Seat {
+  private newSeat(name: string, isAI: boolean, deviceId?: string): Seat {
     const playerId = isAI ? `ai-${this.nextSeatIndex}` : `p${this.nextSeatIndex}`;
     this.nextSeatIndex++;
-    return { playerId, name, isAI, connected: true, token: isAI ? undefined : randomUUID() };
+    return { playerId, name, isAI, connected: true, token: isAI ? undefined : randomUUID(), deviceId: isAI ? undefined : deviceId };
   }
 
   get started(): boolean {
@@ -143,6 +150,7 @@ export class GameSession {
   getSummary(): RoomSummary {
     return {
       roomCode: this.roomCode,
+      hostPlayerId: this.hostPlayerId,
       hostName: this.hostNameLabel,
       hostIsDisplay: this.displayHosted,
       seatedCount: [...this.seats.values()].filter((s) => !s.isAI).length,
@@ -164,6 +172,7 @@ export class GameSession {
       started: this.started,
       serverOrigin: this.serverOrigin,
       roomStats: [...this.roomStats.entries()].map(([playerId, s]): RoomStatsEntry => ({ playerId, ...s })),
+      roomCardStats: statsSummary(this.roomCardStats),
     };
   }
 
@@ -174,13 +183,20 @@ export class GameSession {
    * password change (there is none, currently -- it's fixed at room creation) or a
    * forgotten password never locks an already-seated player out.
    */
-  addPlayer(name: string, password?: string): { playerId: string; token: string } | { error: string } {
+  addPlayer(name: string, password?: string, deviceId?: string): { playerId: string; token: string } | { error: string } {
     if (this.started) return { error: "This game has already started." };
     if (this.roomPassword !== undefined && password?.trim().toUpperCase() !== this.roomPassword) return { error: "Incorrect room password." };
     const humanSeats = [...this.seats.values()].filter((s) => !s.isAI);
     if (humanSeats.length >= this.playerCount) return { error: "This room is full." };
+    // Fresh join only -- rejoin() re-attaches to an EXISTING seat via its token, so a
+    // device reconnecting to its own seat (a real refresh/reopened tab) never hits
+    // this at all. This only blocks a device trying to claim a SECOND, different seat
+    // in the same room.
+    if (deviceId !== undefined && humanSeats.some((s) => s.deviceId === deviceId)) {
+      return { error: "This device already has a seat in this room." };
+    }
 
-    const seat = this.newSeat(name, false);
+    const seat = this.newSeat(name, false, deviceId);
     this.seats.set(seat.playerId, seat);
     this.touch();
     this.onLobbyChange(this.getLobbyState());
@@ -247,15 +263,19 @@ export class GameSession {
   /**
    * Host-only. Deals a fresh game to the exact same seats (same humans, same AI slots
    * filled at the original Start) without touching the room itself -- the same join
-   * link/lobby keeps working, nobody has to reconnect. Only allowed once the previous
-   * game has actually ended; there's no sensible "rematch" mid-game. `centerEffect` can
-   * change the location for this next game (unlike player count, which is fixed to the
-   * seats already at the table) -- already resolved from "random" by the caller, same
-   * as room:create. `aiDifficulty` can change too, same reasoning.
+   * link/lobby keeps working, nobody has to reconnect. Deliberately allowed mid-game
+   * too (not just once the previous game has ended) -- the host may want to restart
+   * with a different AI difficulty or location without waiting the current game out,
+   * same as single-player's always-available "New Game". Discards whatever progress
+   * the in-progress game had; every other seated player just sees a fresh board appear
+   * on their next state push. `centerEffect` can change the location for this next
+   * game (unlike player count, which is fixed to the seats already at the table) --
+   * already resolved from "random" by the caller, same as room:create. `aiDifficulty`
+   * can change too, same reasoning.
    */
   rematch(callerToken: string, centerEffect: CenterEffectId, aiDifficulty: AiDifficulty): { ok: true } | { error: string } {
     if (!this.isHost(callerToken)) return { error: "Only the host can start a new game." };
-    if (!this.state || this.state.phase !== "ended") return { error: "The current game hasn't ended yet." };
+    if (!this.state) return { error: "The game hasn't started yet." };
 
     this.centerEffect = centerEffect;
     this.aiDifficulty = aiDifficulty;
@@ -264,8 +284,19 @@ export class GameSession {
     return { ok: true };
   }
 
-  /** Shared by start() and rematch() -- deals a fresh GameState to the current seat lineup and kicks off play. */
+  /**
+   * Shared by start() and rematch() -- deals a fresh GameState to the current seat
+   * lineup and kicks off play. Cancels any AI turn timer still pending from whatever
+   * game came before (only ever possible via a mid-game rematch, which can now catch
+   * an AI's move mid-flight) -- without this, that stale timer would later fire against
+   * the just-dealt state instead of the abandoned one, since it reads `this.state`
+   * fresh rather than capturing it up front.
+   */
   private dealAndStart(): void {
+    if (this.aiTimer) {
+      clearTimeout(this.aiTimer);
+      this.aiTimer = null;
+    }
     const allIds = [...this.seats.keys()];
     const aiIds = [...this.seats.values()].filter((s) => s.isAI).map((s) => s.playerId);
     const config = configForPlayerCount(this.playerCount, this.centerEffect, this.aiDifficulty);
@@ -330,6 +361,14 @@ export class GameSession {
       bucket.placementDeltaSum += (rank - placementBaseline(this.playerCount)) / placementMaxDeviation(this.playerCount);
       this.roomStats.set(player.id, bucket);
     }
+    const resolved = resolveBoard(
+      state.board,
+      state.config.boardBounds,
+      state.round,
+      state.config.centerEffect,
+      state.players.map((p) => p.id)
+    );
+    tallyGame(this.roomCardStats, resolved.cards, state.result.scores, this.playerCount, state.round, state.config.centerEffect);
     this.onLobbyChange(this.getLobbyState());
   }
 
@@ -388,8 +427,24 @@ export class GameSession {
       if (!this.state || this.state.phase !== "playing") return;
       const activeId = currentPlayerId(this.state);
       if (this.seats.get(activeId)?.isAI !== true) return;
+
+      // Diagnostic only -- see the "AI is slower in multiplayer" investigation this
+      // instrumentation exists to feed. computeMs isolates the AI search itself (the
+      // suspected event-loop-blocking cost, since it runs synchronously on the same
+      // process every other room's socket handling shares); totalMs also includes
+      // setState's redaction/serialize/broadcast fan-out to every seat, which earlier
+      // analysis found cheap at this game's scale but is logged alongside computeMs
+      // anyway so that assumption stays checkable against a real session instead of
+      // just this file's own comments.
+      const startedAt = performance.now();
       const action = chooseAiActionForDifficulty(this.state, activeId, this.state.config.aiDifficulty, this.rng);
+      const computeMs = performance.now() - startedAt;
       this.setState(applyAction(this.state, action, this.rng, this.computeVote));
+      const totalMs = performance.now() - startedAt;
+      console.log(
+        `[ai-timing] room=${this.roomCode} difficulty=${this.aiDifficulty} action=${action.type} computeMs=${computeMs.toFixed(1)} totalMs=${totalMs.toFixed(1)}`
+      );
+
       this.scheduleAiTurnIfNeeded();
     }, AI_TURN_DELAY_MS);
   }

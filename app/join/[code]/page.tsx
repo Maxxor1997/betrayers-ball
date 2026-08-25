@@ -54,6 +54,7 @@ function Room() {
   const session = useMultiplayerSession(roomCode);
   const [showInstructions, setShowInstructions] = useState(false);
   const [showRoomStats, setShowRoomStats] = useState(false);
+  const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(null);
   const [confirmingEnd, setConfirmingEnd] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => setIsMobile(isMobileViewport()), []);
@@ -79,6 +80,7 @@ function Room() {
 
   const isHost = !!session.lobby && session.myPlayerId === session.lobby.hostPlayerId;
   const showGame = !session.roomClosed && session.connected && !session.needsName && session.lobby?.started && session.gameState && session.myPlayerId;
+  const gameEnded = session.gameState?.phase === "ended";
 
   const header = (
     <header className="flex w-full max-w-4xl flex-col gap-2">
@@ -123,6 +125,17 @@ function Room() {
               Room Stats
             </button>
           )}
+          {showGame && isHost && session.lobby && session.gameState && (
+            <button
+              onClick={() =>
+                setNewGameSetup({ playerCount: session.lobby!.playerCount, centerEffect: "random", aiDifficulty: session.gameState!.config.aiDifficulty })
+              }
+              title={gameEnded ? undefined : "Starting a new game abandons the current one for everyone in this room."}
+              className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              New Game
+            </button>
+          )}
           {!session.roomClosed && isHost && (
             <button
               onClick={() => setConfirmingEnd(true)}
@@ -139,6 +152,22 @@ function Room() {
   const popups = (
     <>
       {showInstructions && <InstructionsModal onClose={() => setShowInstructions(false)} />}
+      {newGameSetup && session.gameState && (
+        <NewGameModal
+          title="New game"
+          setup={newGameSetup}
+          onChange={setNewGameSetup}
+          onCancel={() => setNewGameSetup(null)}
+          onConfirm={() => {
+            const pool = randomCenterEffectPool(newGameSetup.playerCount);
+            const centerEffect = newGameSetup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : newGameSetup.centerEffect;
+            session.rematch(centerEffect, newGameSetup.aiDifficulty);
+            setNewGameSetup(null);
+          }}
+          confirmLabel="Start"
+          showPlayerCount={false}
+        />
+      )}
       {showRoomStats && session.lobby && <RoomStatsModal lobby={session.lobby} onClose={() => setShowRoomStats(false)} />}
 
       {confirmingEnd && (
@@ -181,6 +210,7 @@ function Room() {
         {popups}
         <GameView
           header={header}
+          roomCode={roomCode}
           state={session.gameState}
           lobby={session.lobby}
           myPlayerId={session.myPlayerId}
@@ -377,6 +407,7 @@ export function SeatRow({ seat, isHost, isYou }: { seat: SeatInfo; isHost: boole
 
 function GameView({
   state,
+  roomCode,
   lobby,
   myPlayerId,
   dispatch,
@@ -391,6 +422,7 @@ function GameView({
    * CardCatalog doc comment). Room() computes it once so it can also show above the
    * lobby/name-entry/connecting screens, which never mount this component at all. */
   header: React.ReactNode;
+  roomCode: string;
   state: GameState;
   lobby: LobbyState;
   myPlayerId: string;
@@ -402,9 +434,6 @@ function GameView({
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [pendingFlip, setPendingFlip] = useState<{ instanceId: string; label: string } | null>(null);
-  // Rematch's own location picker -- player count isn't reconfigurable (fixed to the
-  // room's existing seats), so this only ever asks for a center effect.
-  const [rematchSetup, setRematchSetup] = useState<NewGameSetup | null>(null);
   // Brief flash of TurnActionChecklist's second item as checked right after placing --
   // placing normally ends the turn (and this component's own isMyTurn) immediately, so
   // without this the player would never actually see it tick before the turn moves on.
@@ -592,7 +621,25 @@ function GameView({
             footer={
               isHost ? (
                 <button
-                  onClick={() => setRematchSetup({ playerCount: lobby.playerCount, centerEffect: "random", aiDifficulty: state.config.aiDifficulty })}
+                  onClick={() => {
+                    // No setup modal -- reuses this room's own settings automatically.
+                    // centerEffectMode (the RAW, pre-resolution choice saved at room
+                    // creation -- see createMultiplayerRoom.ts) is what makes this a
+                    // real reroll rather than always repeating whatever the last game
+                    // happened to land on: state.config.centerEffect only ever holds
+                    // the already-resolved concrete id, so a room originally set to
+                    // "Random" needs this separate signal to keep rerolling each
+                    // rematch instead of quietly becoming a fixed location after game 1.
+                    const mode = loadCredentials(roomCode)?.centerEffectMode ?? state.config.centerEffect;
+                    const centerEffect =
+                      mode === "random"
+                        ? (() => {
+                            const pool = randomCenterEffectPool(lobby.playerCount);
+                            return pool[Math.floor(Math.random() * pool.length)];
+                          })()
+                        : mode;
+                    rematch(centerEffect, state.config.aiDifficulty);
+                  }}
                   className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-sm whitespace-nowrap text-white dark:bg-zinc-100 dark:text-black"
                 >
                   Play again (same room)
@@ -601,23 +648,6 @@ function GameView({
                 <p className="shrink-0 text-sm whitespace-nowrap text-zinc-500">Waiting for the host to start a new game…</p>
               )
             }
-          />
-        )}
-
-        {rematchSetup && (
-          <NewGameModal
-            title="Play again"
-            setup={rematchSetup}
-            onChange={setRematchSetup}
-            onCancel={() => setRematchSetup(null)}
-            onConfirm={() => {
-              const pool = randomCenterEffectPool(rematchSetup.playerCount);
-              const centerEffect = rematchSetup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : rematchSetup.centerEffect;
-              rematch(centerEffect, rematchSetup.aiDifficulty);
-              setRematchSetup(null);
-            }}
-            confirmLabel="Start"
-            showPlayerCount={false}
           />
         )}
 

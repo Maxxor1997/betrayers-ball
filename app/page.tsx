@@ -169,8 +169,18 @@ function ActiveSessions() {
       setJoinCodeError(result.error);
       return;
     }
-    if (!result.rooms.some((room) => room.roomCode.toUpperCase() === code)) {
+    const room = result.rooms.find((r) => r.roomCode.toUpperCase() === code);
+    if (!room) {
       setJoinCodeError(`No room found with code "${code}".`);
+      return;
+    }
+    // Same "already started" rejection /join/[code]'s own NameEntry screen would
+    // eventually surface, just one screen earlier -- catching it here avoids the
+    // dead-end navigate-then-error round trip. Still lets a returning player back into
+    // a started room they already hold credentials for (a real rejoin, not a fresh
+    // join attempt) -- same canReconnect check the Active Sessions list below uses.
+    if (room.started && loadCredentials(code) === null) {
+      setJoinCodeError("This game has already started.");
       return;
     }
     router.push(`/join/${code}`);
@@ -202,17 +212,25 @@ function ActiveSessions() {
           {rooms.map((room) => {
             const canReconnect = room.started && loadCredentials(room.roomCode) !== null;
             const canJoin = !room.started;
+            const isHost = loadCredentials(room.roomCode)?.playerId === room.hostPlayerId;
             return (
               <li
                 key={room.roomCode}
                 className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
               >
-                <span className="min-w-0">
-                  <span className="font-medium">{room.hostIsDisplay ? "Game on a shared screen" : `${room.hostName}’s game`}</span>{" "}
-                  <span className="text-zinc-500 dark:text-zinc-400">
-                    — {room.seatedCount}/{room.playerCount} players, {CENTER_EFFECTS[room.centerEffect].label}
-                    {room.started && " · in progress"}
-                    {room.hasPassword && " · 🔒"}
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {isHost && (
+                    <span className="shrink-0 rounded-full border border-zinc-300 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-zinc-500 uppercase dark:border-zinc-700 dark:text-zinc-400">
+                      Host
+                    </span>
+                  )}
+                  <span className="min-w-0">
+                    <span className="font-medium">{room.hostIsDisplay ? "Game on a shared screen" : `${room.hostName}’s game`}</span>{" "}
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                      — {room.seatedCount}/{room.playerCount} players, {CENTER_EFFECTS[room.centerEffect].label}
+                      {room.started && " · in progress"}
+                      {room.hasPassword && " · 🔒"}
+                    </span>
                   </span>
                 </span>
                 {canJoin || canReconnect ? (
@@ -320,7 +338,15 @@ export default function HomePage() {
     setHostError(null);
     const pool = randomCenterEffectPool(setup.playerCount);
     const centerEffect = setup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : setup.centerEffect;
-    const result = await createMultiplayerRoom(hostName.trim() || "Host", setup.playerCount, centerEffect, setup.aiDifficulty, false, roomPassword);
+    const result = await createMultiplayerRoom(
+      hostName.trim() || "Host",
+      setup.playerCount,
+      centerEffect,
+      setup.aiDifficulty,
+      false,
+      roomPassword,
+      setup.centerEffect
+    );
     setHosting(false);
     if ("error" in result) {
       setNewGameSetup(null);
@@ -336,7 +362,7 @@ export default function HomePage() {
     setHostError(null);
     const pool = randomCenterEffectPool(setup.playerCount);
     const centerEffect = setup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : setup.centerEffect;
-    const result = await createMultiplayerRoom("Host", setup.playerCount, centerEffect, setup.aiDifficulty, true, roomPassword);
+    const result = await createMultiplayerRoom("Host", setup.playerCount, centerEffect, setup.aiDifficulty, true, roomPassword, setup.centerEffect);
     setHosting(false);
     if ("error" in result) {
       setNewGameSetup(null);
@@ -407,7 +433,7 @@ export default function HomePage() {
           />
         )}
 
-        {hostError && <MultiplayerUnavailableModal onClose={() => setHostError(null)} />}
+        {hostError && <MultiplayerUnavailableModal onClose={() => setHostError(null)} message={hostError} />}
 
         <div className="flex w-full flex-col gap-4">
           <h2 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">Play</h2>

@@ -11,9 +11,16 @@ export function MultiplayerUnavailableBanner() {
   );
 }
 
-/** Full popup -- used right after a user action that was specifically trying to reach
- * multiplayer (hosting/creating a room) fails, so the failure is impossible to miss. */
-export function MultiplayerUnavailableModal({ onClose }: { onClose: () => void }) {
+/**
+ * Full popup -- used right after a user action that was specifically trying to reach
+ * multiplayer (hosting/creating a room) fails, so the failure is impossible to miss.
+ * `message` defaults to the generic "connection itself failed" copy, but callers
+ * should pass through the actual rejection reason when they have one (e.g. the
+ * device-restriction ack errors from room:create/room:join) -- otherwise a specific,
+ * actionable reason like "This device already hosts an active room" gets silently
+ * discarded in favor of a generic, unhelpful message.
+ */
+export function MultiplayerUnavailableModal({ onClose, message }: { onClose: () => void; message?: string }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
@@ -22,7 +29,7 @@ export function MultiplayerUnavailableModal({ onClose }: { onClose: () => void }
       >
         <h2 className="mb-2 text-lg font-semibold">Multiplayer unavailable</h2>
         <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
-          {MULTIPLAYER_UNAVAILABLE_MESSAGE}
+          {message ?? MULTIPLAYER_UNAVAILABLE_MESSAGE}
         </p>
         <button
           onClick={onClose}

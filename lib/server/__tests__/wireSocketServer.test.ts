@@ -86,6 +86,58 @@ describe("wireSocketServer", () => {
     expect(result.token).toBeTruthy();
   });
 
+  it("rejects a second room:create from the same device while its first room is still active", async () => {
+    const host = client();
+    const first = (await emit(host, "room:create", {
+      hostName: "Alice",
+      playerCount: 2,
+      centerEffect: "none",
+      asDisplay: false,
+      aiDifficulty: "medium",
+      deviceId: "device-1",
+    })) as AckResult<CreateRoomResult>;
+    expect(first.ok).toBe(true);
+
+    const second = (await emit(host, "room:create", {
+      hostName: "Alice",
+      playerCount: 2,
+      centerEffect: "none",
+      asDisplay: false,
+      aiDifficulty: "medium",
+      deviceId: "device-1",
+    })) as AckResult<CreateRoomResult>;
+    expect(second).toEqual({ ok: false, error: "This device already hosts an active room. Close it before starting another." });
+  });
+
+  it("lets a different device create its own room even while another device's room is active", async () => {
+    const host = client();
+    await emit(host, "room:create", { hostName: "Alice", playerCount: 2, centerEffect: "none", asDisplay: false, aiDifficulty: "medium", deviceId: "device-1" });
+
+    const otherHost = client();
+    const result = (await emit(otherHost, "room:create", {
+      hostName: "Bob",
+      playerCount: 2,
+      centerEffect: "none",
+      asDisplay: false,
+      aiDifficulty: "medium",
+      deviceId: "device-2",
+    })) as AckResult<CreateRoomResult>;
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects a second room:join from the same device trying to claim a different seat in the same room", async () => {
+    const host = client();
+    const created = (await emit(host, "room:create", { hostName: "Alice", playerCount: 3, centerEffect: "none", asDisplay: false, aiDifficulty: "medium" })) as AckResult<CreateRoomResult>;
+    if (!created.ok) throw new Error("setup failed");
+
+    const guest = client();
+    const firstJoin = (await emit(guest, "room:join", { roomCode: created.roomCode, name: "Bob", deviceId: "device-1" })) as AckResult<JoinRoomResult>;
+    expect(firstJoin.ok).toBe(true);
+
+    const secondJoin = (await emit(guest, "room:join", { roomCode: created.roomCode, name: "Carol", deviceId: "device-1" })) as AckResult<JoinRoomResult>;
+    expect(secondJoin).toEqual({ ok: false, error: "This device already has a seat in this room." });
+  });
+
   it("pushes the host their own initial lobby right after room:create -- not only once someone else joins", async () => {
     const host = client();
     const lobbyPromise = new Promise<LobbyState>((resolve) => host.once("lobby:update", resolve));

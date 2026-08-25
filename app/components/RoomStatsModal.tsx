@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { CardStatsTable } from "@/app/components/CardStatsTable";
 import { LobbyState } from "@/lib/server/protocol";
 
 function fmtSigned(n: number, decimals = 2): string {
@@ -12,14 +14,16 @@ function fmtPercent(n: number): string {
 }
 
 /**
- * Room-level equivalent of MyStatsModal, deliberately much smaller: no per-card
- * breakdown, no by-location split, no backup/restore -- just "who's actually winning
- * this room" (win rate + normalized placement delta) per seat, accumulated
- * server-side on the GameSession itself (see RoomStatsEntry) across every rematch in
- * this lobby. Sourced straight from `lobby.roomStats`, already pushed to every client
- * on every lobby:update, so this needs no fetch of its own.
+ * Room-level equivalent of MyStatsModal, deliberately much smaller: no by-location
+ * split, no backup/restore -- just "who's actually winning this room" (win rate +
+ * normalized placement delta) per seat, plus a collapsed-by-default per-card
+ * breakdown, both accumulated server-side on the GameSession itself (see
+ * RoomStatsEntry/roomCardStats) across every rematch in this lobby. Sourced straight
+ * from `lobby.roomStats`/`lobby.roomCardStats`, already pushed to every client on
+ * every lobby:update, so this needs no fetch of its own.
  */
 export function RoomStatsModal({ lobby, onClose }: { lobby: LobbyState; onClose: () => void }) {
+  const [cardStatsExpanded, setCardStatsExpanded] = useState(false);
   const nameFor = (playerId: string) => lobby.seats.find((s) => s.playerId === playerId)?.name ?? playerId;
   // Best placement delta (most negative) first -- same "lower is better" convention as MyStatsModal.
   const rows = [...lobby.roomStats].sort((a, b) => a.placementDeltaSum / a.games - b.placementDeltaSum / b.games);
@@ -69,6 +73,23 @@ export function RoomStatsModal({ lobby, onClose }: { lobby: LobbyState; onClose:
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {lobby.roomCardStats.length > 0 && (
+          <div className="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+            <button
+              onClick={() => setCardStatsExpanded((v) => !v)}
+              className="flex w-full items-center gap-1.5 text-left text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            >
+              <span className="text-xs">{cardStatsExpanded ? "▼" : "▶"}</span>
+              By card
+            </button>
+            {cardStatsExpanded && (
+              <div className="mt-2">
+                <CardStatsTable rows={lobby.roomCardStats} title="" />
+              </div>
+            )}
           </div>
         )}
       </div>

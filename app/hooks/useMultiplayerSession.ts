@@ -6,6 +6,7 @@ import { ClientToServerEvents, fromWireState, LobbyState, ServerToClientEvents }
 import { AiDifficulty, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
 import { clearCredentials, loadCredentials, saveCredentials, StoredCredentials } from "./multiplayerCredentials";
 import { rememberLocalRoom } from "./localRooms";
+import { getDeviceId } from "./deviceId";
 import { MULTIPLAYER_UNAVAILABLE_MESSAGE } from "./multiplayerUnavailable";
 import { CONNECT_TIMEOUT_MS } from "./socketConnectTimeout";
 
@@ -110,7 +111,7 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
     (name: string, password?: string) => {
       const socket = socketRef.current;
       if (!socket) return;
-      socket.emit("room:join", { roomCode, name, password }, (ack) => {
+      socket.emit("room:join", { roomCode, name, password, deviceId: getDeviceId() }, (ack) => {
         if (ack.ok) {
           const credentials = { playerId: ack.playerId, token: ack.token };
           credentialsRef.current = credentials;

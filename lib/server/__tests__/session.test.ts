@@ -107,12 +107,53 @@ describe("GameSession lobby", () => {
     expect(result).toMatchObject({ error: expect.any(String) });
   });
 
+  it("rejects a second FRESH join from a device that already holds a seat in this room", () => {
+    const { session } = harness(3);
+    expect("error" in session.addPlayer("Guest1", undefined, "device-1")).toBe(false);
+    const result = session.addPlayer("Guest2", undefined, "device-1");
+    expect(result).toEqual({ error: "This device already has a seat in this room." });
+  });
+
+  it("lets different devices each take their own seat", () => {
+    const { session } = harness(3);
+    expect("error" in session.addPlayer("Guest1", undefined, "device-1")).toBe(false);
+    expect("error" in session.addPlayer("Guest2", undefined, "device-2")).toBe(false);
+  });
+
+  it("never applies the device guard when no deviceId is supplied -- callers with no real device id skip the check entirely", () => {
+    const { session } = harness(3);
+    expect("error" in session.addPlayer("Guest1")).toBe(false);
+    expect("error" in session.addPlayer("Guest2")).toBe(false);
+  });
+
+  it("also guards against the HOST's own device id, not just seats created via addPlayer", () => {
+    // Host seat is created with hostDeviceId="device-1" via the constructor directly
+    // (harness doesn't thread it through) -- confirms addPlayer's guard checks it too,
+    // not just seats it created itself.
+    const session = new GameSession(
+      "TEST",
+      "Host",
+      3,
+      "none",
+      "http://test.local:3000",
+      { onLobbyChange: () => {}, onPlayerState: () => {} },
+      deterministicRng(1),
+      false,
+      "medium",
+      undefined,
+      "device-1"
+    );
+    const result = session.addPlayer("Guest", undefined, "device-1");
+    expect(result).toEqual({ error: "This device already has a seat in this room." });
+  });
+
   it("getSummary reports the host's name and seated human count, not AI slots (none exist pre-start anyway)", () => {
     const { session } = harness(3);
     session.addPlayer("Guest");
     const summary = session.getSummary();
     expect(summary).toEqual({
       roomCode: "TEST",
+      hostPlayerId: expect.any(String),
       hostName: "Host",
       hostIsDisplay: false,
       seatedCount: 2,
@@ -306,11 +347,38 @@ describe("GameSession rematch", () => {
     expect(result).toMatchObject({ error: expect.any(String) });
   });
 
-  it("rejects rematch while a game is still in progress", () => {
+  it("allows the host to force a new game mid-game, discarding the current one", () => {
     const { session, hostToken } = harness(2);
     session.start(hostToken);
     const result = session.rematch(hostToken, "none", "medium");
-    expect(result).toMatchObject({ error: expect.any(String) });
+    expect(result).toEqual({ ok: true });
+    expect(session.getLobbyState().seats).toHaveLength(2);
+  });
+
+  it("cancels a pending AI-turn timer when forced mid-game, so it never fires against the wrong game", async () => {
+    vi.useFakeTimers();
+    // displayHosted -- every one of the 3 seats is AI (a display host takes no seat of
+    // its own), so whoever's up first after start() is guaranteed to be AI and its
+    // move timer guaranteed pending, regardless of the randomized firstPlayerIndex.
+    const { session, hostToken, statePushes } = harness(3, 1, true);
+    session.start(hostToken);
+    // Force a new game immediately, before the pending AI timer (AI_TURN_DELAY_MS)
+    // fires -- without dealAndStart's fix, that stale timer would later read
+    // `this.state` fresh and apply an AI move against the just-dealt game instead of
+    // the abandoned one.
+    const result = session.rematch(hostToken, "none", "medium");
+    expect(result).toEqual({ ok: true });
+
+    await vi.advanceTimersByTimeAsync(600);
+    const freshState = fromWireState(statePushes.at(-1)!.state);
+    // Still round 1 with at most one action applied (the fresh game's own first AI
+    // move, scheduled anew by dealAndStart) -- never two AI moves deep, which is what
+    // an uncancelled stale timer plus the fresh game's own timer firing back-to-back
+    // would produce.
+    expect(freshState.round).toBe(1);
+    expect(freshState.board.size).toBeLessThanOrEqual(1);
+
+    vi.useRealTimers();
   });
 
   it("deals a fresh game to the same seats once the previous one ends, keeping the room intact", async () => {
@@ -450,6 +518,39 @@ describe("GameSession roomStats", () => {
 
     expect(lobbyPushes.length).toBeGreaterThan(pushCountBefore);
     expect(lobbyPushes.at(-1)!.roomStats.every((e) => e.games === 1)).toBe(true);
+
+    vi.useRealTimers();
+  });
+
+  it("tallies a per-card breakdown alongside the per-seat stats, empty until the first game ends", async () => {
+    vi.useFakeTimers();
+    const { session, hostToken, statePushes } = harness(2);
+    expect(session.getLobbyState().roomCardStats.every((row) => row.played === 0)).toBe(true);
+    session.start(hostToken);
+    expect(session.getLobbyState().roomCardStats.every((row) => row.played === 0)).toBe(true);
+    await playUntilEnded(session, hostToken, statePushes);
+
+    const cardStats = session.getLobbyState().roomCardStats;
+    expect(cardStats.length).toBeGreaterThan(0);
+    expect(cardStats.some((row) => row.played > 0)).toBe(true);
+
+    vi.useRealTimers();
+  });
+
+  it("keeps accumulating card stats across rematches instead of resetting", async () => {
+    vi.useFakeTimers();
+    const { session, hostToken, statePushes } = harness(2);
+    session.start(hostToken);
+    await playUntilEnded(session, hostToken, statePushes);
+    const afterFirstGame = session.getLobbyState().roomCardStats;
+    const totalPlayedAfterFirst = afterFirstGame.reduce((sum, row) => sum + row.played, 0);
+
+    session.rematch(hostToken, "none", "medium");
+    await playUntilEnded(session, hostToken, statePushes);
+    const afterSecondGame = session.getLobbyState().roomCardStats;
+    const totalPlayedAfterSecond = afterSecondGame.reduce((sum, row) => sum + row.played, 0);
+
+    expect(totalPlayedAfterSecond).toBeGreaterThan(totalPlayedAfterFirst);
 
     vi.useRealTimers();
   });

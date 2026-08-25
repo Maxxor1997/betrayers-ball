@@ -15,12 +15,20 @@ function randomRoomCode(): string {
  */
 export class RoomRegistry {
   private rooms = new Map<string, GameSession>();
+  /** deviceId (see app/hooks/deviceId.ts) -> the room code it currently hosts, for enforcing one hosted room per device. Only ever holds devices with a room that still exists -- pruned in delete() -- so a stale entry can never linger past its room's own lifetime. */
+  private hostDeviceRooms = new Map<string, string>();
 
-  create(factory: (roomCode: string) => GameSession): GameSession {
+  /** True if `deviceId` already hosts a room that still exists (lobby or in-progress). Checked by the room:create handler before calling create() below. */
+  hasActiveRoomForDevice(deviceId: string | undefined): boolean {
+    return deviceId !== undefined && this.hostDeviceRooms.has(deviceId);
+  }
+
+  create(factory: (roomCode: string) => GameSession, hostDeviceId?: string): GameSession {
     let code = randomRoomCode();
     while (this.rooms.has(code)) code = randomRoomCode();
     const session = factory(code);
     this.rooms.set(code, session);
+    if (hostDeviceId) this.hostDeviceRooms.set(hostDeviceId, code);
     return session;
   }
 
@@ -29,9 +37,13 @@ export class RoomRegistry {
   }
 
   delete(roomCode: string): void {
-    const session = this.rooms.get(roomCode.toUpperCase());
+    const code = roomCode.toUpperCase();
+    const session = this.rooms.get(code);
     session?.dispose();
-    this.rooms.delete(roomCode.toUpperCase());
+    this.rooms.delete(code);
+    for (const [deviceId, mappedCode] of this.hostDeviceRooms) {
+      if (mappedCode === code) this.hostDeviceRooms.delete(deviceId);
+    }
   }
 
   /**
