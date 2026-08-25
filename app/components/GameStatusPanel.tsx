@@ -201,6 +201,7 @@ function TurnOrderTracker({ state, viewerId, nameFor }: { state: GameState; view
       <div className="flex flex-col gap-0.5">
         {state.players.map((p) => {
           const active = p.id === activeId;
+          const isRoundLeader = p.id === roundStartId;
           const vote = lastVoteRound?.votes[p.id];
           const flips = state.flipHistory.filter((f) => f.playerId === p.id);
           const tooltipId = `turnorder:${p.id}`;
@@ -235,7 +236,7 @@ function TurnOrderTracker({ state, viewerId, nameFor }: { state: GameState; view
               }
             >
               <span className={`h-2 w-2 shrink-0 rounded-full ${playerDotColorClass(state.players, p.id)}`} />
-              <span className="min-w-0 flex-1 truncate">
+              <span className={`min-w-0 flex-1 truncate ${isRoundLeader ? "font-semibold" : ""}`}>
                 {nameFor(p.id)}
                 {p.id === viewerId ? " (You)" : ""}
               </span>
