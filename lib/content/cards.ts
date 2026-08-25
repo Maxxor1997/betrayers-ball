@@ -287,15 +287,24 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     fullText:
       "−2 to every card (any owner, not itself) in the unbroken run of occupied cells extending along its row and its column, while this card is face-up.",
     count: [2, 2, 2, 4, 5, 5, 6],
-    valueModifier: ({ board, pos, self, addDelta }) => {
+    valueModifier: ({ board, bounds, pos, self, addDelta }) => {
       if (!self.faceUp) return;
+      // The center (or any other ownerless tile) is never a real CardInstance, so a
+      // plain board.get would read as empty and stop the run early -- but it's still
+      // occupied for adjacency/run purposes (see isOwnerlessPosition's own doc
+      // comment), so the run has to pass through it to reach cards on the far side.
+      // Nothing to addDelta on an ownerless tile itself, just don't let it break the run.
       function walk(dx: number, dy: number) {
         let x = pos.x + dx;
         let y = pos.y + dy;
         while (true) {
-          const c = board.get(posKey({ x, y }));
-          if (!c) break;
-          addDelta(c.instanceId, -2, `${CARD_DEFS.Earthshaker.name} (connected row/col)`);
+          const p = { x, y };
+          const c = board.get(posKey(p));
+          if (c) {
+            addDelta(c.instanceId, -2, `${CARD_DEFS.Earthshaker.name} (connected row/col)`);
+          } else if (!isOwnerlessPosition(p, bounds)) {
+            break;
+          }
           x += dx;
           y += dy;
         }

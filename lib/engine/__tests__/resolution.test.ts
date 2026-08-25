@@ -451,6 +451,18 @@ describe("resolveBoard — Earthshaker", () => {
     expect(find(cards, far.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
   });
 
+  it("passes straight through the ownerless center tile instead of stopping the run there", () => {
+    const board: Board = new Map();
+    // Center is (4,4). Earthshaker directly adjacent on one side, a card directly
+    // adjacent on the other -- the only thing "occupying" the cell between them is
+    // the center tile itself, no real gap.
+    const e = place(board, 3, 4, "Earthshaker", "p1", true);
+    const farSide = place(board, 5, 4, "Footman", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, farSide.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+    expect(find(cards, e.instanceId).finalValue).toBe(CARD_DEFS.Earthshaker.base);
+  });
+
   it("tags the resulting external contribution with the Earthshaker's own instanceId", () => {
     const board: Board = new Map();
     const e = place(board, 1, 1, "Earthshaker", "p1", true);
@@ -597,6 +609,44 @@ describe("resolveBoard — Infiltrator (Facestealer)", () => {
     expect(infResolved.finalValue).toBe(CARD_DEFS.Gloryseeker.base);
     expect(gloryResolved.cardId).toBe("Gloryseeker");
     expect(gloryResolved.finalValue).toBe(CARD_DEFS.Infiltrator.base);
+  });
+
+  it("attributes the target's stolen value to the Facestealer as disruption, without changing the target's real (now-Infiltrator) score", () => {
+    const board: Board = new Map();
+    const inf = place(board, 1, 1, "Infiltrator", "p1", false);
+    const gloryseeker = place(board, 0, 1, "Gloryseeker", "p2", true); // face-up: true self-value is base 4 + 3 (face-up rule) = 7
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const gloryResolved = find(cards, gloryseeker.instanceId);
+
+    expect(gloryResolved.finalValue).toBe(CARD_DEFS.Infiltrator.base); // scores as Infiltrator now, unaffected by the new lines
+    const trueValueLine = gloryResolved.breakdown.find((d) => d.label.startsWith("True value as"));
+    const stolenLine = gloryResolved.breakdown.find((d) => d.sourceInstanceId === inf.instanceId);
+    expect(trueValueLine).toBeDefined();
+    expect(trueValueLine!.amount).toBe(CARD_DEFS.Gloryseeker.base + 3 - CARD_DEFS.Infiltrator.base); // 7 - 3 = 4
+    expect(stolenLine).toBeDefined();
+    expect(stolenLine!.label).toBe("Stolen by Facestealer");
+    expect(stolenLine!.amount).toBe(-(CARD_DEFS.Gloryseeker.base + 3 - CARD_DEFS.Infiltrator.base));
+    expect(trueValueLine!.informational).toBe(true);
+    expect(stolenLine!.informational).toBe(true);
+    // Nets to exactly 0 -- never changes the target's real score, only makes the theft
+    // visible/attributable (see disruptionFor in lib/playtest/cardStats.ts).
+    expect(gloryResolved.breakdown.reduce((sum, d) => sum + d.amount, 0)).toBe(gloryResolved.finalValue);
+  });
+
+  it("splits the stolen-value attribution evenly when multiple Facestealers independently target the same card", () => {
+    const board: Board = new Map();
+    const inf1 = place(board, 1, 1, "Infiltrator", "p1", false);
+    const gloryseeker = place(board, 2, 1, "Gloryseeker", "p2", true);
+    const inf2 = place(board, 3, 1, "Infiltrator", "p3", false);
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const gloryResolved = find(cards, gloryseeker.instanceId);
+
+    const stolenLines = gloryResolved.breakdown.filter((d) => d.label === "Stolen by Facestealer");
+    expect(stolenLines).toHaveLength(2);
+    const total = CARD_DEFS.Gloryseeker.base + 3 - CARD_DEFS.Infiltrator.base;
+    for (const line of stolenLines) expect(line.amount).toBe(-total / 2);
+    expect(new Set(stolenLines.map((d) => d.sourceInstanceId))).toEqual(new Set([inf1.instanceId, inf2.instanceId]));
+    expect(gloryResolved.breakdown.reduce((sum, d) => sum + d.amount, 0)).toBe(gloryResolved.finalValue);
   });
 
   it("no-op when the only neighbor is face-down -- can only steal an identity it can see", () => {
@@ -810,6 +860,32 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     // since negation cancels a card's own/outgoing effects, not its ownership as read
     // by others: row y=2 has an unbroken p2-owned line of Bannerman-Footman-Giant.
     expect(find(cards, footman.instanceId).finalValue).toBe(CARD_DEFS.Footman.base + 1);
+  });
+
+  it("attributes a negated card's denied OUTGOING effect on a neighbor to the negator, on the neighbor's own breakdown, without changing the neighbor's real value", () => {
+    const board: Board = new Map();
+    const suppressor = place(board, 2, 2, "Suppressor", "p1");
+    const ban = place(board, 3, 2, "Bannerman", "p2");
+    place(board, 1, 2, "Giant", "p2");
+    place(board, 2, 1, "Giant", "p2");
+    place(board, 2, 3, "Giant", "p2");
+    const footman = place(board, 4, 2, "Footman", "p2"); // adjacent to Bannerman only, would normally get +2
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const footmanResolved = find(cards, footman.instanceId);
+
+    expect(find(cards, ban.instanceId).negated).toBe(true);
+    expect(footmanResolved.finalValue).toBe(CARD_DEFS.Footman.base); // no +2 -- Bannerman's buff never fired
+    const wouldHave = footmanResolved.breakdown.find((d) => d.label.startsWith("Would have received from"));
+    const denied = footmanResolved.breakdown.find((d) => d.sourceInstanceId === suppressor.instanceId);
+    expect(wouldHave).toBeDefined();
+    expect(wouldHave!.amount).toBe(2); // Bannerman's own rule: +2 to an adjacent Footman
+    expect(denied).toBeDefined();
+    expect(denied!.amount).toBe(-2);
+    expect(wouldHave!.informational).toBe(true);
+    expect(denied!.informational).toBe(true);
+    // Nets to exactly 0 -- this pair never changes footman's real value, only makes
+    // the denial visible/attributable (see disruptionFor in lib/playtest/cardStats.ts).
+    expect(footmanResolved.breakdown.reduce((sum, d) => sum + d.amount, 0)).toBe(footmanResolved.finalValue);
   });
 
   it("without an active Suppressor, Bannerman's buff lands normally", () => {

@@ -226,6 +226,43 @@ describe("disruptionFor", () => {
     // tracked delta, so there was nothing for disruptionFor's breakdown scan to find).
     expect(disruptionFor(resolvedSuppressor, cards)).toBe(3);
   });
+
+  it("counts a negated card's denied OUTGOING effect on a third-party neighbor as disruption too, not just its denied self-effect", () => {
+    const board: Board = new Map();
+    const suppressor = place(board, 2, 2, "Suppressor", "p1");
+    place(board, 3, 2, "Bannerman", "p2"); // negated -- its own outgoing bonuses never fire
+    place(board, 1, 2, "Giant", "p1");
+    place(board, 2, 1, "Giant", "p1");
+    place(board, 2, 3, "Giant", "p1");
+    const footman = place(board, 4, 2, "Footman", "p2"); // opponent of the Suppressor -- would have gotten Bannerman's +2
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const resolvedSuppressor = cards.find((c) => c.instanceId === suppressor.instanceId)!;
+    const resolvedFootman = cards.find((c) => c.instanceId === footman.instanceId)!;
+    expect(resolvedFootman.finalValue).toBe(CARD_DEFS.Footman.base); // no +2 landed
+    // Previously invisible entirely -- negation only ever reconstructed the negated
+    // card's own SELF-directed denial, never what it would have done to a neighbor.
+    // Net disruption here is +1, not +2: Bannerman's own outgoing rule also would have
+    // given the Suppressor itself +1 (every adjacent non-Footman gets +1, and the
+    // Suppressor is Bannerman's neighbor too, by definition of being what negated it)
+    // -- so negating this particular Bannerman cost the Suppressor's own side a
+    // foregone +1 in exchange for denying the opponent's +2, netting +1. Same
+    // own-side-vs-opponent accounting disruptionFor already applies everywhere else,
+    // just newly able to see this side of the trade at all.
+    expect(disruptionFor(resolvedSuppressor, cards)).toBe(1);
+  });
+
+  it("counts a Facestealer's stolen value from a target as disruption", () => {
+    const board: Board = new Map();
+    const inf = place(board, 1, 1, "Infiltrator", "p1", false);
+    const glory = place(board, 0, 1, "Gloryseeker", "p2", true); // true self-value: base 4 + 3 (face-up) = 7
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    const resolvedInf = cards.find((c) => c.instanceId === inf.instanceId)!;
+    const resolvedGlory = cards.find((c) => c.instanceId === glory.instanceId)!;
+    expect(resolvedGlory.finalValue).toBe(CARD_DEFS.Infiltrator.base); // scores as Infiltrator, unaffected
+    // Previously invisible entirely -- the swap changes cardId directly rather than
+    // going through addDelta, so disruptionFor's breakdown scan had nothing to find.
+    expect(disruptionFor(resolvedInf, cards)).toBe(CARD_DEFS.Gloryseeker.base + 3 - CARD_DEFS.Infiltrator.base);
+  });
 });
 
 describe("tallyGame", () => {

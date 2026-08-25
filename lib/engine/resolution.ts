@@ -25,8 +25,15 @@ interface IdentitySwap {
  * iteration order), same as everywhere else in this engine that needs a deterministic
  * first-among-equals.
  */
-function computeIdentitySwaps(board: Board, bounds: BoardBounds): Map<string, IdentitySwap> {
+function computeIdentitySwaps(board: Board, bounds: BoardBounds): { swaps: Map<string, IdentitySwap>; thievesOf: Map<string, string[]> } {
   const swaps = new Map<string, IdentitySwap>();
+  // Reverse edge (target instanceId -> the Facestealer instance(s) that stole from
+  // it) -- computeIdentitySwaps' own per-instance map has no way to recover this,
+  // since a target's swap entry only records its own new/old cardId, not who did it.
+  // Needed so a "value stolen from you" disruption line can be attributed to the
+  // correct specific thief instance(s), same "attribute back to exactly which card
+  // instance caused it" requirement every other external contribution already meets.
+  const thievesOf = new Map<string, string[]>();
   for (const [key, c] of board.entries()) {
     if (c.faceUp || c.cardId !== "Infiltrator") continue;
     const pos = parsePosKey(key);
@@ -38,8 +45,11 @@ function computeIdentitySwaps(board: Board, bounds: BoardBounds): Map<string, Id
     }
     swaps.set(c.instanceId, { originalCardId: "Infiltrator", newCardId: target.cardId });
     swaps.set(target.instanceId, { originalCardId: target.cardId, newCardId: "Infiltrator" });
+    const list = thievesOf.get(target.instanceId);
+    if (list) list.push(c.instanceId);
+    else thievesOf.set(target.instanceId, [c.instanceId]);
   }
-  return swaps;
+  return { swaps, thievesOf };
 }
 
 /**
@@ -163,21 +173,27 @@ function computeNegatorsOf(board: Board, bounds: BoardBounds): Map<string, strin
  * them the same way either way.
  */
 export function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Set<string> {
-  const swapped = applyIdentitySwaps(board, computeIdentitySwaps(board, bounds));
+  const swapped = applyIdentitySwaps(board, computeIdentitySwaps(board, bounds).swaps);
   return new Set(computeNegatorsOf(swapped, bounds).keys());
 }
 
 /**
- * A card's value from its own printed rule alone -- base plus only the deltas its own
- * valueModifier applies to itself -- found by running that hook in isolation. Used
- * below to find what a negated card's own effect *would* have been, so negation's
- * real impact shows up in the breakdown instead of just silently vanishing. Same
- * "simultaneous, only ever reads board/identity, never another card's resolved value"
- * computation every valueModifier already does -- this doesn't add a new kind of read,
- * it just runs one in isolation to see what it would have produced.
+ * Every delta a card's valueModifier hook would produce -- both onto itself and onto
+ * any neighbor -- found by running that hook in isolation, keyed by whichever
+ * instanceId each addDelta call targeted. Same "simultaneous, only ever reads
+ * board/identity, never another card's resolved value" computation every
+ * valueModifier already does -- this doesn't add a new kind of read, it just runs one
+ * in isolation to see what it would have produced. Two callers reuse this:
+ * - Negation (computeValueModifiers below): recovers what a negated card's hook would
+ *   have applied, both to itself (`get(card.instanceId)`, the existing "Own rule
+ *   (negated)" line) and to its neighbors (every other key -- the neighbors' own
+ *   denied bonus/penalty, otherwise silently vanishing with zero trace anywhere).
+ * - Facestealer's swap (resolveBoard): recovers what a swap target's TRUE identity
+ *   would have contributed to itself, by passing a card object with `cardId`
+ *   overridden to the stolen-from identity -- see resolveBoard's own comment.
  */
-function selfContributionOnly(board: Board, bounds: BoardBounds, round: number, pos: Position, card: CardInstance): number {
-  let total = 0;
+function contributionsOf(board: Board, bounds: BoardBounds, round: number, pos: Position, card: CardInstance): Map<string, number> {
+  const result = new Map<string, number>();
   CARD_DEFS[card.cardId].valueModifier?.({
     board,
     bounds,
@@ -185,10 +201,10 @@ function selfContributionOnly(board: Board, bounds: BoardBounds, round: number, 
     pos,
     self: card,
     addDelta: (instanceId, amount) => {
-      if (instanceId === card.instanceId) total += amount;
+      result.set(instanceId, (result.get(instanceId) ?? 0) + amount);
     },
   });
-  return total;
+  return result;
 }
 
 /**
@@ -254,24 +270,38 @@ function computeValueModifiers(
     for (const [instanceId, negatorIds] of negatorsOf) {
       const target = byInstanceId.get(instanceId);
       if (!target) continue;
-      const deniedSelfContribution = selfContributionOnly(board, bounds, round, target.pos, target.card);
-      if (deniedSelfContribution === 0) continue; // nothing was actually denied
-      // The point effect first, then its cancellation right below it -- so the
-      // breakdown reads "here's what its own rule would have been worth, here's why
-      // it didn't count" in that order, instead of only ever showing the already-net
-      // result with nothing to compare it against. "external"/no sourceInstanceId (not
-      // "self", and not the negator's id) on purpose: ownValueFor/disruptionFor in
-      // lib/playtest/cardStats.ts scan breakdown entries by source/sourceInstanceId to
-      // attribute real stats, and this line is neither a genuine self-earned point nor
-      // a real disruption event to credit to the negator -- just an explanatory mirror
-      // of the "Negated by" line right after it. Both informational: the real total is
-      // always exactly base for a negated card (see resolveBoard), these two lines
-      // exist purely to make the denial visible/attributable.
-      push(instanceId, deniedSelfContribution, "Own rule (negated)", "external", undefined, true);
-      const share = deniedSelfContribution / negatorIds.length;
-      for (const negatorId of negatorIds) {
-        const negatorName = byInstanceId.get(negatorId) ? CARD_DEFS[byInstanceId.get(negatorId)!.card.cardId].name : "negation";
-        push(instanceId, -share, `Negated by ${negatorName}`, "external", negatorId, true);
+      const negatorName = (negatorId: string) => (byInstanceId.get(negatorId) ? CARD_DEFS[byInstanceId.get(negatorId)!.card.cardId].name : "negation");
+      const denied = contributionsOf(board, bounds, round, target.pos, target.card);
+
+      const deniedSelfContribution = denied.get(instanceId) ?? 0;
+      if (deniedSelfContribution !== 0) {
+        // The point effect first, then its cancellation right below it -- so the
+        // breakdown reads "here's what its own rule would have been worth, here's why
+        // it didn't count" in that order, instead of only ever showing the already-net
+        // result with nothing to compare it against. "external"/no sourceInstanceId (not
+        // "self", and not the negator's id) on purpose: ownValueFor/disruptionFor in
+        // lib/playtest/cardStats.ts scan breakdown entries by source/sourceInstanceId to
+        // attribute real stats, and this line is neither a genuine self-earned point nor
+        // a real disruption event to credit to the negator -- just an explanatory mirror
+        // of the "Negated by" line right after it. Both informational: the real total is
+        // always exactly base for a negated card (see resolveBoard), these two lines
+        // exist purely to make the denial visible/attributable.
+        push(instanceId, deniedSelfContribution, "Own rule (negated)", "external", undefined, true);
+        const share = deniedSelfContribution / negatorIds.length;
+        for (const negatorId of negatorIds) push(instanceId, -share, `Negated by ${negatorName(negatorId)}`, "external", negatorId, true);
+      }
+
+      // Negation also cancels the target's OUTGOING effects on its own neighbors --
+      // those addDelta calls simply never happen (the source's whole hook is skipped),
+      // which otherwise leaves zero trace anywhere: not on the neighbor (nothing ever
+      // ran), not on the negated card (its own breakdown only ever explained its SELF
+      // portion above). Same visible/attributable treatment, just landing on the
+      // neighbor's breakdown instead, since the neighbor is who actually lost out.
+      for (const [otherInstanceId, amount] of denied) {
+        if (otherInstanceId === instanceId || amount === 0) continue;
+        push(otherInstanceId, amount, `Would have received from ${CARD_DEFS[target.card.cardId].name} (negated)`, "external", undefined, true);
+        const share = amount / negatorIds.length;
+        for (const negatorId of negatorIds) push(otherInstanceId, -share, `Denied by ${negatorName(negatorId)}`, "external", negatorId, true);
       }
     }
   }
@@ -320,7 +350,7 @@ export function resolveBoard(
   // swapped card's own. `originalBoard` is consulted again below only to recover each
   // instance's *real* cardId for display (see the cards.push loop) -- see
   // applyIdentitySwaps' own doc comment for the full reasoning.
-  const swaps = computeIdentitySwaps(originalBoard, bounds);
+  const { swaps, thievesOf } = computeIdentitySwaps(originalBoard, bounds);
   const board = applyIdentitySwaps(originalBoard, swaps);
 
   const negatorsOf = computeNegatorsOf(board, bounds);
@@ -381,6 +411,29 @@ export function resolveBoard(
           ? `Scoring as ${CARD_DEFS[swap.newCardId].name} (Facestealer effect)`
           : `Scoring as ${CARD_DEFS.Infiltrator.name} (Facestealer effect)`;
       breakdown.push({ label, amount: 0, source: "self" });
+
+      // If this instance LOST its identity (it's the target, not the thief), its true
+      // self-worth as its real identity is otherwise invisible: the swap changes
+      // `cardId` directly rather than going through addDelta, so nothing in
+      // computeValueModifiers ever attributes the loss to the Facestealer(s)
+      // responsible. Recovered the same way negation recovers a denied effect --
+      // running the (true, unswapped) identity's own hook in isolation against the
+      // current board -- and split evenly across every thief that targeted this card
+      // (see computeIdentitySwaps' thievesOf), same "share it" convention negation
+      // uses for multiple negators. Both informational: net to 0, doesn't touch
+      // finalValue, only makes the theft visible/attributable.
+      if (swap.originalCardId !== "Infiltrator") {
+        const trueSelfContribution = contributionsOf(board, bounds, round, parsePosKey(key), { ...c, cardId: swap.originalCardId }).get(c.instanceId) ?? 0;
+        const stolen = CARD_DEFS[swap.originalCardId].base + trueSelfContribution - base;
+        const thieves = thievesOf.get(c.instanceId) ?? [];
+        if (stolen !== 0 && thieves.length > 0) {
+          breakdown.push({ label: `True value as ${CARD_DEFS[swap.originalCardId].name}`, amount: stolen, source: "self", informational: true });
+          const share = stolen / thieves.length;
+          for (const thiefId of thieves) {
+            breakdown.push({ label: "Stolen by Facestealer", amount: -share, source: "external", sourceInstanceId: thiefId, informational: true });
+          }
+        }
+      }
     }
     breakdown.push({ label: "Base", amount: base, source: "self" });
     breakdown.push(...cardContributions);

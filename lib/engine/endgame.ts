@@ -103,7 +103,7 @@ function hiddenIdentityWeights(state: GameState, viewerId: string): Map<CardId, 
  * most hidden cards, worst on boards where a lot stays face-down for a long time (e.g.
  * Pit of Erebus's delayed flip gate).
  *
- * Fixed the same way negation's dry-run helper (selfContributionOnly in resolution.ts)
+ * Fixed the same way negation's dry-run helper (contributionsOf in resolution.ts)
  * works elsewhere in this codebase: for every still-hidden position, temporarily swap
  * in each candidate identity (weighted by hiddenIdentityWeights) and run its *real*
  * valueModifier hook against the real (redacted) board, keeping only the deltas it
