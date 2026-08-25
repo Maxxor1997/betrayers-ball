@@ -347,6 +347,23 @@ describe("GameSession rematch", () => {
     expect(result).toMatchObject({ error: expect.any(String) });
   });
 
+  it("allows any real seated player to rematch in a display-hosted room -- there's no player-facing host token to restrict it to", () => {
+    const { session, hostToken } = harness(2, 1, true);
+    const guest = session.addPlayer("Guest") as { playerId: string; token: string };
+    session.start(hostToken);
+    const result = session.rematch(guest.token, "none", "medium");
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("still rejects an AI seat's token in a display-hosted room -- only real seated players qualify", () => {
+    const { session, hostToken } = harness(2, 1, true);
+    session.start(hostToken);
+    // Every seat in a 2-player display room is AI (no one called addPlayer), so any
+    // fabricated token is guaranteed not to belong to a real seated player.
+    const result = session.rematch("not-a-real-token", "none", "medium");
+    expect(result).toMatchObject({ error: expect.any(String) });
+  });
+
   it("allows the host to force a new game mid-game, discarding the current one", () => {
     const { session, hostToken } = harness(2);
     session.start(hostToken);
@@ -424,6 +441,27 @@ describe("GameSession rematch", () => {
     await vi.advanceTimersByTimeAsync(0);
     const freshState = fromWireState(statePushes.at(-1)!.state);
     expect(freshState.config.centerEffect).toBe("shadowlands");
+
+    vi.useRealTimers();
+  });
+
+  it("defaults centerEffectMode to the resolved centerEffect when the room was never told about 'random'", () => {
+    const { session } = harness(2);
+    expect(session.getLobbyState().centerEffectMode).toBe("none");
+  });
+
+  it("keeps centerEffectMode server-authoritative across a rematch, so every viewer (not just whoever created the room) can tell a room was set to reroll on every rematch", async () => {
+    vi.useFakeTimers();
+    const { session, hostToken, statePushes } = harness(2);
+    session.start(hostToken);
+    await playUntilEnded(session, hostToken, statePushes);
+
+    const result = session.rematch(hostToken, "shadowlands", "medium", "random");
+    expect(result).toEqual({ ok: true });
+    expect(session.getLobbyState().centerEffectMode).toBe("random");
+    // The resolved value is still the concrete id actually dealt -- "random" is only
+    // ever the raw mode, never a real GameConfig.centerEffect value.
+    expect(session.getLobbyState().centerEffect).toBe("shadowlands");
 
     vi.useRealTimers();
   });

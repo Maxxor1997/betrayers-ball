@@ -1,5 +1,3 @@
-import { CenterEffectId } from "@/lib/engine/types";
-
 /**
  * Per-room bearer credentials (playerId + token), persisted in localStorage so
  * closing and reopening a tab (or a page refresh) rejoins the same seat instead of
@@ -18,16 +16,6 @@ export interface StoredCredentials {
   token: string;
   /** Only ever set for the browser that actually created the room (see createMultiplayerRoom.ts) -- so its own lobby screen can display the password for others to read off. Never set for a browser that joined via room code, even if the room has one. */
   roomPassword?: string;
-  /**
-   * The RAW, pre-resolution location choice the host picked when this room was
-   * created ("random" or a specific CenterEffectId) -- only ever set for the host
-   * (same as roomPassword). GameState.config.centerEffect only ever holds the already-
-   * resolved concrete id (see createMultiplayerRoom.ts's callers), so a one-click
-   * "Play again" needs this separately to know whether a rematch should reroll a fresh
-   * random location or reuse the same fixed one -- same reasoning /play's own
-   * lastCenterEffectWasRandom serves for single-player's rematch.
-   */
-  centerEffectMode?: CenterEffectId | "random";
 }
 
 const STORAGE_PREFIX = "board-game:mp:";

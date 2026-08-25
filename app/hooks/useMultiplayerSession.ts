@@ -34,7 +34,7 @@ export interface MultiplayerSession {
   join: (name: string, password?: string) => void;
   startGame: () => void;
   /** Host-only, only once the current game has ended -- deals a fresh game to the same seats without leaving the room. `centerEffect` should already be resolved from "random", same as room:create. */
-  rematch: (centerEffect: CenterEffectId, aiDifficulty: AiDifficulty) => void;
+  rematch: (centerEffect: CenterEffectId, aiDifficulty: AiDifficulty, centerEffectMode?: CenterEffectId | "random") => void;
   /** Host-only. Permanently closes the room, lobby or mid-game -- everyone still connected (including the caller) gets bounced to the "room closed" state. */
   endRoom: () => void;
   dispatch: (action: GameAction) => void;
@@ -138,11 +138,11 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
   }, [roomCode]);
 
   const rematch = useCallback(
-    (centerEffect: CenterEffectId, aiDifficulty: AiDifficulty) => {
+    (centerEffect: CenterEffectId, aiDifficulty: AiDifficulty, centerEffectMode?: CenterEffectId | "random") => {
       const socket = socketRef.current;
       const credentials = credentialsRef.current;
       if (!socket || !credentials) return;
-      socket.emit("room:rematch", { roomCode, token: credentials.token, centerEffect, aiDifficulty }, (ack) => {
+      socket.emit("room:rematch", { roomCode, token: credentials.token, centerEffect, aiDifficulty, centerEffectMode }, (ack) => {
         if (!ack.ok) setError(ack.error);
       });
     },

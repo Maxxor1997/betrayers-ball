@@ -47,6 +47,16 @@ export interface LobbyState {
   hostIsDisplay: boolean;
   playerCount: number;
   centerEffect: CenterEffectId;
+  /**
+   * The RAW, pre-resolution location choice ("random" or a specific id) this room was
+   * last set to create/rematch with -- `centerEffect` above is always already resolved
+   * to a concrete id (needed for the actual game config), but "Play again" needs the
+   * *unresolved* choice to know whether to keep rerolling on every rematch or reuse the
+   * same fixed location. Server-authoritative (set at room:create, updated on every
+   * room:rematch) so every viewer -- not just the browser that created the room -- can
+   * make that call correctly, including a screencast room's individual seated players.
+   */
+  centerEffectMode: CenterEffectId | "random";
   seats: SeatInfo[];
   started: boolean;
   /**
@@ -102,6 +112,8 @@ export interface CreateRoomPayload {
   password?: string;
   /** See app/hooks/deviceId.ts -- lets RoomRegistry enforce one hosted room per device. Optional so older/test callers without a real device id just skip that check. */
   deviceId?: string;
+  /** The RAW, pre-resolution location choice -- see LobbyState.centerEffectMode. Optional, defaulting to `centerEffect` (i.e. "never actually random") for any caller that never had a "random" concept to begin with. */
+  centerEffectMode?: CenterEffectId | "random";
 }
 export interface CreateRoomResult {
   roomCode: string;
@@ -143,12 +155,16 @@ export interface StartRoomPayload {
  * The location can be reconfigured for a rematch (unlike player count, which is fixed
  * to the room's existing seats) -- "random" is resolved client-side into a concrete
  * CenterEffectId before this is sent, same as room:create already does, so the server
- * never needs to know about "random" as a real value.
+ * never needs to resolve it itself. `centerEffectMode` carries the raw, unresolved
+ * choice alongside it purely so the server can update LobbyState.centerEffectMode for
+ * every future viewer -- optional, defaulting to `centerEffect` (never actually
+ * random) for any caller that never had a "random" concept to begin with.
  */
 export interface RematchPayload {
   roomCode: string;
   token: string;
   centerEffect: CenterEffectId;
+  centerEffectMode?: CenterEffectId | "random";
   aiDifficulty: AiDifficulty;
 }
 

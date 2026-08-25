@@ -141,7 +141,7 @@ function Display() {
           onConfirm={() => {
             const pool = randomCenterEffectPool(newGameSetup.playerCount);
             const centerEffect = newGameSetup.centerEffect === "random" ? pool[Math.floor(Math.random() * pool.length)] : newGameSetup.centerEffect;
-            session.rematch(centerEffect, newGameSetup.aiDifficulty);
+            session.rematch(centerEffect, newGameSetup.aiDifficulty, newGameSetup.centerEffect);
             setNewGameSetup(null);
           }}
           confirmLabel="Start"
@@ -186,7 +186,6 @@ function Display() {
         {popups}
         <DisplayGameView
           header={header}
-          roomCode={roomCode}
           state={session.gameState}
           lobby={session.lobby}
           rematch={session.rematch}
@@ -310,7 +309,6 @@ function DisplayLobby({ roomCode, session }: { roomCode: string; session: Return
 }
 
 function DisplayGameView({
-  roomCode,
   state,
   lobby,
   rematch,
@@ -322,10 +320,9 @@ function DisplayGameView({
    * GameView, same reasoning: shares CardCatalog/GameStatusPanel's row so they span
    * the full height alongside the header, not just alongside the board underneath it. */
   header: React.ReactNode;
-  roomCode: string;
   state: GameState;
   lobby: LobbyState;
-  rematch: (centerEffect: CenterEffectId, aiDifficulty: AiDifficulty) => void;
+  rematch: (centerEffect: CenterEffectId, aiDifficulty: AiDifficulty, centerEffectMode?: CenterEffectId | "random") => void;
   cardsCollapsed: boolean;
   onCardsCollapsedChange: (collapsed: boolean) => void;
 }) {
@@ -381,15 +378,15 @@ function DisplayGameView({
               <button
                 onClick={() => {
                   // No setup modal -- reuses this room's own settings automatically,
-                  // same as join/[code]/page.tsx's "Play again". centerEffectMode (the
-                  // RAW, pre-resolution choice saved at room creation -- see
-                  // createMultiplayerRoom.ts) is what makes this a real reroll rather
+                  // same as join/[code]/page.tsx's "Play again". lobby.centerEffectMode
+                  // (the RAW, pre-resolution choice, kept server-authoritative -- see
+                  // LobbyState's doc comment) is what makes this a real reroll rather
                   // than always repeating whatever the last game happened to land on:
                   // state.config.centerEffect only ever holds the already-resolved
                   // concrete id, so a room originally set to "Random" needs this
                   // separate signal to keep rerolling each rematch instead of quietly
                   // becoming a fixed location after game 1.
-                  const mode = loadCredentials(roomCode)?.centerEffectMode ?? state.config.centerEffect;
+                  const mode = lobby.centerEffectMode;
                   const centerEffect =
                     mode === "random"
                       ? (() => {
@@ -397,7 +394,7 @@ function DisplayGameView({
                           return pool[Math.floor(Math.random() * pool.length)];
                         })()
                       : mode;
-                  rematch(centerEffect, state.config.aiDifficulty);
+                  rematch(centerEffect, state.config.aiDifficulty, mode);
                 }}
                 className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-sm whitespace-nowrap text-white dark:bg-zinc-100 dark:text-black"
               >

@@ -27,8 +27,11 @@ export function createMultiplayerRoom(
    * above is already resolved (needed for the actual room:create payload/first game),
    * but a one-click multiplayer "Play again" needs the *unresolved* choice too, so it
    * knows whether to keep rerolling on every rematch or reuse the same fixed location.
-   * Defaults to `centerEffect` for any caller that never had a "random" concept to
-   * begin with (e.g. tests).
+   * Sent to the server and stored on the room itself (LobbyState.centerEffectMode) --
+   * not just this browser's own credentials -- so any viewer (including a screencast
+   * room's individual seated players, not just whoever created the room) can make that
+   * call correctly. Defaults to `centerEffect` for any caller that never had a "random"
+   * concept to begin with (e.g. tests).
    */
   centerEffectMode: CenterEffectId | "random" = centerEffect
 ): Promise<{ roomCode: string } | { error: string }> {
@@ -43,15 +46,19 @@ export function createMultiplayerRoom(
     };
 
     socket.on("connect", () => {
-      socket.emit("room:create", { hostName, playerCount, centerEffect, asDisplay, aiDifficulty, password, deviceId: getDeviceId() }, (ack) => {
-        if (ack.ok) {
-          saveCredentials(ack.roomCode, { playerId: ack.playerId, token: ack.token, roomPassword: ack.password, centerEffectMode });
-          rememberLocalRoom(ack.roomCode);
-          finish({ roomCode: ack.roomCode });
-        } else {
-          finish({ error: ack.error });
+      socket.emit(
+        "room:create",
+        { hostName, playerCount, centerEffect, asDisplay, aiDifficulty, password, deviceId: getDeviceId(), centerEffectMode },
+        (ack) => {
+          if (ack.ok) {
+            saveCredentials(ack.roomCode, { playerId: ack.playerId, token: ack.token, roomPassword: ack.password });
+            rememberLocalRoom(ack.roomCode);
+            finish({ roomCode: ack.roomCode });
+          } else {
+            finish({ error: ack.error });
+          }
         }
-      });
+      );
     });
     socket.on("connect_error", () => finish({ error: MULTIPLAYER_UNAVAILABLE_MESSAGE }));
   });

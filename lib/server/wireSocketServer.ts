@@ -41,7 +41,7 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
   }
 
   io.on("connection", (socket: IOSocket) => {
-    socket.on("room:create", ({ hostName, playerCount, centerEffect, asDisplay, aiDifficulty, password, deviceId }, ack) => {
+    socket.on("room:create", ({ hostName, playerCount, centerEffect, asDisplay, aiDifficulty, password, deviceId, centerEffectMode }, ack) => {
       try {
         if (registry.hasActiveRoomForDevice(deviceId)) {
           return ack({ ok: false, error: "This device already hosts an active room. Close it before starting another." });
@@ -62,7 +62,8 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
               asDisplay,
               aiDifficulty,
               password,
-              deviceId
+              deviceId,
+              centerEffectMode
             ),
           deviceId
         );
@@ -117,10 +118,10 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
       ack("error" in result ? { ok: false, error: result.error } : { ok: true });
     });
 
-    socket.on("room:rematch", ({ roomCode, token, centerEffect, aiDifficulty }, ack) => {
+    socket.on("room:rematch", ({ roomCode, token, centerEffect, aiDifficulty, centerEffectMode }, ack) => {
       const session = registry.get(roomCode);
       if (!session) return ack({ ok: false, error: "No game found at that room code." });
-      const result = session.rematch(token, centerEffect, aiDifficulty);
+      const result = session.rematch(token, centerEffect, aiDifficulty, centerEffectMode);
       ack("error" in result ? { ok: false, error: result.error } : { ok: true });
     });
 

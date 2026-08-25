@@ -46,6 +46,8 @@ export class GameSession {
   private readonly playerCount: number;
   /** Not readonly -- rematch() can change the location for the next deal, unlike playerCount which is fixed to the room's existing seats. */
   private centerEffect: CenterEffectId;
+  /** See LobbyState's doc comment -- the raw, unresolved choice `centerEffect` was last set from. Not readonly -- rematch() updates it same as centerEffect. */
+  private centerEffectMode: CenterEffectId | "random";
   /** Not readonly -- rematch() can change it too, same as centerEffect. */
   private aiDifficulty: AiDifficulty;
   private readonly serverOrigin: string;
@@ -94,7 +96,9 @@ export class GameSession {
     /** Trailing optional -- blank/undefined means no password, same as every call site that predates this feature. Trimmed here (not by the caller) so " " isn't treated as a real password. */
     password?: string,
     /** The host's own device id (see app/hooks/deviceId.ts) -- undefined for a display-hosted room (no host seat to attach it to) or any call site that predates this feature. */
-    hostDeviceId?: string
+    hostDeviceId?: string,
+    /** The RAW, pre-resolution location choice -- see LobbyState.centerEffectMode. Trailing optional, defaulting to `centerEffect` (never actually random), same reasoning as every other trailing default here. */
+    centerEffectMode: CenterEffectId | "random" = centerEffect
   ) {
     if (!Number.isInteger(playerCount) || playerCount < MIN_PLAYERS || playerCount > MAX_PLAYERS) {
       throw new Error(`playerCount must be an integer between ${MIN_PLAYERS} and ${MAX_PLAYERS}`);
@@ -102,6 +106,7 @@ export class GameSession {
     this.roomCode = roomCode;
     this.playerCount = playerCount;
     this.centerEffect = centerEffect;
+    this.centerEffectMode = centerEffectMode;
     this.aiDifficulty = aiDifficulty;
     this.serverOrigin = serverOrigin;
     this.rng = rng;
@@ -168,6 +173,7 @@ export class GameSession {
       hostIsDisplay: this.displayHosted,
       playerCount: this.playerCount,
       centerEffect: this.centerEffect,
+      centerEffectMode: this.centerEffectMode,
       seats: [...this.seats.values()].map(({ playerId, name, isAI, connected }) => ({ playerId, name, isAI, connected })),
       started: this.started,
       serverOrigin: this.serverOrigin,
@@ -261,23 +267,49 @@ export class GameSession {
   }
 
   /**
-   * Host-only. Deals a fresh game to the exact same seats (same humans, same AI slots
-   * filled at the original Start) without touching the room itself -- the same join
-   * link/lobby keeps working, nobody has to reconnect. Deliberately allowed mid-game
-   * too (not just once the previous game has ended) -- the host may want to restart
-   * with a different AI difficulty or location without waiting the current game out,
-   * same as single-player's always-available "New Game". Discards whatever progress
-   * the in-progress game had; every other seated player just sees a fresh board appear
-   * on their next state push. `centerEffect` can change the location for this next
-   * game (unlike player count, which is fixed to the seats already at the table) --
-   * already resolved from "random" by the caller, same as room:create. `aiDifficulty`
-   * can change too, same reasoning.
+   * True for the host, same as isHost -- but also true for any real seated player in a
+   * display-hosted (screencast) room, since that room's "host" is just the shared
+   * screen and holds no player-facing token of its own. Without this, nobody actually
+   * playing a screencast game could ever trigger "Play again" themselves; they'd be
+   * stuck waiting on whoever's standing at the shared screen. Not extended to a
+   * single-device room's guests -- there, a real host exists and rematch staying
+   * host-only is the deliberate norm.
    */
-  rematch(callerToken: string, centerEffect: CenterEffectId, aiDifficulty: AiDifficulty): { ok: true } | { error: string } {
-    if (!this.isHost(callerToken)) return { error: "Only the host can start a new game." };
+  private canRematch(callerToken: string): boolean {
+    if (this.isHost(callerToken)) return true;
+    if (!this.displayHosted) return false;
+    return [...this.seats.values()].some((s) => !s.isAI && s.token === callerToken);
+  }
+
+  /**
+   * Host-only for a single-device room; any real seated player for a display-hosted
+   * (screencast) one -- see canRematch. Deals a fresh game to the exact same seats
+   * (same humans, same AI slots filled at the original Start) without touching the
+   * room itself -- the same join link/lobby keeps working, nobody has to reconnect.
+   * Deliberately allowed mid-game too (not just once the previous game has ended) --
+   * whoever calls it may want to restart with a different AI difficulty or location
+   * without waiting the current game out, same as single-player's always-available
+   * "New Game". Discards whatever progress the in-progress game had; every other
+   * seated player just sees a fresh board appear on their next state push.
+   * `centerEffect` can change the location for this next game (unlike player count,
+   * which is fixed to the seats already at the table) -- already resolved from
+   * "random" by the caller, same as room:create. `centerEffectMode` carries the raw,
+   * unresolved choice alongside it purely so every future viewer's own LobbyState
+   * stays accurate (see its doc comment); defaults to `centerEffect` for a caller that
+   * never had a "random" concept. `aiDifficulty` can change too, same reasoning as the
+   * location.
+   */
+  rematch(
+    callerToken: string,
+    centerEffect: CenterEffectId,
+    aiDifficulty: AiDifficulty,
+    centerEffectMode: CenterEffectId | "random" = centerEffect
+  ): { ok: true } | { error: string } {
+    if (!this.canRematch(callerToken)) return { error: "Only a seated player can start a new game." };
     if (!this.state) return { error: "The game hasn't started yet." };
 
     this.centerEffect = centerEffect;
+    this.centerEffectMode = centerEffectMode;
     this.aiDifficulty = aiDifficulty;
     this.dealAndStart();
     this.onLobbyChange(this.getLobbyState());
