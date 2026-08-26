@@ -105,6 +105,26 @@ export interface ScoreContribution {
    * than applying a tracked delta. Omitted (falsy) for every normal contribution.
    */
   informational?: boolean;
+  /**
+   * True for a line that should render with strikethrough -- "this would have
+   * happened, but didn't count" (currently only a negated card's own denied rule).
+   * Purely a display hint; has no effect on scoring or on which contributions
+   * disruptionFor/ownValueFor scan (that's still governed by `source`/`informational`
+   * as normal). Omitted (falsy) for every normal contribution.
+   */
+  crossedOut?: boolean;
+  /**
+   * Overrides `amount` for display only -- lets a line show a human-legible number
+   * (e.g. a negated card's own rule at its natural, un-flipped sign) while `amount`
+   * itself keeps carrying the real net-score-effect value disruptionFor's math
+   * actually depends on. Those two can differ specifically when the negated rule was
+   * itself a self-penalty: negating it is a net *gain* (amount is positive, "backfired
+   * on the negator"), but showing that gain crossed out reads as if the card lost
+   * something, not gained it -- displayAmount keeps the crossed-out line showing the
+   * penalty's own natural negative number instead. Omitted (falsy) for every line
+   * where the two coincide, which is most of them.
+   */
+  displayAmount?: number;
 }
 
 /**
@@ -177,31 +197,43 @@ export function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Se
   return new Set(computeNegatorsOf(swapped, bounds).keys());
 }
 
+/** One delta a card's valueModifier hook would produce, with the original label it was raised under -- see contributionsOf. */
+interface LabeledDelta {
+  label: string;
+  amount: number;
+}
+
 /**
  * Every delta a card's valueModifier hook would produce -- both onto itself and onto
  * any neighbor -- found by running that hook in isolation, keyed by whichever
- * instanceId each addDelta call targeted. Same "simultaneous, only ever reads
+ * instanceId each addDelta call targeted, keeping each call's own original label
+ * (not just its summed amount) so a caller can recover exactly what the hook would
+ * have said, not just a synthesized substitute. Same "simultaneous, only ever reads
  * board/identity, never another card's resolved value" computation every
  * valueModifier already does -- this doesn't add a new kind of read, it just runs one
  * in isolation to see what it would have produced. Two callers reuse this:
  * - Negation (computeValueModifiers below): recovers what a negated card's hook would
- *   have applied, both to itself (`get(card.instanceId)`, the existing "Own rule
- *   (negated)" line) and to its neighbors (every other key -- the neighbors' own
+ *   have applied, both to itself (`get(card.instanceId)`, shown crossed-out under its
+ *   own original label) and to its neighbors (every other key -- the neighbors' own
  *   denied bonus/penalty, otherwise silently vanishing with zero trace anywhere).
  * - Facestealer's swap (resolveBoard): recovers what a swap target's TRUE identity
  *   would have contributed to itself, by passing a card object with `cardId`
- *   overridden to the stolen-from identity -- see resolveBoard's own comment.
+ *   overridden to the stolen-from identity -- see resolveBoard's own comment (only
+ *   needs the total, so it sums this function's per-delta list itself).
  */
-function contributionsOf(board: Board, bounds: BoardBounds, round: number, pos: Position, card: CardInstance): Map<string, number> {
-  const result = new Map<string, number>();
+function contributionsOf(board: Board, bounds: BoardBounds, round: number, pos: Position, card: CardInstance): Map<string, LabeledDelta[]> {
+  const result = new Map<string, LabeledDelta[]>();
   CARD_DEFS[card.cardId].valueModifier?.({
     board,
     bounds,
     round,
     pos,
     self: card,
-    addDelta: (instanceId, amount) => {
-      result.set(instanceId, (result.get(instanceId) ?? 0) + amount);
+    addDelta: (instanceId, amount, label) => {
+      const list = result.get(instanceId);
+      const delta = { label, amount };
+      if (list) list.push(delta);
+      else result.set(instanceId, [delta]);
     },
   });
   return result;
@@ -236,10 +268,11 @@ function computeValueModifiers(
     label: string,
     source: ScoreContribution["source"],
     sourceInstanceId?: string,
-    informational?: boolean
+    informational?: boolean,
+    display?: { crossedOut?: boolean; displayAmount?: number }
   ) => {
     const list = contributions.get(instanceId);
-    const entry: ScoreContribution = { label, amount, source, sourceInstanceId, informational };
+    const entry: ScoreContribution = { label, amount, source, sourceInstanceId, informational, ...display };
     if (list) list.push(entry);
     else contributions.set(instanceId, [entry]);
   };
@@ -270,38 +303,28 @@ function computeValueModifiers(
     for (const [instanceId, negatorIds] of negatorsOf) {
       const target = byInstanceId.get(instanceId);
       if (!target) continue;
-      const negatorName = (negatorId: string) => (byInstanceId.get(negatorId) ? CARD_DEFS[byInstanceId.get(negatorId)!.card.cardId].name : "negation");
       const denied = contributionsOf(board, bounds, round, target.pos, target.card);
 
-      const deniedSelfContribution = denied.get(instanceId) ?? 0;
-      if (deniedSelfContribution !== 0) {
-        // The point effect first, then its cancellation right below it -- so the
-        // breakdown reads "here's what its own rule would have been worth, here's why
-        // it didn't count" in that order, instead of only ever showing the already-net
-        // result with nothing to compare it against. "external"/no sourceInstanceId (not
-        // "self", and not the negator's id) on purpose: ownValueFor/disruptionFor in
-        // lib/playtest/cardStats.ts scan breakdown entries by source/sourceInstanceId to
-        // attribute real stats, and this line is neither a genuine self-earned point nor
-        // a real disruption event to credit to the negator -- just an explanatory mirror
-        // of the "Negated by" line right after it. Both informational: the real total is
-        // always exactly base for a negated card (see resolveBoard), these two lines
-        // exist purely to make the denial visible/attributable.
-        push(instanceId, deniedSelfContribution, "Own rule (negated)", "external", undefined, true);
-        const share = deniedSelfContribution / negatorIds.length;
-        for (const negatorId of negatorIds) push(instanceId, -share, `Negated by ${negatorName(negatorId)}`, "external", negatorId, true);
-      }
-
-      // Negation also cancels the target's OUTGOING effects on its own neighbors --
-      // those addDelta calls simply never happen (the source's whole hook is skipped),
-      // which otherwise leaves zero trace anywhere: not on the neighbor (nothing ever
-      // ran), not on the negated card (its own breakdown only ever explained its SELF
-      // portion above). Same visible/attributable treatment, just landing on the
-      // neighbor's breakdown instead, since the neighbor is who actually lost out.
-      for (const [otherInstanceId, amount] of denied) {
-        if (otherInstanceId === instanceId || amount === 0) continue;
-        push(otherInstanceId, amount, `Would have received from ${CARD_DEFS[target.card.cardId].name} (negated)`, "external", undefined, true);
-        const share = amount / negatorIds.length;
-        for (const negatorId of negatorIds) push(otherInstanceId, -share, `Denied by ${negatorName(negatorId)}`, "external", negatorId, true);
+      // One crossed-out line per original delta, at its own natural label and sign
+      // (displayAmount) -- e.g. a card whose own rule reads "Adjacent enemies -1" when
+      // active still shows exactly that struck through when negated, not a synthesized
+      // substitute label. `amount` still carries the real net-score-effect value (the
+      // negative of the denied delta, split evenly across multiple simultaneous
+      // negators) -- that's what ownValueFor/disruptionFor in
+      // lib/playtest/cardStats.ts actually scan by source/sourceInstanceId to
+      // attribute real stats, and is deliberately "external"/the negator's id (not
+      // "self") so it's credited to the negator as the disruption event it is.
+      // Informational either way: the real total is always exactly base for a negated
+      // card (see resolveBoard), and an unaffected neighbor's total is never touched
+      // by an effect that never ran.
+      for (const [targetInstanceId, deltas] of denied) {
+        for (const delta of deltas) {
+          if (delta.amount === 0) continue;
+          const share = delta.amount / negatorIds.length;
+          for (const negatorId of negatorIds) {
+            push(targetInstanceId, -share, delta.label, "external", negatorId, true, { crossedOut: true, displayAmount: share });
+          }
+        }
       }
     }
   }
@@ -374,8 +397,7 @@ export function resolveBoard(
   if (playerIds) for (const id of playerIds) totalsByOwner[id] = 0;
 
   // For the top-of-breakdown "Negated by X" caption below -- needs each negator's
-  // display name off its instanceId, same lookup computeValueModifiers builds
-  // internally for its own "Negated by" lines, just needed again out here.
+  // display name off its instanceId.
   const cardNameByInstanceId = new Map<string, string>();
   for (const c2 of board.values()) cardNameByInstanceId.set(c2.instanceId, CARD_DEFS[c2.cardId].name);
 
@@ -393,9 +415,9 @@ export function resolveBoard(
     if (negated.has(c.instanceId)) {
       // The single most important fact about a negated card's breakdown, so it goes
       // first, above even the swap caption/Base -- a reader shouldn't have to scan
-      // past several other lines to learn a card's own rule never fired at all. The
-      // detailed point-effect-then-cancellation pair (see computeValueModifiers) is
-      // still further down in cardContributions; this is just the headline. Multiple
+      // past several other lines to learn a card's own rule never fired at all. Each
+      // individual denied delta is still further down in cardContributions, shown
+      // crossed-out at its own original label -- this is just the headline. Multiple
       // negators (rare -- a card boxed in by two at once) are all named, joined.
       const negatorNames = (negatorsOf.get(c.instanceId) ?? []).map((id) => cardNameByInstanceId.get(id) ?? "negation");
       breakdown.push({ label: `Negated by ${negatorNames.join(", ")}`, amount: 0, source: "self" });
@@ -423,7 +445,10 @@ export function resolveBoard(
       // uses for multiple negators. Both informational: net to 0, doesn't touch
       // finalValue, only makes the theft visible/attributable.
       if (swap.originalCardId !== "Infiltrator") {
-        const trueSelfContribution = contributionsOf(board, bounds, round, parsePosKey(key), { ...c, cardId: swap.originalCardId }).get(c.instanceId) ?? 0;
+        const trueSelfContribution = (contributionsOf(board, bounds, round, parsePosKey(key), { ...c, cardId: swap.originalCardId }).get(c.instanceId) ?? []).reduce(
+          (sum, d) => sum + d.amount,
+          0
+        );
         const stolen = CARD_DEFS[swap.originalCardId].base + trueSelfContribution - base;
         const thieves = thievesOf.get(c.instanceId) ?? [];
         if (stolen !== 0 && thieves.length > 0) {

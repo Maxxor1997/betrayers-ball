@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { CardArt } from "@/app/components/CardArt";
+import { FixedTooltip } from "@/app/components/CardCatalog";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, pseudoCardLiveValue } from "@/lib/content/centerEffects";
 import { inBounds, isOwnerlessPosition } from "@/lib/engine/board";
@@ -34,6 +36,17 @@ export interface BoardGridProps {
   onCellDragOver: (e: React.DragEvent, key: string) => void;
   onCellDragLeave: () => void;
   onCellDrop: (e: React.DragEvent, pos: Position) => void;
+  /**
+   * True while it's the viewer's own turn -- adds a pulsing glow around the board
+   * itself (see the `.turn-glow` class in globals.css). Applied directly to this
+   * component's own root element (which already computes its exact rendered width via
+   * inline style) rather than a wrapping `<div>` a caller might add -- a wrapper with
+   * no explicit width of its own breaks this component's `width: min(100%, ...)` calc
+   * (the percentage has nothing definite to resolve against, collapsing the board to
+   * its min-content size) the moment it's the containing block instead of this
+   * component's real parent.
+   */
+  highlighted?: boolean;
 }
 
 export function BoardGrid({
@@ -50,12 +63,20 @@ export function BoardGrid({
   onCellDragOver,
   onCellDragLeave,
   onCellDrop,
+  highlighted: turnHighlighted,
 }: BoardGridProps) {
   const { width, height } = state.config.boardBounds;
   const rows = Array.from({ length: height }, (_, y) => y);
   const cols = Array.from({ length: width }, (_, x) => x);
   const activeTooltipId = useActiveTooltipId();
   const hasHover = useHasHover();
+  // Only one tooltip is ever open anywhere in the app at once (see activeTooltip.ts),
+  // so a single locally-held rect is enough -- same reasoning as CardCatalog's own
+  // activeRect. Feeds FixedTooltip (a portal, positioned `fixed` from real screen
+  // coordinates and clamped to the viewport) instead of a plain `absolute` tooltip --
+  // a board cell near the screen edge (common on a narrow phone) was otherwise
+  // rendering half off-screen, unreadable.
+  const [activeRect, setActiveRect] = useState<DOMRect | null>(null);
   // EndScreen's per-card breakdown rows share this same tooltip store, namespaced
   // `endscreen:${instanceId}` (see EndScreen.tsx) -- reusing that instead of adding a
   // separate onHover callback/prop means hovering (or tapping, on touch) a row in the
@@ -102,7 +123,7 @@ export function BoardGrid({
 
   return (
     <div
-      className="grid gap-1.5"
+      className={`grid gap-1.5 rounded-xl p-1.5 ${turnHighlighted ? "turn-glow" : ""}`}
       style={{
         gridTemplateColumns: `repeat(${width}, minmax(0, 1fr))`,
         width: `min(100%, ${naturalWidthPx}px, ${widthForHeightBudget})`,
@@ -136,13 +157,21 @@ export function BoardGrid({
                 // shares one "only one tooltip open at a time, anywhere in the app"
                 // source of truth with every other tap-to-toggle tooltip -- see
                 // activeTooltip.ts's doc comment.
-                onMouseEnter={hasHover ? () => setActiveTooltip(tooltipId) : undefined}
+                onMouseEnter={
+                  hasHover
+                    ? (e) => {
+                        setActiveRect(e.currentTarget.getBoundingClientRect());
+                        setActiveTooltip(tooltipId);
+                      }
+                    : undefined
+                }
                 onMouseLeave={hasHover ? () => clearActiveTooltip(tooltipId) : undefined}
                 onClick={
                   hasHover
                     ? undefined
                     : (e) => {
                         e.stopPropagation();
+                        setActiveRect(e.currentTarget.getBoundingClientRect());
                         toggleActiveTooltip(tooltipId);
                       }
                 }
@@ -159,10 +188,10 @@ export function BoardGrid({
                   {displayLabel}
                 </div>
                 <div className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} bg-current`} />
-                {activeTooltipId === tooltipId && (
-                  <div className="pointer-events-none absolute -top-9 left-1/2 z-10 w-max max-w-[14rem] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-center text-[10px] leading-tight text-white shadow dark:bg-zinc-100 dark:text-black">
+                {activeTooltipId === tooltipId && activeRect && (
+                  <FixedTooltip rect={activeRect}>
                     {displayLabel} — {detail}
-                  </div>
+                  </FixedTooltip>
                 )}
               </div>
             );
@@ -213,13 +242,21 @@ export function BoardGrid({
                 // setActiveTooltip/toggleActiveTooltip (not local state) -- see
                 // activeTooltip.ts's doc comment for why "only one tooltip open
                 // anywhere in the app" needs to be a shared store, not per-component.
-                onMouseEnter={hasHover ? () => setActiveTooltip(tooltipId) : undefined}
+                onMouseEnter={
+                  hasHover
+                    ? (e) => {
+                        setActiveRect(e.currentTarget.getBoundingClientRect());
+                        setActiveTooltip(tooltipId);
+                      }
+                    : undefined
+                }
                 onMouseLeave={hasHover ? () => clearActiveTooltip(tooltipId) : undefined}
                 onClick={
                   hasHover
                     ? undefined
                     : (e) => {
                         e.stopPropagation();
+                        setActiveRect(e.currentTarget.getBoundingClientRect());
                         toggleActiveTooltip(tooltipId);
                       }
                 }
@@ -265,8 +302,8 @@ export function BoardGrid({
                     <span className="text-[length:clamp(12px,40cqw,20px)]">🂠</span>
                   )}
                 </button>
-                {activeTooltipId === tooltipId && (
-                  <div className="pointer-events-none absolute -top-2 left-1/2 z-10 w-max min-w-[9rem] max-w-[16rem] -translate-x-1/2 -translate-y-full rounded bg-zinc-900 px-2 py-1 text-center text-[10px] text-white shadow dark:bg-zinc-100 dark:text-black">
+                {activeTooltipId === tooltipId && activeRect && (
+                  <FixedTooltip rect={activeRect}>
                     <div className="font-semibold leading-tight">{tooltipOwner}</div>
                     <div className="leading-tight">{tooltipDetail}</div>
                     {resolvedCard && (
@@ -274,7 +311,7 @@ export function BoardGrid({
                         <BreakdownPopup breakdown={resolvedCard.breakdown} finalValue={resolvedCard.finalValue} />
                       </div>
                     )}
-                  </div>
+                  </FixedTooltip>
                 )}
               </div>
             );

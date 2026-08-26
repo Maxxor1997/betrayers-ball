@@ -1,8 +1,15 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { CardArt } from "@/app/components/CardArt";
+import { FixedTooltip } from "@/app/components/CardCatalog";
+import { setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
+import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CardInstance } from "@/lib/engine/types";
+
+/** How long a touch has to be held before it counts as a long-press (vs. a normal tap-to-select). */
+const LONG_PRESS_MS = 500;
 
 export interface HandProps {
   cards: CardInstance[];
@@ -16,6 +23,28 @@ export interface HandProps {
 
 export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disabled, ownerAccentClass }: HandProps) {
   const sortedCards = [...cards].sort((a, b) => CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name));
+
+  const hasHover = useHasHover();
+  const activeTooltipId = useActiveTooltipId();
+  // Only one tooltip is ever open anywhere in the app at once (see activeTooltip.ts),
+  // so a single locally-held rect is enough -- same reasoning as Board.tsx/CardCatalog's
+  // own activeRect. Feeds FixedTooltip (portal, clamped to the viewport) so a card near
+  // the screen edge never renders its full description off-screen.
+  const [activeRect, setActiveRect] = useState<DOMRect | null>(null);
+  // A single shared pair, not one per card -- only one card can ever be mid-press at a
+  // time, same reasoning as activeRect above. pressTimer holds the pending long-press
+  // timeout; suppressNextClick is set the moment that timer actually fires, so the
+  // click event a touchend still dispatches right after doesn't also select the card
+  // out from under the long-press (see the button's onClick below).
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressNextClick = useRef(false);
+
+  function clearPressTimer() {
+    if (pressTimer.current) {
+      clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+  }
 
   // Cards shrink in width together (flex-basis 7rem down to a 4rem floor) to try to
   // fit one row without wrapping, but height stays fixed rather than tracking width
@@ -38,6 +67,7 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
       {sortedCards.map((card) => {
         const def = CARD_DEFS[card.cardId];
         const selected = card.instanceId === selectedInstanceId;
+        const tooltipId = `hand:${card.instanceId}`;
         return (
           <div key={card.instanceId} className="relative" style={{ flex: "1 1 7rem", minWidth: "4rem", maxWidth: "7rem" }}>
             <button
@@ -49,8 +79,50 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
               // button. Gating the handler body instead keeps the button a normal,
               // fully hoverable element; aria-disabled keeps it announced correctly.
               onClick={() => {
+                // Set by a long-press that just fired (see onPointerDown below) --
+                // touch still dispatches a click right after touchend, which would
+                // otherwise select/deselect the card out from under the description
+                // that just opened.
+                if (suppressNextClick.current) {
+                  suppressNextClick.current = false;
+                  return;
+                }
                 if (!disabled) onCardClick(card.instanceId);
               }}
+              // Desktop-only -- see the long-press handlers below for touch's
+              // equivalent gesture. Two ordinary clicks fire before a dblclick (per
+              // spec), which just toggles this card's selection on then off again --
+              // harmless, since it never had a chance to also select a board cell in
+              // between.
+              onDoubleClick={
+                hasHover
+                  ? (e) => {
+                      setActiveRect(e.currentTarget.getBoundingClientRect());
+                      toggleActiveTooltip(tooltipId);
+                    }
+                  : undefined
+              }
+              // Long-press (touch only -- hasHover devices use onDoubleClick above)
+              // shows the card's full rules text, same as double-click. The element
+              // reference is captured synchronously here, not read off the event
+              // inside the timeout callback -- a native event's currentTarget is only
+              // valid for the duration of dispatch.
+              onPointerDown={
+                !hasHover
+                  ? (e) => {
+                      const el = e.currentTarget;
+                      pressTimer.current = setTimeout(() => {
+                        pressTimer.current = null;
+                        suppressNextClick.current = true;
+                        setActiveRect(el.getBoundingClientRect());
+                        setActiveTooltip(tooltipId);
+                      }, LONG_PRESS_MS);
+                    }
+                  : undefined
+              }
+              onPointerUp={!hasHover ? clearPressTimer : undefined}
+              onPointerLeave={!hasHover ? clearPressTimer : undefined}
+              onPointerCancel={!hasHover ? clearPressTimer : undefined}
               draggable={!disabled}
               onDragStart={(e) => onCardDragStart(e, card.instanceId)}
               aria-disabled={disabled}
@@ -62,13 +134,15 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
               <CardArt cardId={card.cardId} className="h-7 w-7 shrink-0" />
               <span className="text-[length:clamp(14px,32cqw,20px)] leading-none font-bold">{def.base}</span>
               {/* Truncated to 2 lines, not left to grow -- keeps the card's fixed h-28
-                  from growing with description length. Full text is available in the
-                  card catalog, not repeated here via a tooltip (removed -- finnicky on
-                  mobile). */}
+                  from growing with description length. Full text is available via
+                  long-press/double-click below (FixedTooltip), not shown inline --
+                  that was tried and removed as finnicky on mobile when it was a plain
+                  hover tooltip. */}
               <span className="line-clamp-2 w-full text-[length:clamp(7px,16cqw,9px)] leading-tight break-words text-zinc-500 dark:text-zinc-400">
                 {def.text}
               </span>
             </button>
+            {activeTooltipId === tooltipId && activeRect && <FixedTooltip rect={activeRect}>{def.fullText}</FixedTooltip>}
           </div>
         );
       })}

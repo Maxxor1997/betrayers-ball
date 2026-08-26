@@ -191,7 +191,9 @@ function TurnOrderTracker({ state, viewerId, nameFor }: { state: GameState; view
           {roundStartId === viewerId ? " (you)" : ""}
         </span>
       )}
-      {playerCount >= 3 && (
+      {/* Only shown before the last round -- state.round === roundCap means this is
+          the final round, so there's no "next round" for this line to describe. */}
+      {playerCount >= 3 && state.round < state.config.roundCap && (
         <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
           Next round starts with{" "}
           <span className={`font-semibold ${ownerTextColorClass(state, nextRoundStartId)}`}>{nameFor(nextRoundStartId)}</span>

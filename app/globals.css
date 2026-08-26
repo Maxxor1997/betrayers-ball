@@ -46,3 +46,34 @@ html {
      appears or disappears mid-game. */
   scrollbar-gutter: stable;
 }
+
+/* Wraps the board+hand area while it's the viewer's own turn -- the disabled/enabled
+   state of the hand cards alone was hard to read at a glance on a small phone screen.
+   A box-shadow glow (not a background/text color) so it reads the same in light and
+   dark mode without a separate dark-mode definition. Emerald, not reused from any
+   existing board accent (amber = flip-clickable, sky = hover-highlighted) so it can't
+   be mistaken for either. */
+@keyframes turn-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px rgba(16, 185, 129, 0.45),
+      0 0 18px 4px rgba(16, 185, 129, 0.35);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(16, 185, 129, 0.85),
+      0 0 30px 9px rgba(16, 185, 129, 0.6);
+  }
+}
+
+.turn-glow {
+  animation: turn-glow 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-glow {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.65);
+  }
+}

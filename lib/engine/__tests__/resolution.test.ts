@@ -875,17 +875,22 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
 
     expect(find(cards, ban.instanceId).negated).toBe(true);
     expect(footmanResolved.finalValue).toBe(CARD_DEFS.Footman.base); // no +2 -- Bannerman's buff never fired
-    const wouldHave = footmanResolved.breakdown.find((d) => d.label.startsWith("Would have received from"));
+
+    // A single crossed-out line, at Bannerman's own original label ("Bannerman
+    // (adjacent)", the same text it would show if Bannerman weren't negated) -- not a
+    // synthesized "Would have received from X (negated)" substitute.
     const denied = footmanResolved.breakdown.find((d) => d.sourceInstanceId === suppressor.instanceId);
-    expect(wouldHave).toBeDefined();
-    expect(wouldHave!.amount).toBe(2); // Bannerman's own rule: +2 to an adjacent Footman
     expect(denied).toBeDefined();
-    expect(denied!.amount).toBe(-2);
-    expect(wouldHave!.informational).toBe(true);
-    expect(denied!.informational).toBe(true);
-    // Nets to exactly 0 -- this pair never changes footman's real value, only makes
-    // the denial visible/attributable (see disruptionFor in lib/playtest/cardStats.ts).
-    expect(footmanResolved.breakdown.reduce((sum, d) => sum + d.amount, 0)).toBe(footmanResolved.finalValue);
+    expect(denied).toMatchObject({
+      label: `${CARD_DEFS.Bannerman.name} (adjacent)`,
+      amount: -2, // the real net-score-effect disruptionFor scans by
+      informational: true,
+      crossedOut: true,
+      displayAmount: 2, // shown crossed-out at Bannerman's own natural sign (a +2 buff), not the net-effect one
+    });
+    // Never changes footman's real value, only makes the denial visible/attributable
+    // (see disruptionFor in lib/playtest/cardStats.ts).
+    expect(footmanResolved.breakdown.reduce((sum, d) => sum + (d.informational ? 0 : d.amount), 0)).toBe(footmanResolved.finalValue);
   });
 
   it("without an active Suppressor, Bannerman's buff lands normally", () => {
@@ -964,7 +969,7 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     expect(negationLine!.informational).toBe(true); // explains the denial, doesn't double-count into finalValue
   });
 
-  it("puts a zero-amount 'Negated by X' caption first in a negated card's breakdown, and shows the point effect before its cancellation", () => {
+  it("shows a headline 'Negated by X' at the top, and the denied rule crossed out under its own original label", () => {
     const board: Board = new Map();
     const suppressor = place(board, 2, 2, "Suppressor", "p1");
     const glory = place(board, 3, 2, "Gloryseeker", "p2", true);
@@ -974,28 +979,28 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const breakdown = find(cards, glory.instanceId).breakdown;
 
-    // The headline caption is the very first entry, zero-amount (real effect already
+    // The headline is the very first entry, zero-amount (the real effect is already
     // baked into base/finalValue -- see resolveBoard), before even "Base".
-    expect(breakdown[0]).toMatchObject({ label: `Negated by ${CARD_DEFS.Suppressor.name}`, amount: 0 });
+    expect(breakdown[0]).toMatchObject({ label: `Negated by ${CARD_DEFS.Suppressor.name}`, amount: 0, source: "self" });
     expect(breakdown[1]).toMatchObject({ label: "Base" });
 
-    // Further down, the detailed pair: the point effect itself, then its cancellation
-    // right after it -- in that order, not just the already-net result.
-    const ownRuleIndex = breakdown.findIndex((d) => d.label === "Own rule (negated)");
+    // Further down, the denied rule itself -- at its own original label ("Gloryseeker
+    // (face-up)", the same text it would show if it weren't negated), not a
+    // synthesized "Negated by X" substitute, crossed out.
     const negatedByIndex = breakdown.findIndex((d) => d.sourceInstanceId === suppressor.instanceId);
-    expect(ownRuleIndex).toBeGreaterThan(-1);
-    expect(negatedByIndex).toBe(ownRuleIndex + 1);
-    expect(breakdown[ownRuleIndex].amount).toBe(3); // what Gloryseeker's own rule would have scored
-    expect(breakdown[negatedByIndex].amount).toBe(-3); // its cancellation
+    expect(negatedByIndex).toBeGreaterThan(-1);
+    expect(breakdown[negatedByIndex]).toMatchObject({
+      label: `${CARD_DEFS.Gloryseeker.name} (face-up)`,
+      amount: -3, // the real net-score-effect disruptionFor scans by -- a denied +3 buff costs Gloryseeker 3 points
+      source: "external",
+      crossedOut: true,
+      displayAmount: 3, // shown crossed-out at the rule's own natural sign, not the net-effect one
+    });
 
-    // Neither of the two detail lines pollutes ownValueFor/disruptionFor's own
-    // source-based scans (see lib/playtest/cardStats.ts) -- "Own rule (negated)" is
-    // "external" with no sourceInstanceId (not "self", so it can't be double-counted
-    // as a real earned point), and its pair with "Negated by" (also "external",
-    // sourceInstanceId = the negator) nets to exactly the original single-line
-    // behavior for any stat keyed off the negator's instanceId.
-    expect(breakdown[ownRuleIndex].source).toBe("external");
-    expect(breakdown[ownRuleIndex].sourceInstanceId).toBeUndefined();
+    // Doesn't pollute ownValueFor's own source-based scans (see
+    // lib/playtest/cardStats.ts) -- "external" with the negator's own instanceId as
+    // sourceInstanceId, not "self", so it can't be double-counted as a real earned
+    // point, only picked up by disruptionFor's negator-side attribution.
   });
 
   it("a negated card that would have scored a self-PENALTY shows the denial as a positive (an accidental backfire)", () => {
@@ -1015,6 +1020,11 @@ describe("resolveBoard — Suppressor & resolution ordering", () => {
     const negationLine = dyingGodResolved.breakdown.find((d) => d.sourceInstanceId === suppressor.instanceId);
     expect(negationLine).toBeDefined();
     expect(negationLine!.amount).toBe(round); // denying a -4 penalty reads as +4 -- a real backfire for the negator
+    // But it still displays crossed-out at the penalty's own natural sign (-4), not
+    // the backfired net-effect one (+4) -- showing "+4 crossed out" would misleadingly
+    // read as a lost gain, when what actually got cancelled was a would-be loss.
+    expect(negationLine!.crossedOut).toBe(true);
+    expect(negationLine!.displayAmount).toBe(-round);
   });
 
   it("splits attribution evenly when two separate negators both negate the same card", () => {

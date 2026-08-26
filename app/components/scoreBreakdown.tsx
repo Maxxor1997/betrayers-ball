@@ -7,7 +7,15 @@ import { FLOORED_AT_ZERO_LABEL } from "@/lib/engine/resolution";
  * starts with a real "Base" entry already (not just for negated cards -- every card,
  * unconditionally), so nothing here needs to add one; a caller that prepends its own
  * synthetic "Base" line on top of this ends up rendering Base twice. */
-export function visibleBreakdown(breakdown: { label: string; amount: number }[]) {
+export interface BreakdownRow {
+  label: string;
+  amount: number;
+  /** See ScoreContribution's own doc comments -- purely display hints, no effect on scoring. */
+  crossedOut?: boolean;
+  displayAmount?: number;
+}
+
+export function visibleBreakdown(breakdown: BreakdownRow[]) {
   return breakdown.filter((d) => d.label !== FLOORED_AT_ZERO_LABEL);
 }
 
@@ -19,26 +27,30 @@ export function visibleBreakdown(breakdown: { label: string; amount: number }[])
  * whitespace-nowrap-vs-wrap handling, different "+" sign rules around "Base"). A
  * zero-amount entry (currently only Facestealer/Infiltrator's swap annotation) is
  * rendered as a plain italic caption with no numeric column, rather than as a "+0" row
- * that reads like a real (missing) contribution.
+ * that reads like a real (missing) contribution. A `crossedOut` entry (currently only
+ * a negated card's own denied rule) renders the whole row struck through, at its
+ * `displayAmount` (falling back to `amount`) rather than the real scoring amount --
+ * see ScoreContribution's own doc comments for why those two can differ.
  */
-export function BreakdownPopup({ breakdown, finalValue }: { breakdown: { label: string; amount: number }[]; finalValue: number }) {
+export function BreakdownPopup({ breakdown, finalValue }: { breakdown: BreakdownRow[]; finalValue: number }) {
   return (
     <div className="flex flex-col gap-0.5 text-left">
-      {visibleBreakdown(breakdown).map((d, i) =>
-        d.amount === 0 ? (
+      {visibleBreakdown(breakdown).map((d, i) => {
+        const shown = d.displayAmount ?? d.amount;
+        return d.amount === 0 ? (
           <div key={i} className="text-left italic opacity-80">
             {d.label}
           </div>
         ) : (
-          <div key={i} className="flex justify-between gap-3">
+          <div key={i} className={`flex justify-between gap-3 ${d.crossedOut ? "line-through opacity-60" : ""}`}>
             <span className="break-words">{d.label}</span>
             <span className="shrink-0">
-              {d.amount > 0 && d.label !== "Base" ? "+" : ""}
-              {d.amount}
+              {shown > 0 && d.label !== "Base" ? "+" : ""}
+              {shown}
             </span>
           </div>
-        )
-      )}
+        );
+      })}
       <div className="mt-0.5 flex justify-between gap-3 border-t border-white/20 pt-0.5 font-semibold dark:border-black/20">
         <span>Final</span>
         <span>{finalValue}</span>

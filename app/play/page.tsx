@@ -581,6 +581,7 @@ function Game() {
         onCellDragOver={handleCellDragOver}
         onCellDragLeave={() => setDragOverKey(null)}
         onCellDrop={handleCellDrop}
+        highlighted={isHumanTurn}
       />
 
       {state.phase === "ended" && (
