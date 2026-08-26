@@ -65,6 +65,14 @@ function ArenaIcon() {
     </svg>
   );
 }
+function SandboxIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-5 w-5">
+      <path d="M8 2.5h4M8.5 2.5v4l-4.3 7.4c-.6 1 .1 2.3 1.3 2.3h9c1.2 0 1.9-1.3 1.3-2.3L11.5 6.5v-4" strokeLinejoin="round" />
+      <path d="M6.5 12h7" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function PlayOption({
   href,
@@ -472,7 +480,13 @@ export default function HomePage() {
               description="Pit AI difficulties and configurations against each other."
               icon={<ArenaIcon />}
               accentClass="bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
-              fullWidth
+            />
+            <PlayOption
+              href="/sandbox"
+              title="Sandbox"
+              description="Place any card anywhere, flip freely, and preview animations and scoring."
+              icon={<SandboxIcon />}
+              accentClass="bg-teal-100 text-teal-600 dark:bg-teal-950 dark:text-teal-400"
             />
           </div>
           <ActiveSessions />
