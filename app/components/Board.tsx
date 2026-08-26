@@ -56,6 +56,15 @@ export interface BoardGridProps {
    * legality gating is completely unaffected.
    */
   forceAllClickable?: boolean;
+  /**
+   * Makes every occupied cell's card draggable and calls this when a drag off of it
+   * starts -- only sandbox mode sets this (see app/sandbox/page.tsx, which lets a
+   * placed card be dragged to a new cell, or off the board entirely to remove it).
+   * Omitted (falsy) everywhere else, so no real game's board cards become draggable.
+   */
+  onCardDragStart?: (e: React.DragEvent, instanceId: string, pos: Position) => void;
+  /** Paired with onCardDragStart -- fires when that drag ends, wherever it ends. `e.dataTransfer.dropEffect` is still "none" here if it was never accepted by a drop target (see onCellDragOver), which is how sandbox tells "dropped back onto some cell" apart from "dragged off the board entirely." */
+  onCardDragEnd?: (e: React.DragEvent) => void;
 }
 
 export function BoardGrid({
@@ -73,6 +82,8 @@ export function BoardGrid({
   onCellDragOver,
   onCellDragLeave,
   onCellDrop,
+  onCardDragStart,
+  onCardDragEnd,
   highlighted: turnHighlighted,
 }: BoardGridProps) {
   const { width, height } = state.config.boardBounds;
@@ -406,6 +417,9 @@ export function BoardGrid({
                   onClick={() => {
                     if (clickable) onCellClick(pos);
                   }}
+                  draggable={!!onCardDragStart}
+                  onDragStart={onCardDragStart ? (e) => onCardDragStart(e, card.instanceId, pos) : undefined}
+                  onDragEnd={onCardDragEnd}
                   aria-disabled={!clickable}
                   title={clickable ? "Tap to flip face-up" : undefined}
                   className={`@container flex aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 p-1 text-center ${ownerColorClass(state, card.ownerId)} ${

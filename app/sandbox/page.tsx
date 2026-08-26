@@ -23,6 +23,9 @@ const BUCKET_ORDER: CardBucket[] = ["Slam", "Engine", "Control"];
 /** Every real, placeable card -- "Unknown" is a synthetic placeholder, never a real card (see its own doc comment in types.ts). Disabled cards (currently just Skysplitter) are still included on purpose: this is a testing tool, and previewing a shelved card's animation is exactly the kind of thing it's for. */
 const PLACEABLE_CARD_IDS = ALL_CARD_IDS.filter((id) => id !== "Unknown");
 
+/** Drag payload for a palette card being dragged straight onto the board -- see handlePaletteDragStart/handleCellDrop. */
+const NEW_CARD_MIME = "application/x-sandbox-new-card";
+
 function playerId(index: number): string {
   return `p${index + 1}`;
 }
@@ -48,6 +51,7 @@ function Sandbox() {
   const [board, setBoard] = useState<Board>(new Map());
   const [placementOrder, setPlacementOrder] = useState<string[]>([]);
   const [selectedCardId, setSelectedCardId] = useState<CardId | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [removeMode, setRemoveMode] = useState(false);
   const [showScoring, setShowScoring] = useState(false);
   const nextInstanceId = useRef(0);
@@ -104,17 +108,37 @@ function Sandbox() {
     result: showScoring ? gameResult : null,
   };
 
+  function removeCardAt(key: string, instanceId: string) {
+    setBoard((prev) => {
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
+    setPlacementOrder((prev) => prev.filter((id) => id !== instanceId));
+  }
+
+  function placeCardAt(key: string, cardId: CardId) {
+    const instanceId = `sandbox-${nextInstanceId.current++}`;
+    // Same rule a real placement applies (see turns.ts's applyPlace) -- a forceFaceUp
+    // card (Cyclops) is always dealt face-up, never playable face-down, and it's what
+    // lets its "rising up out of the board" reveal animation trigger correctly (see
+    // Board.tsx's flippingIds/risingIds split).
+    const faceUp = CARD_DEFS[cardId].forceFaceUp ?? false;
+    const newCard: CardInstance = { instanceId, cardId, ownerId: viewerId, faceUp };
+    setBoard((prev) => {
+      const next = new Map(prev);
+      next.set(key, newCard);
+      return next;
+    });
+    setPlacementOrder((prev) => [...prev, instanceId]);
+  }
+
   function handleCellClick(pos: Position) {
     const key = posKey(pos);
     const existing = board.get(key);
     if (existing) {
       if (removeMode) {
-        setBoard((prev) => {
-          const next = new Map(prev);
-          next.delete(key);
-          return next;
-        });
-        setPlacementOrder((prev) => prev.filter((id) => id !== existing.instanceId));
+        removeCardAt(key, existing.instanceId);
       } else {
         setBoard((prev) => {
           const next = new Map(prev);
@@ -123,23 +147,103 @@ function Sandbox() {
         });
       }
     } else if (selectedCardId) {
-      const instanceId = `sandbox-${nextInstanceId.current++}`;
-      // Same rule a real placement applies (see turns.ts's applyPlace) -- a
-      // forceFaceUp card (Cyclops) is always dealt face-up, never playable face-down,
-      // and it's what lets its "rising up out of the board" reveal animation trigger
-      // correctly (see Board.tsx's flippingIds/risingIds split).
-      const faceUp = CARD_DEFS[selectedCardId].forceFaceUp ?? false;
-      const newCard: CardInstance = { instanceId, cardId: selectedCardId, ownerId: viewerId, faceUp };
-      setBoard((prev) => {
-        const next = new Map(prev);
-        next.set(key, newCard);
-        return next;
-      });
-      setPlacementOrder((prev) => [...prev, instanceId]);
+      placeCardAt(key, selectedCardId);
     }
   }
 
-  const noop = () => {};
+  // Dragging a card already on the board: tracked in a ref (not just dataTransfer),
+  // since dataTransfer.getData() is only reliably readable during "drop"/"dragstart"
+  // in most browsers, not "dragover"/"dragend".
+  const draggingBoardCard = useRef<{ instanceId: string; key: string } | null>(null);
+  // Runs whenever the current drag actually resolves (dropped somewhere, on-board or
+  // off) -- set fresh at the start of every board-card drag, cleared once it fires.
+  // See handleCardDragStart's own doc comment for why this exists at all.
+  const dragResolvedRef = useRef<(() => void) | null>(null);
+
+  function handleCardDragStart(e: React.DragEvent, instanceId: string, pos: Position) {
+    const dragging = { instanceId, key: posKey(pos) };
+    draggingBoardCard.current = dragging;
+    e.dataTransfer.effectAllowed = "move";
+
+    // A drop released outside the board entirely would otherwise be an "invalid"
+    // drop as far as the browser's native drag-and-drop is concerned -- most browsers
+    // play a snap-back-to-origin animation for the drag image before ever firing
+    // dragend, which is what made removal feel delayed. Making the whole document a
+    // valid drop target (always calling preventDefault) skips that animation
+    // entirely: a board cell's own onCellDrop calls stopPropagation, so this
+    // document-level handler only ever actually fires for a drop that truly missed
+    // every cell -- exactly "dragged off the board," resolved the instant it's
+    // released instead of waiting on dragend.
+    const onDocumentDragOver = (ev: DragEvent) => {
+      ev.preventDefault();
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+    };
+    const onDocumentDrop = (ev: DragEvent) => {
+      ev.preventDefault();
+      resolve();
+      removeCardAt(dragging.key, dragging.instanceId);
+    };
+    function resolve() {
+      document.removeEventListener("dragover", onDocumentDragOver);
+      document.removeEventListener("drop", onDocumentDrop);
+      draggingBoardCard.current = null;
+      dragResolvedRef.current = null;
+      setDragOverKey(null);
+    }
+    dragResolvedRef.current = resolve;
+    document.addEventListener("dragover", onDocumentDragOver);
+    document.addEventListener("drop", onDocumentDrop);
+  }
+
+  function handleCardDragEnd() {
+    // Only still set if nothing resolved this drag at all -- neither a board cell nor
+    // the document-level catch-all above ever saw a drop (e.g. Escape cancelled it
+    // mid-drag). Just cleans up; doesn't remove anything, since nothing was released.
+    dragResolvedRef.current?.();
+  }
+
+  function handleCellDragOver(e: React.DragEvent, key: string) {
+    const isNewCardFromPalette = e.dataTransfer.types.includes(NEW_CARD_MIME);
+    if (!draggingBoardCard.current && !isNewCardFromPalette) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = isNewCardFromPalette ? "copy" : "move";
+    setDragOverKey(key);
+  }
+
+  function handleCellDrop(e: React.DragEvent, pos: Position) {
+    e.preventDefault();
+    // Claims this drop so the document-level off-board catch-all (see
+    // handleCardDragStart) never also sees it -- landing on a board cell at all,
+    // whether or not the specific move below actually applies, is never "off the
+    // board."
+    e.stopPropagation();
+    setDragOverKey(null);
+    const key = posKey(pos);
+
+    const dragging = draggingBoardCard.current;
+    if (dragging) {
+      dragResolvedRef.current?.();
+      if (key !== dragging.key && !board.has(key)) {
+        setBoard((prev) => {
+          const card = prev.get(dragging.key);
+          if (!card) return prev;
+          const next = new Map(prev);
+          next.delete(dragging.key);
+          next.set(key, card);
+          return next;
+        });
+      }
+      return;
+    }
+
+    const newCardId = e.dataTransfer.getData(NEW_CARD_MIME) as CardId | "";
+    if (newCardId && !board.has(key)) placeCardAt(key, newCardId);
+  }
+
+  function handlePaletteDragStart(e: React.DragEvent, cardId: CardId) {
+    e.dataTransfer.setData(NEW_CARD_MIME, cardId);
+    e.dataTransfer.effectAllowed = "copy";
+  }
 
   return (
     <div className="flex w-full flex-1 flex-row items-start gap-8 px-4 py-8">
@@ -148,6 +252,7 @@ function Sandbox() {
         onCollapsedChange={setPaletteCollapsed}
         selectedCardId={selectedCardId}
         onSelect={setSelectedCardId}
+        onDragStartCard={handlePaletteDragStart}
       />
 
       <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-1 flex-col items-center gap-6">
@@ -204,14 +309,16 @@ function Sandbox() {
           legalCellKeys={new Set()}
           flipTargetIds={new Set()}
           selectedInstanceId={null}
-          dragOverKey={null}
+          dragOverKey={dragOverKey}
           revealAll={showScoring}
           resolvedCards={showScoring ? resolvedCardsMap : undefined}
           forceAllClickable
           onCellClick={handleCellClick}
-          onCellDragOver={noop}
-          onCellDragLeave={noop}
-          onCellDrop={noop}
+          onCellDragOver={handleCellDragOver}
+          onCellDragLeave={() => setDragOverKey(null)}
+          onCellDrop={handleCellDrop}
+          onCardDragStart={handleCardDragStart}
+          onCardDragEnd={handleCardDragEnd}
         />
 
         {showScoring && (
@@ -363,11 +470,13 @@ function CardPalette({
   onCollapsedChange,
   selectedCardId,
   onSelect,
+  onDragStartCard,
 }: {
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
   selectedCardId: CardId | null;
   onSelect: (id: CardId | null) => void;
+  onDragStartCard: (e: React.DragEvent, id: CardId) => void;
 }) {
   return (
     <div className={`shrink-0 ${collapsed ? "w-auto" : "w-full max-w-[16rem]"} lg:self-start`}>
@@ -398,6 +507,8 @@ function CardPalette({
                         key={id}
                         title={def.fullText}
                         onClick={() => onSelect(selected ? null : id)}
+                        draggable
+                        onDragStart={(e) => onDragStartCard(e, id)}
                         className={`flex flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${
                           selected
                             ? "border-amber-500 bg-amber-50 dark:bg-amber-950"
