@@ -572,7 +572,14 @@ describe("simulateOneGame", () => {
 
 describe("simulateOneGameSteps", () => {
   it("yields an intermediate (still-playing) state before eventually finishing, and the plain wrapper matches its own final state for the same seed", () => {
-    const steps = [...simulateOneGameSteps(3, "none", deterministicRng(7))];
+    // Pinned to "medium" explicitly, not DEFAULT_AI_DIFFICULTY -- this test's own
+    // reproducibility check (below) needs a difficulty whose search is a fixed,
+    // seed-only computation. "expert" (hardFast.ts) instead runs a wall-clock
+    // time-budgeted search loop (deadline = performance.now() + budget), so the
+    // number of passes it completes -- and so how much of the rng stream it
+    // consumes -- can genuinely vary between two runs even with an identical seed,
+    // which isn't what this test is trying to verify.
+    const steps = [...simulateOneGameSteps(3, "none", deterministicRng(7), "medium")];
     expect(steps.length).toBeGreaterThan(1);
     expect(steps.some((s) => s.phase === "playing")).toBe(true);
     const last = steps[steps.length - 1];
@@ -582,7 +589,7 @@ describe("simulateOneGameSteps", () => {
     // same shape of result. (Not a deep toEqual: card instanceIds come from a
     // module-level counter shared across the whole test file, not the seeded rng, so
     // they aren't reproducible run-to-run even with an identical seed.)
-    const rerun = simulateOneGame(3, "none", deterministicRng(7));
+    const rerun = simulateOneGame(3, "none", deterministicRng(7), "medium");
     expect(rerun.phase).toBe(last.phase);
     expect(rerun.round).toBe(last.round);
     expect(rerun.result).toEqual(last.result);

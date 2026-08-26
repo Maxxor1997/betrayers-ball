@@ -17,7 +17,7 @@ export const AI_DIFFICULTY_LABELS: Record<AiDifficulty, string> = {
   expert: "Expert",
 };
 
-export const DEFAULT_AI_DIFFICULTY: AiDifficulty = "medium";
+export const DEFAULT_AI_DIFFICULTY: AiDifficulty = "expert";
 
 /**
  * Single entrypoint every AI-turn call site should go through instead of importing a

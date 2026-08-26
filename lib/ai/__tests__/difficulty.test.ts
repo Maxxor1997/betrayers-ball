@@ -75,8 +75,8 @@ describe("chooseAiActionForDifficulty", () => {
     for (const d of AI_DIFFICULTIES) expect(AI_DIFFICULTY_LABELS[d]).toBeTruthy();
   });
 
-  it("defaults to medium", () => {
-    expect(DEFAULT_AI_DIFFICULTY).toBe("medium");
+  it("defaults to expert", () => {
+    expect(DEFAULT_AI_DIFFICULTY).toBe("expert");
   });
 
   it("plays a full game legally at every difficulty, including expert's simulated vote decisions at round boundaries", () => {
