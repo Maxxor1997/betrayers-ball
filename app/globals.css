@@ -117,3 +117,113 @@ html {
     transform: rotateY(180deg);
   }
 }
+
+/* A forceFaceUp card (Cyclops) has no face-down state to flip away from -- it's
+   revealed the instant it's placed, not flipped later -- so instead of .card-flip-*
+   above, the real card underneath stays completely normal (no transform on it at
+   all), and a separate, larger copy of just its icon (see Board.tsx's
+   card-rise-overlay div, a sibling of the button, not a descendant -- so the button's
+   own `overflow-hidden` never clips it) pops up out of it, looms above the board
+   briefly, then fades -- like the eye rising up and receding. Starts at scale(0.5) to
+   roughly match the icon's actual in-card footprint (h-1/2 w-1/2 of the cell), so it
+   reads as emerging from the real icon's position rather than appearing from nowhere. */
+@keyframes card-rise-overlay-pop {
+  0% {
+    transform: scale(0.5) translateY(0);
+    opacity: 1;
+  }
+  35% {
+    transform: scale(1.7) translateY(-25%);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2.4) translateY(-60%);
+    opacity: 0;
+  }
+}
+
+.card-rise-overlay {
+  animation: card-rise-overlay-pop 0.7s cubic-bezier(0.25, 0.8, 0.3, 1) forwards;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-rise-overlay {
+    animation: none;
+    display: none;
+  }
+}
+
+/* A red "impact" punch on whichever cells a just-flipped card actually hits (its
+   row/col, its neighbors, whatever its own rule reaches) -- see Board.tsx's
+   disruptedIds/flipDisruptionTargets. A glowing ring plus a quick squash-and-recover
+   scale, not just a plain fade -- reads as "hit" at a glance instead of a subtle tint
+   change easy to miss during real play. One-shot, not looping like .turn-glow -- this
+   marks a single moment (the flip that caused it), not an ongoing state. */
+@keyframes card-disrupted-flash {
+  0% {
+    box-shadow:
+      0 0 0 2px rgba(239, 68, 68, 0.95),
+      0 0 16px 4px rgba(239, 68, 68, 0.7);
+    transform: scale(1);
+  }
+  15% {
+    box-shadow:
+      0 0 0 4px rgba(239, 68, 68, 1),
+      0 0 24px 8px rgba(239, 68, 68, 0.9);
+    transform: scale(0.92);
+  }
+  40% {
+    box-shadow:
+      0 0 0 3px rgba(239, 68, 68, 0.8),
+      0 0 18px 6px rgba(239, 68, 68, 0.6);
+    transform: scale(1.04);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    transform: scale(1);
+  }
+}
+
+.card-disrupted {
+  animation: card-disrupted-flash 0.8s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-disrupted {
+    animation: none;
+  }
+}
+
+/* Green mirror of .card-disrupted -- see Board.tsx's boostedIds/flipBoostTargets.
+   Grows instead of squashing (a "lift," not an "impact") to feel like a gain rather
+   than a hit -- green-500, distinct from .turn-glow's emerald-500 and its own
+   infinite ambient pulse, so the two never read as the same thing. */
+@keyframes card-boosted-flash {
+  0% {
+    box-shadow:
+      0 0 0 2px rgba(34, 197, 94, 0.95),
+      0 0 16px 4px rgba(34, 197, 94, 0.7);
+    transform: scale(1);
+  }
+  30% {
+    box-shadow:
+      0 0 0 4px rgba(34, 197, 94, 1),
+      0 0 26px 9px rgba(34, 197, 94, 0.9);
+    transform: scale(1.08);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+    transform: scale(1);
+  }
+}
+
+.card-boosted {
+  animation: card-boosted-flash 0.8s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-boosted {
+    animation: none;
+  }
+}

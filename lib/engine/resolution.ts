@@ -125,6 +125,17 @@ export interface ScoreContribution {
    * where the two coincide, which is most of them.
    */
   displayAmount?: number;
+  /**
+   * True for a contribution that should count toward stats tallies (ownValueFor/
+   * disruptionFor, via source/sourceInstanceId same as any other entry) but never
+   * render in a breakdown popup at all -- currently only Facestealer's "stolen by"
+   * line on the target's breakdown, which a player reads as needless noise once
+   * "Scoring as Facestealer" already explains why the numbers don't match. Distinct
+   * from `informational` (which still displays, just doesn't count toward
+   * finalValue) -- this is purely a display filter, orthogonal to scoring. Omitted
+   * (falsy) for every normal contribution.
+   */
+  hidden?: boolean;
 }
 
 /**
@@ -237,6 +248,55 @@ function contributionsOf(board: Board, bounds: BoardBounds, round: number, pos: 
     },
   });
   return result;
+}
+
+/**
+ * Every other card a face-up card's own rule currently hits with a real, negative
+ * effect -- run live against the CURRENT board (not resolution-time), for a purely
+ * visual purpose: Board.tsx flashes exactly these cells the moment such a card flips
+ * face-up, so a "disrupts neighbors/row/col" card's reveal reads as *why* it matters,
+ * not just that a card turned over. Two mechanisms feed this, same two negation
+ * already has to handle:
+ * - A direct outgoing addDelta a card's own hook applies to a neighbor (Earthshaker's
+ *   row/col, Chronicler/Skysplitter/PlagueBearer/Truthseeker's/PlagueRat's various
+ *   adjacency effects) -- only the NEGATIVE ones count as a "hit" worth flashing;
+ *   Bannerman's positive adjacent buff, for instance, deliberately doesn't qualify.
+ * - Suppressor/Lictor's negatesNeighborsIf, which doesn't go through addDelta at all
+ *   (see computeNegatorsOf) -- every occupied neighbor counts once its 3+-adjacent
+ *   condition is met, regardless of what that neighbor's own rule would have said.
+ * Returns nothing for a card that's currently negated itself -- a negated card's
+ * outgoing effects never actually fire (see computeValueModifiers), so there's
+ * nothing real to flash.
+ */
+export function flipDisruptionTargets(board: Board, bounds: BoardBounds, round: number, pos: Position, card: CardInstance): string[] {
+  if (computeNegatedInstanceIds(board, bounds).has(card.instanceId)) return [];
+  const targets = new Set<string>();
+  for (const [instanceId, deltas] of contributionsOf(board, bounds, round, pos, card)) {
+    if (instanceId !== card.instanceId && deltas.some((d) => d.amount < 0)) targets.add(instanceId);
+  }
+  if (CARD_DEFS[card.cardId].negatesNeighborsIf?.({ board, bounds, pos })) {
+    for (const n of getAdjacentCards(board, bounds, pos)) targets.add(n.instanceId);
+  }
+  return [...targets];
+}
+
+/**
+ * The green mirror of flipDisruptionTargets -- every card (including the flipped card
+ * itself, unlike disruption) a face-up card's own rule currently grants a real,
+ * positive effect to. Self counts on purpose here: "the card gains stats" from its
+ * own rule (e.g. Gloryseeker's own +3 while face-up, Footman's line bonus, Beacon,
+ * Commander, Conciliator) is exactly as worth a visual beat as a neighbor getting
+ * buffed by Hornblower's adjacency bonus. Same "nothing real happens if this card is
+ * currently negated" guard as disruption -- a negated card's own rule never fires
+ * (see computeValueModifiers), self-boost included.
+ */
+export function flipBoostTargets(board: Board, bounds: BoardBounds, round: number, pos: Position, card: CardInstance): string[] {
+  if (computeNegatedInstanceIds(board, bounds).has(card.instanceId)) return [];
+  const targets = new Set<string>();
+  for (const [instanceId, deltas] of contributionsOf(board, bounds, round, pos, card)) {
+    if (deltas.some((d) => d.amount > 0)) targets.add(instanceId);
+  }
+  return [...targets];
 }
 
 /**
@@ -434,16 +494,19 @@ export function resolveBoard(
           : `Scoring as ${CARD_DEFS.Infiltrator.name} (Facestealer effect)`;
       breakdown.push({ label, amount: 0, source: "self" });
 
-      // If this instance LOST its identity (it's the target, not the thief), its true
-      // self-worth as its real identity is otherwise invisible: the swap changes
-      // `cardId` directly rather than going through addDelta, so nothing in
-      // computeValueModifiers ever attributes the loss to the Facestealer(s)
-      // responsible. Recovered the same way negation recovers a denied effect --
-      // running the (true, unswapped) identity's own hook in isolation against the
-      // current board -- and split evenly across every thief that targeted this card
-      // (see computeIdentitySwaps' thievesOf), same "share it" convention negation
-      // uses for multiple negators. Both informational: net to 0, doesn't touch
-      // finalValue, only makes the theft visible/attributable.
+      // If this instance LOST its identity (it's the target, not the thief), its loss
+      // is otherwise invisible to disruption stats: the swap changes `cardId` directly
+      // rather than going through addDelta, so nothing in computeValueModifiers ever
+      // attributes it to the Facestealer(s) responsible. Recovered the same way
+      // negation recovers a denied effect -- running the (true, unswapped) identity's
+      // own hook in isolation against the current board -- and split evenly across
+      // every thief that targeted this card (see computeIdentitySwaps' thievesOf),
+      // same "share it" convention negation uses for multiple negators. `hidden`: the
+      // "Scoring as Facestealer" caption above already explains why this card's
+      // numbers don't match its printed rule -- a further "you lost N points" line
+      // read as confusing noise on top of that, so this is tracked (disruptionFor
+      // still scans it by source/sourceInstanceId, same as any other entry) but never
+      // actually shown in a breakdown popup.
       if (swap.originalCardId !== "Infiltrator") {
         const trueSelfContribution = (contributionsOf(board, bounds, round, parsePosKey(key), { ...c, cardId: swap.originalCardId }).get(c.instanceId) ?? []).reduce(
           (sum, d) => sum + d.amount,
@@ -452,10 +515,9 @@ export function resolveBoard(
         const stolen = CARD_DEFS[swap.originalCardId].base + trueSelfContribution - base;
         const thieves = thievesOf.get(c.instanceId) ?? [];
         if (stolen !== 0 && thieves.length > 0) {
-          breakdown.push({ label: `True value as ${CARD_DEFS[swap.originalCardId].name}`, amount: stolen, source: "self", informational: true });
           const share = stolen / thieves.length;
           for (const thiefId of thieves) {
-            breakdown.push({ label: "Stolen by Facestealer", amount: -share, source: "external", sourceInstanceId: thiefId, informational: true });
+            breakdown.push({ label: "Stolen by Facestealer", amount: -share, source: "external", sourceInstanceId: thiefId, informational: true, hidden: true });
           }
         }
       }

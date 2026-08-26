@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveBoard, ResolvedCard } from "../resolution";
+import { flipBoostTargets, flipDisruptionTargets, resolveBoard, ResolvedCard } from "../resolution";
 import { Board, BoardBounds, CardId, CardInstance, posKey } from "../types";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, KINGSLAYER_BASE_VALUE } from "@/lib/content/centerEffects";
@@ -611,26 +611,33 @@ describe("resolveBoard — Infiltrator (Facestealer)", () => {
     expect(gloryResolved.finalValue).toBe(CARD_DEFS.Infiltrator.base);
   });
 
-  it("attributes the target's stolen value to the Facestealer as disruption, without changing the target's real (now-Infiltrator) score", () => {
+  it("attributes the target's stolen value to the Facestealer as disruption, tracked but hidden from the breakdown popup, without changing the target's real (now-Infiltrator) score", () => {
     const board: Board = new Map();
     const inf = place(board, 1, 1, "Infiltrator", "p1", false);
     const gloryseeker = place(board, 0, 1, "Gloryseeker", "p2", true); // face-up: true self-value is base 4 + 3 (face-up rule) = 7
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const gloryResolved = find(cards, gloryseeker.instanceId);
 
-    expect(gloryResolved.finalValue).toBe(CARD_DEFS.Infiltrator.base); // scores as Infiltrator now, unaffected by the new lines
-    const trueValueLine = gloryResolved.breakdown.find((d) => d.label.startsWith("True value as"));
+    expect(gloryResolved.finalValue).toBe(CARD_DEFS.Infiltrator.base); // scores as Infiltrator now, unaffected by the hidden line
+
+    // No "True value as X" line at all -- the "Scoring as Facestealer" caption already
+    // explains why the numbers don't match; a further "you lost N points" line was
+    // confusing noise on top of that.
+    expect(gloryResolved.breakdown.find((d) => d.label.startsWith("True value as"))).toBeUndefined();
+
+    // The stolen-value attribution itself is still tracked for disruption stats, just
+    // marked `hidden` -- a real screen-facing breakdown popup filters it out (see
+    // visibleBreakdown in scoreBreakdown.tsx), but disruptionFor's own scan reads
+    // straight off resolution.ts's breakdown array, unaffected by that display filter.
     const stolenLine = gloryResolved.breakdown.find((d) => d.sourceInstanceId === inf.instanceId);
-    expect(trueValueLine).toBeDefined();
-    expect(trueValueLine!.amount).toBe(CARD_DEFS.Gloryseeker.base + 3 - CARD_DEFS.Infiltrator.base); // 7 - 3 = 4
     expect(stolenLine).toBeDefined();
     expect(stolenLine!.label).toBe("Stolen by Facestealer");
-    expect(stolenLine!.amount).toBe(-(CARD_DEFS.Gloryseeker.base + 3 - CARD_DEFS.Infiltrator.base));
-    expect(trueValueLine!.informational).toBe(true);
+    expect(stolenLine!.amount).toBe(-(CARD_DEFS.Gloryseeker.base + 3 - CARD_DEFS.Infiltrator.base)); // -(7 - 3) = -4
     expect(stolenLine!.informational).toBe(true);
-    // Nets to exactly 0 -- never changes the target's real score, only makes the theft
-    // visible/attributable (see disruptionFor in lib/playtest/cardStats.ts).
-    expect(gloryResolved.breakdown.reduce((sum, d) => sum + d.amount, 0)).toBe(gloryResolved.finalValue);
+    expect(stolenLine!.hidden).toBe(true);
+    // Never changes the target's real score -- informational entries are excluded from
+    // finalValue (see resolveBoard's own rawTotal calc), only counted toward disruption.
+    expect(gloryResolved.breakdown.reduce((sum, d) => sum + (d.informational ? 0 : d.amount), 0)).toBe(gloryResolved.finalValue);
   });
 
   it("splits the stolen-value attribution evenly when multiple Facestealers independently target the same card", () => {
@@ -644,9 +651,12 @@ describe("resolveBoard — Infiltrator (Facestealer)", () => {
     const stolenLines = gloryResolved.breakdown.filter((d) => d.label === "Stolen by Facestealer");
     expect(stolenLines).toHaveLength(2);
     const total = CARD_DEFS.Gloryseeker.base + 3 - CARD_DEFS.Infiltrator.base;
-    for (const line of stolenLines) expect(line.amount).toBe(-total / 2);
+    for (const line of stolenLines) {
+      expect(line.amount).toBe(-total / 2);
+      expect(line.hidden).toBe(true);
+    }
     expect(new Set(stolenLines.map((d) => d.sourceInstanceId))).toEqual(new Set([inf1.instanceId, inf2.instanceId]));
-    expect(gloryResolved.breakdown.reduce((sum, d) => sum + d.amount, 0)).toBe(gloryResolved.finalValue);
+    expect(gloryResolved.breakdown.reduce((sum, d) => sum + (d.informational ? 0 : d.amount), 0)).toBe(gloryResolved.finalValue);
   });
 
   it("no-op when the only neighbor is face-down -- can only steal an identity it can see", () => {
@@ -1346,5 +1356,86 @@ describe("resolveBoard — center effect: The Summit", () => {
       amount: CARD_DEFS.Footman.base,
       source: "external",
     });
+  });
+});
+
+describe("flipDisruptionTargets", () => {
+  it("includes a neighbor Earthshaker hits in its row/col with a real negative effect", () => {
+    const board: Board = new Map();
+    const e = place(board, 1, 1, "Earthshaker", "p1", true);
+    const sameRow = place(board, 0, 1, "Footman", "p2");
+    const diagonal = place(board, 0, 0, "Footman", "p2"); // untouched -- neither row nor column
+    const targets = flipDisruptionTargets(board, BOUNDS, 3, { x: 1, y: 1 }, e);
+    expect(targets).toContain(sameRow.instanceId);
+    expect(targets).not.toContain(diagonal.instanceId);
+  });
+
+  it("excludes a positive effect -- Bannerman's adjacent buff doesn't count as a disruption", () => {
+    const board: Board = new Map();
+    const ban = place(board, 1, 1, "Bannerman", "p1", true);
+    place(board, 0, 1, "Footman", "p1");
+    const targets = flipDisruptionTargets(board, BOUNDS, 3, { x: 1, y: 1 }, ban);
+    expect(targets).toEqual([]);
+  });
+
+  it("includes every occupied neighbor for Suppressor/Lictor's negation, which never goes through addDelta", () => {
+    const board: Board = new Map();
+    const suppressor = place(board, 2, 2, "Suppressor", "p1", true);
+    const glory = place(board, 3, 2, "Gloryseeker", "p2", true);
+    place(board, 1, 2, "Giant", "p1");
+    place(board, 2, 1, "Giant", "p1");
+    place(board, 2, 3, "Giant", "p1");
+    const targets = flipDisruptionTargets(board, BOUNDS, 3, { x: 2, y: 2 }, suppressor);
+    expect(targets).toContain(glory.instanceId);
+  });
+
+  it("returns nothing for a card that's currently negated itself -- its outgoing effect never actually fires", () => {
+    const board: Board = new Map();
+    place(board, 2, 2, "Suppressor", "p1", true);
+    const e = place(board, 3, 2, "Earthshaker", "p2", true); // negated by the Suppressor
+    place(board, 1, 2, "Giant", "p1");
+    place(board, 2, 1, "Giant", "p1");
+    place(board, 2, 3, "Giant", "p1");
+    place(board, 4, 2, "Footman", "p2"); // would be hit by Earthshaker's row, if it weren't negated
+    const targets = flipDisruptionTargets(board, BOUNDS, 3, { x: 3, y: 2 }, e);
+    expect(targets).toEqual([]);
+  });
+});
+
+describe("flipBoostTargets", () => {
+  it("includes a neighbor Hornblower buffs -- the green mirror of a disruption", () => {
+    const board: Board = new Map();
+    const ban = place(board, 1, 1, "Bannerman", "p1", true);
+    const neighbor = place(board, 0, 1, "Footman", "p1");
+    const diagonal = place(board, 0, 0, "Footman", "p1"); // not adjacent -- untouched
+    const targets = flipBoostTargets(board, BOUNDS, 3, { x: 1, y: 1 }, ban);
+    expect(targets).toContain(neighbor.instanceId);
+    expect(targets).not.toContain(diagonal.instanceId);
+  });
+
+  it("includes the flipped card itself for a self-buff, unlike flipDisruptionTargets", () => {
+    const board: Board = new Map();
+    const glory = place(board, 1, 1, "Gloryseeker", "p1", true); // +3 while face-up, self only
+    const targets = flipBoostTargets(board, BOUNDS, 3, { x: 1, y: 1 }, glory);
+    expect(targets).toEqual([glory.instanceId]);
+  });
+
+  it("excludes a negative effect -- Earthshaker's row/col hit doesn't count as a boost", () => {
+    const board: Board = new Map();
+    const e = place(board, 1, 1, "Earthshaker", "p1", true);
+    place(board, 0, 1, "Footman", "p2");
+    const targets = flipBoostTargets(board, BOUNDS, 3, { x: 1, y: 1 }, e);
+    expect(targets).toEqual([]);
+  });
+
+  it("returns nothing for a card that's currently negated itself -- its own rule never actually fires", () => {
+    const board: Board = new Map();
+    place(board, 2, 2, "Suppressor", "p1", true);
+    const glory = place(board, 3, 2, "Gloryseeker", "p2", true); // would self-buff +3, if it weren't negated
+    place(board, 1, 2, "Giant", "p1");
+    place(board, 2, 1, "Giant", "p1");
+    place(board, 2, 3, "Giant", "p1");
+    const targets = flipBoostTargets(board, BOUNDS, 3, { x: 3, y: 2 }, glory);
+    expect(targets).toEqual([]);
   });
 });

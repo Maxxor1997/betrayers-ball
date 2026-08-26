@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 import { CardArt } from "@/app/components/CardArt";
 import { FixedTooltip } from "@/app/components/CardCatalog";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, pseudoCardLiveValue } from "@/lib/content/centerEffects";
-import { inBounds, isOwnerlessPosition } from "@/lib/engine/board";
+import { inBounds, isOwnerlessPosition, parsePosKey } from "@/lib/engine/board";
 import { PLAYER_COLOR_CLASSES } from "@/lib/config/players";
-import { computeNegatedInstanceIds, ResolvedCard } from "@/lib/engine/resolution";
+import { computeNegatedInstanceIds, flipBoostTargets, flipDisruptionTargets, ResolvedCard } from "@/lib/engine/resolution";
 import { GameState, Position, posKey } from "@/lib/engine/types";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useHasHover } from "@/app/hooks/useHasHover";
@@ -47,6 +47,15 @@ export interface BoardGridProps {
    * component's real parent.
    */
   highlighted?: boolean;
+  /**
+   * Bypasses legalCellKeys/flipTargetIds entirely -- every empty cell accepts a click
+   * and every occupied cell (face-up or face-down) does too, regardless of whose turn
+   * it is or the normal "only face-down cards are flip-targets" rule. Only sandbox
+   * mode sets this (see app/sandbox/page.tsx, which needs to place/toggle/remove any
+   * card freely) -- omitted (falsy) everywhere else, so every real game's normal
+   * legality gating is completely unaffected.
+   */
+  forceAllClickable?: boolean;
 }
 
 export function BoardGrid({
@@ -59,6 +68,7 @@ export function BoardGrid({
   dragOverKey,
   revealAll,
   resolvedCards,
+  forceAllClickable,
   onCellClick,
   onCellDragOver,
   onCellDragLeave,
@@ -115,33 +125,90 @@ export function BoardGrid({
   // setState-in-effect it does trigger is accepted here the same way every page's own
   // mount-detection effect already does.
   const FLIP_ANIMATION_MS = 500;
+  // A forceFaceUp card (Cyclops) never has a face-down state to rotate away from --
+  // it arrives already revealed the instant it's placed, not flipped later mid-game --
+  // so instead of the two-face 3D flip every other card's later flip uses, a larger
+  // copy of just its icon pops up out of the real (unchanged) card and looms above the
+  // board briefly (see .card-rise-overlay in globals.css). Matches that CSS
+  // animation's own duration so the overlay never gets cut off mid-animation.
+  const RISE_ANIMATION_MS = 700;
+  // Slightly longer than the flip itself and starting from the same moment -- reads as
+  // "the flip caused this," not a separate, disconnected blink, while still giving a
+  // beat after the card settles for the affected cells to actually register.
+  const DISRUPTION_FLASH_MS = 800;
   const hasMountedRef = useRef(false);
   const prevFaceUpRef = useRef<Map<string, boolean>>(new Map());
   const [flippingIds, setFlippingIds] = useState<Set<string>>(new Set());
+  const [risingIds, setRisingIds] = useState<Set<string>>(new Set());
+  // Neighbor/row/col cells a just-flipped card (Earthshaker, Chronicler, Skysplitter,
+  // Suppressor/Lictor, Truthseeker/Inquisitor, PlagueBearer, PlagueRat, ...) actually
+  // hits -- see flipDisruptionTargets. Flashed with a red pulse (.card-disrupted in
+  // globals.css) so a disruptive card's reveal reads as *why* it matters, not just
+  // that a card turned over.
+  const [disruptedIds, setDisruptedIds] = useState<Set<string>>(new Set());
+  // Green mirror of disruptedIds -- see flipBoostTargets. Includes the flipped card
+  // itself (a self-buff, e.g. Gloryseeker's own +3 while face-up) as well as neighbors
+  // a card like Hornblower buffs on flip. Flashed with .card-boosted in globals.css.
+  const [boostedIds, setBoostedIds] = useState<Set<string>>(new Set());
   useEffect(() => {
     const prev = prevFaceUpRef.current;
     const next = new Map<string, boolean>();
+    // A real, later flip (was genuinely face-down at some earlier render) vs. a card
+    // arriving already face-up the moment it's first seen (only ever a forceFaceUp
+    // card's placement, since the board starts empty and only grows one placement at
+    // a time -- see hasMountedRef's own doc comment above for why "first sighting"
+    // only counts post-mount) -- same underlying "just revealed" moment, but they get
+    // two different animations (see FLIP_ANIMATION_MS/RISE_ANIMATION_MS above).
     const newlyFlipped: string[] = [];
-    for (const card of state.board.values()) {
+    const newlyRisen: string[] = [];
+    for (const [key, card] of state.board.entries()) {
       const prevValue = prev.get(card.instanceId);
-      const justRevealed = card.faceUp && (prevValue === false || (hasMountedRef.current && prevValue === undefined));
-      if (justRevealed) newlyFlipped.push(card.instanceId);
+      if (card.faceUp && prevValue === false) newlyFlipped.push(key);
+      else if (card.faceUp && hasMountedRef.current && prevValue === undefined) newlyRisen.push(key);
       next.set(card.instanceId, card.faceUp);
     }
     prevFaceUpRef.current = next;
     hasMountedRef.current = true;
-    if (newlyFlipped.length === 0) return;
+    const justRevealed = [...newlyFlipped, ...newlyRisen];
+    if (justRevealed.length === 0) return;
 
-    setFlippingIds((current) => new Set([...current, ...newlyFlipped]));
-    const timer = setTimeout(() => {
-      setFlippingIds((current) => {
-        const remaining = new Set(current);
-        for (const id of newlyFlipped) remaining.delete(id);
-        return remaining;
-      });
-    }, FLIP_ANIMATION_MS);
-    return () => clearTimeout(timer);
-  }, [state.board]);
+    // One-shot flash: adds `ids` to whichever set `setter` manages, then removes
+    // exactly those ids again after `ms` -- shared by the flip/rise/disruption/boost
+    // flashes below, which all follow this same "add now, clean up later" shape.
+    const flash = (ids: string[], setter: Dispatch<SetStateAction<Set<string>>>, ms: number): (() => void) | undefined => {
+      if (ids.length === 0) return undefined;
+      setter((current) => new Set([...current, ...ids]));
+      const timer = setTimeout(() => {
+        setter((current) => {
+          const remaining = new Set(current);
+          for (const id of ids) remaining.delete(id);
+          return remaining;
+        });
+      }, ms);
+      return () => clearTimeout(timer);
+    };
+
+    const newlyFlippedIds = newlyFlipped.map((key) => state.board.get(key)!.instanceId);
+    const newlyRisenIds = newlyRisen.map((key) => state.board.get(key)!.instanceId);
+    const newlyDisrupted = justRevealed.flatMap((key) => {
+      const card = state.board.get(key)!;
+      return flipDisruptionTargets(state.board, state.config.boardBounds, state.round, parsePosKey(key), card);
+    });
+    const newlyBoosted = justRevealed.flatMap((key) => {
+      const card = state.board.get(key)!;
+      return flipBoostTargets(state.board, state.config.boardBounds, state.round, parsePosKey(key), card);
+    });
+
+    const cleanups = [
+      flash(newlyFlippedIds, setFlippingIds, FLIP_ANIMATION_MS),
+      flash(newlyRisenIds, setRisingIds, RISE_ANIMATION_MS),
+      flash(newlyDisrupted, setDisruptedIds, DISRUPTION_FLASH_MS),
+      flash(newlyBoosted, setBoostedIds, DISRUPTION_FLASH_MS),
+    ];
+    return () => {
+      for (const cleanup of cleanups) cleanup?.();
+    };
+  }, [state.board, state.config.boardBounds, state.round]);
 
   // Cells are sized to fill their grid column (aspect-square, no fixed px) rather than
   // a fixed h-20 w-20 -- with wider/taller boards (7-8p can be 11+ columns or rows) a
@@ -182,7 +249,7 @@ export function BoardGrid({
           const key = posKey(pos);
           const isOwnerless = isOwnerlessPosition(pos, state.config.boardBounds);
           const card = state.board.get(key);
-          const isLegal = legalCellKeys.has(key);
+          const isLegal = forceAllClickable || legalCellKeys.has(key);
 
           if (isOwnerless) {
             const effect = CENTER_EFFECTS[state.config.centerEffect];
@@ -244,7 +311,7 @@ export function BoardGrid({
           }
 
           if (card) {
-            const clickable = !card.faceUp && flipTargetIds.has(card.instanceId) && !selectedInstanceId;
+            const clickable = forceAllClickable || (!card.faceUp && flipTargetIds.has(card.instanceId) && !selectedInstanceId);
             const displayFaceUp = revealAll || card.faceUp;
             // At game end, cards that were face-down during play are shown with faded
             // text instead of a separate badge -- distinguishable without being loud.
@@ -343,7 +410,7 @@ export function BoardGrid({
                   title={clickable ? "Tap to flip face-up" : undefined}
                   className={`@container flex aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 p-1 text-center ${ownerColorClass(state, card.ownerId)} ${
                     clickable ? "cursor-pointer ring-2 ring-amber-400" : ""
-                  } ${highlighted ? "ring-2 ring-sky-400 dark:ring-sky-500" : ""} ${flippingIds.has(card.instanceId) ? "[perspective:600px]" : ""}`}
+                  } ${highlighted ? "ring-2 ring-sky-400 dark:ring-sky-500" : ""} ${flippingIds.has(card.instanceId) ? "[perspective:600px]" : ""} ${disruptedIds.has(card.instanceId) ? "card-disrupted" : ""} ${boostedIds.has(card.instanceId) ? "card-boosted" : ""}`}
                 >
                   {flippingIds.has(card.instanceId) ? (
                     // Briefly renders BOTH faces stacked in 3D (see .card-flip-* in
@@ -364,6 +431,19 @@ export function BoardGrid({
                     <span className="text-[length:clamp(12px,40cqw,20px)]">🂠</span>
                   )}
                 </button>
+                {risingIds.has(card.instanceId) && (
+                  // A forceFaceUp card (Cyclops) has no face-down state to flip away
+                  // from -- it's revealed the instant it's placed, not flipped later --
+                  // so instead of the two-face flip above, the real card underneath
+                  // stays put at its normal size, and a larger copy of just its icon
+                  // rises up out of it and looms above the board for a moment before
+                  // fading, like the eye emerging (see .card-rise-overlay in
+                  // globals.css). `overflow-hidden` on the button above never clips
+                  // this -- it's a sibling, not a descendant, of the button.
+                  <div className="card-rise-overlay pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+                    <CardArt cardId={card.cardId} className="h-full w-full drop-shadow-lg" />
+                  </div>
+                )}
                 {activeTooltipId === tooltipId && activeRect && (
                   <FixedTooltip rect={activeRect}>
                     <div className="font-semibold leading-tight">{tooltipOwner}</div>

@@ -13,10 +13,12 @@ export interface BreakdownRow {
   /** See ScoreContribution's own doc comments -- purely display hints, no effect on scoring. */
   crossedOut?: boolean;
   displayAmount?: number;
+  /** See ScoreContribution's own doc comment -- still counts toward stats tallies, just never rendered. */
+  hidden?: boolean;
 }
 
 export function visibleBreakdown(breakdown: BreakdownRow[]) {
-  return breakdown.filter((d) => d.label !== FLOORED_AT_ZERO_LABEL);
+  return breakdown.filter((d) => d.label !== FLOORED_AT_ZERO_LABEL && !d.hidden);
 }
 
 /**
