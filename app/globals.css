@@ -77,3 +77,43 @@ html {
     box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.65);
   }
 }
+
+/* A board card's face-down-to-face-up reveal -- see Board.tsx's flippingIds, which
+   mounts this markup only for the ~500ms the animation plays, then settles back into
+   the plain single-face render every other card uses. Classic two-face 3D flip: the
+   inner element rotates 0deg -> 180deg; the front face (face-down back, showing at
+   0deg) and back face (face-up content, pre-rotated to 180deg) each hide their own
+   backface, so exactly one is ever visible at a time as the rotation crosses 90deg. */
+.card-flip-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  animation: card-flip-reveal 0.5s cubic-bezier(0.3, 0.1, 0.2, 1) forwards;
+}
+
+@keyframes card-flip-reveal {
+  from {
+    transform: rotateY(0deg);
+  }
+  to {
+    transform: rotateY(180deg);
+  }
+}
+
+.card-flip-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+}
+
+.card-flip-face-back {
+  transform: rotateY(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-flip-inner {
+    animation: none;
+    transform: rotateY(180deg);
+  }
+}

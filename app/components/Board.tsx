@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CardArt } from "@/app/components/CardArt";
 import { FixedTooltip } from "@/app/components/CardCatalog";
 import { CARD_DEFS } from "@/lib/content/cards";
@@ -96,6 +96,52 @@ export function BoardGrid({
     : activeTooltipId?.startsWith(playerRowPrefix)
       ? activeTooltipId.slice(playerRowPrefix.length)
       : null;
+
+  // Which cards are mid-flip-reveal right now -- see FLIP_ANIMATION_MS and the
+  // .card-flip-* classes in globals.css for the actual 3D animation. Detected by
+  // diffing against the previous render's face-up snapshot (below), not by any signal
+  // the reducer itself emits -- this keeps the animation purely a rendering concern,
+  // oblivious to *why* a card flipped (a real flip action, an AI's move, a forceFaceUp
+  // card like Cyclops getting placed, Reckoning's redraw, anything). A card's very
+  // FIRST sighting only counts once this component has already rendered the board at
+  // least once (see hasMountedRef) -- otherwise reconnecting mid-game (a page refresh,
+  // a spectator opening the display view) would see every already-revealed card play
+  // the reveal animation at once, since they'd all be "new" to a freshly mounted
+  // snapshot. After that first render, a card's first-ever sighting genuinely does
+  // mean "just placed this turn" (the board starts empty and only ever grows one
+  // placement at a time), so a forceFaceUp card's placement now reveals exactly like a
+  // real flip does. Refs are only ever touched inside this effect (never during
+  // render, per this project's stricter react-hooks/refs rule), so the
+  // setState-in-effect it does trigger is accepted here the same way every page's own
+  // mount-detection effect already does.
+  const FLIP_ANIMATION_MS = 500;
+  const hasMountedRef = useRef(false);
+  const prevFaceUpRef = useRef<Map<string, boolean>>(new Map());
+  const [flippingIds, setFlippingIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const prev = prevFaceUpRef.current;
+    const next = new Map<string, boolean>();
+    const newlyFlipped: string[] = [];
+    for (const card of state.board.values()) {
+      const prevValue = prev.get(card.instanceId);
+      const justRevealed = card.faceUp && (prevValue === false || (hasMountedRef.current && prevValue === undefined));
+      if (justRevealed) newlyFlipped.push(card.instanceId);
+      next.set(card.instanceId, card.faceUp);
+    }
+    prevFaceUpRef.current = next;
+    hasMountedRef.current = true;
+    if (newlyFlipped.length === 0) return;
+
+    setFlippingIds((current) => new Set([...current, ...newlyFlipped]));
+    const timer = setTimeout(() => {
+      setFlippingIds((current) => {
+        const remaining = new Set(current);
+        for (const id of newlyFlipped) remaining.delete(id);
+        return remaining;
+      });
+    }, FLIP_ANIMATION_MS);
+    return () => clearTimeout(timer);
+  }, [state.board]);
 
   // Cells are sized to fill their grid column (aspect-square, no fixed px) rather than
   // a fixed h-20 w-20 -- with wider/taller boards (7-8p can be 11+ columns or rows) a
@@ -220,6 +266,29 @@ export function BoardGrid({
               (selectedInstanceId !== null && card.ownerId === viewerId) ||
               card.instanceId === hoveredEndCardInstanceId ||
               card.ownerId === hoveredPlayerId;
+            // Shared between the plain face-up render and the mid-flip 3D reveal (see
+            // flippingIds above) so the two never drift out of sync with each other.
+            const faceUpContent = (
+              <>
+                {/* Keyed off the cell's own rendered size (@container), not the
+                    viewport -- an 8p board's cells can be too small to show a
+                    readable name even on a wide desktop screen, and a 2-3p board's
+                    cells can be plenty roomy even on a phone. 72px (not 52px) --
+                    verified against the longest card name ("Shieldbearer") plus the
+                    button's own p-1 padding: below that it still truncates with an
+                    ellipsis mid-word, which is arguably worse than just not showing
+                    it at all. */}
+                <span
+                  className={`hidden w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight @[72px]:block ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
+                >
+                  {def.name}
+                </span>
+                <CardArt cardId={card.cardId} className={`h-1/2 w-1/2 shrink-0 ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`} />
+                <span className={`text-[length:clamp(9px,26cqw,15px)] leading-none font-bold ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}>
+                  {def.base}
+                </span>
+              </>
+            );
             const tooltipDetail = displayFaceUp
               ? `${def.name} (${def.base}) — ${def.text}`
               : card.ownerId === viewerId
@@ -274,30 +343,23 @@ export function BoardGrid({
                   title={clickable ? "Tap to flip face-up" : undefined}
                   className={`@container flex aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 p-1 text-center ${ownerColorClass(state, card.ownerId)} ${
                     clickable ? "cursor-pointer ring-2 ring-amber-400" : ""
-                  } ${highlighted ? "ring-2 ring-sky-400 dark:ring-sky-500" : ""}`}
+                  } ${highlighted ? "ring-2 ring-sky-400 dark:ring-sky-500" : ""} ${flippingIds.has(card.instanceId) ? "[perspective:600px]" : ""}`}
                 >
-                  {displayFaceUp ? (
-                    <>
-                      {/* Keyed off the cell's own rendered size (@container), not the
-                          viewport -- an 8p board's cells can be too small to show a
-                          readable name even on a wide desktop screen, and a 2-3p
-                          board's cells can be plenty roomy even on a phone. 72px (not
-                          52px) -- verified against the longest card name
-                          ("Shieldbearer") plus the button's own p-1 padding: below
-                          that it still truncates with an ellipsis mid-word, which is
-                          arguably worse than just not showing it at all. */}
-                      <span
-                        className={`hidden w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight @[72px]:block ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
-                      >
-                        {def.name}
-                      </span>
-                      <CardArt cardId={card.cardId} className={`h-1/2 w-1/2 shrink-0 ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`} />
-                      <span
-                        className={`text-[length:clamp(9px,26cqw,15px)] leading-none font-bold ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}
-                      >
-                        {def.base}
-                      </span>
-                    </>
+                  {flippingIds.has(card.instanceId) ? (
+                    // Briefly renders BOTH faces stacked in 3D (see .card-flip-* in
+                    // globals.css) while the reveal animation plays, then this whole
+                    // branch stops applying (see FLIP_ANIMATION_MS above) and settles
+                    // into the plain single-branch render below, same as always.
+                    <div className="card-flip-inner">
+                      <div className="card-flip-face">
+                        <span className="text-[length:clamp(12px,40cqw,20px)]">🂠</span>
+                      </div>
+                      <div className="card-flip-face card-flip-face-back flex flex-col items-center justify-center gap-0.5">
+                        {faceUpContent}
+                      </div>
+                    </div>
+                  ) : displayFaceUp ? (
+                    faceUpContent
                   ) : (
                     <span className="text-[length:clamp(12px,40cqw,20px)]">🂠</span>
                   )}
