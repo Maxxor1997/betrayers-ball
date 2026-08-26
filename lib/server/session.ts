@@ -6,6 +6,7 @@ import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game
 import { redactedStateFor } from "@/lib/engine/playerView";
 import { currentPlayerId } from "@/lib/engine/turns";
 import { AiDifficulty, CenterEffectId, GameAction, GameState } from "@/lib/engine/types";
+import { randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { resolveBoard } from "@/lib/engine/resolution";
 import { computeRanks, createEmptyStats, placementBaseline, placementMaxDeviation, PlaytestStats, statsSummary, tallyGame } from "@/lib/playtest/cardStats";
 import { DISPLAY_VIEWER_ID, LobbyState, RoomStatsEntry, RoomSummary, SeatInfo, toWireState, WireGameState } from "./protocol";
@@ -72,6 +73,15 @@ export class GameSession {
   private readonly roomStats = new Map<string, { games: number; wins: number; placementDeltaSum: number }>();
   /** Per-card breakdown for this room only, same shape/tallying as the bulk playtest simulator's own stats -- see RoomStatsModal's collapsed "By card" section. */
   private readonly roomCardStats: PlaytestStats = createEmptyStats();
+  /**
+   * Which real seated players have clicked "ready" for the next game -- screencast
+   * (display-hosted) rooms only, see readyForRematch. A one-way set, never toggled
+   * off by its own owner (matches "everyone needs to click and can't unclick"); reset
+   * to empty every time dealAndStart actually deals a fresh game, so it's clean again
+   * for the game after that. AI seats never appear here -- they can't click anything,
+   * and readyForRematch only counts real seats toward "everyone."
+   */
+  private readonly rematchReady = new Set<string>();
   /** Last time anyone actually did something in this room -- see touch()/isReapable(). Starts at creation time, since a freshly-created lobby is itself a form of activity. */
   private lastActivityAt = Date.now();
 
@@ -179,6 +189,7 @@ export class GameSession {
       serverOrigin: this.serverOrigin,
       roomStats: [...this.roomStats.entries()].map(([playerId, s]): RoomStatsEntry => ({ playerId, ...s })),
       roomCardStats: statsSummary(this.roomCardStats),
+      rematchReadyPlayerIds: [...this.rematchReady],
     };
   }
 
@@ -317,6 +328,43 @@ export class GameSession {
   }
 
   /**
+   * Screencast (display-hosted) rooms only: registers `callerToken`'s seat as ready
+   * for the next game, then actually deals it the moment every real seated player has
+   * done the same -- a one-way "click and can't unclick" readiness gate, deliberately
+   * not a toggle. Reuses the room's own stored centerEffect/centerEffectMode/
+   * aiDifficulty (same settings "Play again" always reused), resolving a fresh
+   * location itself when centerEffectMode is "random" -- unlike rematch() above, no
+   * caller ever gets to hand in an already-resolved value here, since the whole point
+   * is that any one of several players' clicks might be the one that finally triggers
+   * the deal, and none of them should need to carry the room's settings themselves.
+   * A normal single-device room has no use for this (there's always exactly one real
+   * host, no "everyone" to wait on) -- it keeps using rematch() directly, unchanged.
+   */
+  readyForRematch(callerToken: string): { ok: true } | { error: string } {
+    if (!this.displayHosted) return { error: "This room doesn't need everyone to ready up." };
+    if (!this.state || this.state.phase !== "ended") return { error: "The game hasn't ended yet." };
+    const seat = [...this.seats.values()].find((s) => !s.isAI && s.token === callerToken);
+    if (!seat) return { error: "Only a real seated player can ready up." };
+
+    this.rematchReady.add(seat.playerId);
+    const realSeatIds = [...this.seats.values()].filter((s) => !s.isAI).map((s) => s.playerId);
+    if (realSeatIds.every((id) => this.rematchReady.has(id))) {
+      const rand = this.rng ?? Math.random;
+      const centerEffect =
+        this.centerEffectMode === "random"
+          ? (() => {
+              const pool = randomCenterEffectPool(this.playerCount);
+              return pool[Math.floor(rand() * pool.length)];
+            })()
+          : this.centerEffectMode;
+      this.centerEffect = centerEffect;
+      this.dealAndStart(); // clears rematchReady itself, see its own doc comment
+    }
+    this.onLobbyChange(this.getLobbyState());
+    return { ok: true };
+  }
+
+  /**
    * Shared by start() and rematch() -- deals a fresh GameState to the current seat
    * lineup and kicks off play. Cancels any AI turn timer still pending from whatever
    * game came before (only ever possible via a mid-game rematch, which can now catch
@@ -329,6 +377,7 @@ export class GameSession {
       clearTimeout(this.aiTimer);
       this.aiTimer = null;
     }
+    this.rematchReady.clear();
     const allIds = [...this.seats.keys()];
     const aiIds = [...this.seats.values()].filter((s) => s.isAI).map((s) => s.playerId);
     const config = configForPlayerCount(this.playerCount, this.centerEffect, this.aiDifficulty);

@@ -69,6 +69,8 @@ export interface LobbyState {
   roomStats: RoomStatsEntry[];
   /** Per-card breakdown across every game played in this room so far (including past rematches) -- same shape as MyStatsModal's single-player "By card" table, just scoped to this room instead of one browser's history. Empty until the first game in the room ends. */
   roomCardStats: CardStatsRow[];
+  /** Screencast (display-hosted) rooms only -- see GameSession.readyForRematch. Which real seated players have clicked "ready" for the next game; reset empty every time a fresh game actually deals. Always empty for a normal single-device room (nothing ever adds to it there). */
+  rematchReadyPlayerIds: string[];
 }
 
 /**
@@ -151,6 +153,9 @@ export interface StartRoomPayload {
   token: string;
 }
 
+/** Same shape as StartRoomPayload -- see GameSession.readyForRematch. */
+export type RematchReadyPayload = StartRoomPayload;
+
 /**
  * The location can be reconfigured for a rematch (unlike player count, which is fixed
  * to the room's existing seats) -- "random" is resolved client-side into a concrete
@@ -205,6 +210,8 @@ export interface ClientToServerEvents {
   "room:start": (payload: StartRoomPayload, ack: (result: AckResult) => void) => void;
   /** Host-only, only once the current game has ended -- deals a fresh game to the same seat lineup without leaving the room (same join link, nobody reconnects). */
   "room:rematch": (payload: RematchPayload, ack: (result: AckResult) => void) => void;
+  /** Screencast (display-hosted) rooms only -- see GameSession.readyForRematch. Registers the caller's seat as ready; the actual rematch fires once every real seated player has called this. */
+  "room:rematchReady": (payload: RematchReadyPayload, ack: (result: AckResult) => void) => void;
   /** Host-only. Permanently closes the room -- lobby or mid-game, either way -- and removes it from the registry (and so from the home screen's active-sessions list). Everyone still connected gets "room:closed". Same payload shape as room:start. */
   "room:end": (payload: StartRoomPayload, ack: (result: AckResult) => void) => void;
   "game:action": (payload: GameActionPayload, ack: (result: AckResult) => void) => void;

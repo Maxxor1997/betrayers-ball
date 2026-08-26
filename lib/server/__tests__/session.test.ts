@@ -73,6 +73,58 @@ async function playUntilEnded(session: GameSession, hostToken: string, statePush
   throw new Error("playUntilEnded: game never ended within the guard limit");
 }
 
+/**
+ * Same idea as playUntilEnded, but drives one or more given real seats' own turns
+ * instead of always the host's -- needed for display-hosted rooms, where hostPlayerId
+ * is DISPLAY_VIEWER_ID and never actually has a turn to take (see readyForRematch's
+ * tests, which need real, non-host seats to reach "ended" itself). `tokensByPlayerId`
+ * covers every real seat that needs driving -- any seat NOT in it is assumed to be AI,
+ * playing itself via the session's own timers.
+ *
+ * Reads phase/currentPlayerId off *any* of our own players' pushes (identical on
+ * every redacted copy), but always reads the ACTING player's own push to decide their
+ * hand/legal cells -- a hidden-info redacted view of a DIFFERENT player's hand isn't
+ * their real hand (usually empty/hidden), and driving off the wrong one causes a
+ * dispatch to be rejected as illegal even when the real player genuinely has a move.
+ */
+async function playUntilEndedAsPlayers(
+  session: GameSession,
+  tokensByPlayerId: Map<string, string>,
+  statePushes: { playerId: string; state: WireGameState }[]
+) {
+  const [anyPlayerId] = tokensByPlayerId.keys();
+  for (let guard = 0; guard < 300; guard++) {
+    await vi.advanceTimersByTimeAsync(700);
+    const anyPush = [...statePushes].reverse().find((p) => p.playerId === anyPlayerId);
+    if (!anyPush) continue;
+    const anyState = fromWireState(anyPush.state);
+    if (anyState.phase === "ended") return anyState;
+
+    if (anyState.phase === "voting") {
+      for (const [playerId, token] of tokensByPlayerId) {
+        if (!(playerId in anyState.votes)) session.dispatch(token, { type: "castVote", playerId, vote: true });
+      }
+      continue;
+    }
+
+    const activeId = currentPlayerId(anyState);
+    const token = tokensByPlayerId.get(activeId);
+    if (!token) continue; // not one of ours -- an AI seat, plays itself via its own timer
+
+    const activePush = [...statePushes].reverse().find((p) => p.playerId === activeId);
+    if (!activePush) continue;
+    const activeState = fromWireState(activePush.state);
+    const player = activeState.players.find((p) => p.id === activeId)!;
+    const legalCells = getLegalPlacementCells(activeState);
+    if (player.hand.length === 0 || legalCells.length === 0) {
+      session.dispatch(token, { type: "pass", playerId: activeId });
+    } else {
+      session.dispatch(token, { type: "place", playerId: activeId, instanceId: player.hand[0].instanceId, position: legalCells[0] });
+    }
+  }
+  throw new Error("playUntilEndedAsPlayers: game never ended within the guard limit");
+}
+
 beforeEach(() => {
   vi.useRealTimers();
 });
@@ -490,6 +542,92 @@ describe("GameSession rematch", () => {
     await vi.advanceTimersByTimeAsync(0);
     const freshState = fromWireState(statePushes.at(-1)!.state);
     expect(freshState.config.aiDifficulty).toBe("hard");
+
+    vi.useRealTimers();
+  });
+});
+
+describe("GameSession readyForRematch", () => {
+  it("rejects it entirely for a normal (non-display) room", async () => {
+    vi.useFakeTimers();
+    const { session, hostToken, statePushes } = harness(2);
+    session.start(hostToken);
+    await playUntilEnded(session, hostToken, statePushes);
+
+    const result = session.readyForRematch(hostToken);
+    expect(result).toMatchObject({ error: expect.any(String) });
+
+    vi.useRealTimers();
+  });
+
+  it("rejects it before the game has ended", () => {
+    const { session, hostToken } = harness(2, 1, true);
+    const alice = session.addPlayer("Alice") as { playerId: string; token: string };
+    session.start(hostToken);
+    const result = session.readyForRematch(alice.token);
+    expect(result).toMatchObject({ error: expect.any(String) });
+  });
+
+  it("doesn't deal a fresh game until every real seated player has readied up", async () => {
+    vi.useFakeTimers();
+    // 3 seats, only 2 real (Alice, Bob) -- the third fills with AI at start() and
+    // plays itself, so readiness only ever needs to wait on the two real ones.
+    const { session, hostToken, statePushes } = harness(3, 1, true);
+    const alice = session.addPlayer("Alice") as { playerId: string; token: string };
+    const bob = session.addPlayer("Bob") as { playerId: string; token: string };
+    session.start(hostToken);
+    const ended = await playUntilEndedAsPlayers(
+      session,
+      new Map([
+        [alice.playerId, alice.token],
+        [bob.playerId, bob.token],
+      ]),
+      statePushes
+    );
+    expect(ended.phase).toBe("ended");
+
+    const pushCountBefore = statePushes.length;
+    const aliceResult = session.readyForRematch(alice.token);
+    expect(aliceResult).toEqual({ ok: true });
+    expect(session.getLobbyState().rematchReadyPlayerIds).toEqual([alice.playerId]);
+
+    // Still just the one seat readied -- no fresh game dealt yet, so no new state push.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(statePushes.length).toBe(pushCountBefore);
+    const stillEnded = fromWireState(statePushes.at(-1)!.state);
+    expect(stillEnded.phase).toBe("ended");
+
+    const bobResult = session.readyForRematch(bob.token);
+    expect(bobResult).toEqual({ ok: true });
+
+    await vi.advanceTimersByTimeAsync(0);
+    const freshState = fromWireState(statePushes.at(-1)!.state);
+    expect(freshState.phase).toBe("playing");
+    expect(freshState.round).toBe(1);
+    // The readiness set is cleared the moment the fresh game deals, ready for the game
+    // after this one.
+    expect(session.getLobbyState().rematchReadyPlayerIds).toEqual([]);
+
+    vi.useRealTimers();
+  });
+
+  it("rejects a fabricated/AI token -- only a real seated player's own token counts", async () => {
+    vi.useFakeTimers();
+    const { session, hostToken, statePushes } = harness(3, 1, true);
+    const alice = session.addPlayer("Alice") as { playerId: string; token: string };
+    const bob = session.addPlayer("Bob") as { playerId: string; token: string };
+    session.start(hostToken);
+    await playUntilEndedAsPlayers(
+      session,
+      new Map([
+        [alice.playerId, alice.token],
+        [bob.playerId, bob.token],
+      ]),
+      statePushes
+    );
+
+    const result = session.readyForRematch("not-a-real-token");
+    expect(result).toMatchObject({ error: expect.any(String) });
 
     vi.useRealTimers();
   });

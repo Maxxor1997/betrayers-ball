@@ -35,6 +35,8 @@ export interface MultiplayerSession {
   startGame: () => void;
   /** Host-only, only once the current game has ended -- deals a fresh game to the same seats without leaving the room. `centerEffect` should already be resolved from "random", same as room:create. */
   rematch: (centerEffect: CenterEffectId, aiDifficulty: AiDifficulty, centerEffectMode?: CenterEffectId | "random") => void;
+  /** Screencast (display-hosted) rooms only -- see GameSession.readyForRematch. Registers this seat as ready for the next game; the server deals it once every real seated player has called this. */
+  readyForRematch: () => void;
   /** Host-only. Permanently closes the room, lobby or mid-game -- everyone still connected (including the caller) gets bounced to the "room closed" state. */
   endRoom: () => void;
   dispatch: (action: GameAction) => void;
@@ -149,6 +151,15 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
     [roomCode]
   );
 
+  const readyForRematch = useCallback(() => {
+    const socket = socketRef.current;
+    const credentials = credentialsRef.current;
+    if (!socket || !credentials) return;
+    socket.emit("room:rematchReady", { roomCode, token: credentials.token }, (ack) => {
+      if (!ack.ok) setError(ack.error);
+    });
+  }, [roomCode]);
+
   const endRoom = useCallback(() => {
     const socket = socketRef.current;
     const credentials = credentialsRef.current;
@@ -172,5 +183,20 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
     [roomCode]
   );
 
-  return { connected, connectFailed, lobby, gameState, myPlayerId, needsName, roomClosed, error, join, startGame, rematch, endRoom, dispatch };
+  return {
+    connected,
+    connectFailed,
+    lobby,
+    gameState,
+    myPlayerId,
+    needsName,
+    roomClosed,
+    error,
+    join,
+    startGame,
+    rematch,
+    readyForRematch,
+    endRoom,
+    dispatch,
+  };
 }

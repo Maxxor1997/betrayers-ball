@@ -375,31 +375,39 @@ function DisplayGameView({
             viewerId={DISPLAY_VIEWER_ID}
             nameFor={(id) => nameFor(lobby, id)}
             footer={
-              <button
-                onClick={() => {
-                  // No setup modal -- reuses this room's own settings automatically,
-                  // same as join/[code]/page.tsx's "Play again". lobby.centerEffectMode
-                  // (the RAW, pre-resolution choice, kept server-authoritative -- see
-                  // LobbyState's doc comment) is what makes this a real reroll rather
-                  // than always repeating whatever the last game happened to land on:
-                  // state.config.centerEffect only ever holds the already-resolved
-                  // concrete id, so a room originally set to "Random" needs this
-                  // separate signal to keep rerolling each rematch instead of quietly
-                  // becoming a fixed location after game 1.
-                  const mode = lobby.centerEffectMode;
-                  const centerEffect =
-                    mode === "random"
-                      ? (() => {
-                          const pool = randomCenterEffectPool(lobby.playerCount);
-                          return pool[Math.floor(Math.random() * pool.length)];
-                        })()
-                      : mode;
-                  rematch(centerEffect, state.config.aiDifficulty, mode);
-                }}
-                className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-sm whitespace-nowrap text-white dark:bg-zinc-100 dark:text-black"
-              >
-                Play again (same room)
-              </button>
+              lobby.seats.every((s) => s.isAI) ? (
+                // No real seats at all (every seat auto-filled with AI at Start) --
+                // there's genuinely nobody who could ever click "ready" on their own
+                // phone, so the readiness gate would wait forever. The display is the
+                // only device in the room at all here, so it gets to continue directly.
+                <button
+                  onClick={() => {
+                    const mode = lobby.centerEffectMode;
+                    const centerEffect =
+                      mode === "random"
+                        ? (() => {
+                            const pool = randomCenterEffectPool(lobby.playerCount);
+                            return pool[Math.floor(Math.random() * pool.length)];
+                          })()
+                        : mode;
+                    rematch(centerEffect, state.config.aiDifficulty, mode);
+                  }}
+                  className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-sm whitespace-nowrap text-white dark:bg-zinc-100 dark:text-black"
+                >
+                  Continue
+                </button>
+              ) : (
+                // The display holds no seat of its own (see DISPLAY_VIEWER_ID) -- it
+                // can't "ready up" itself, so this is a passive live status instead of
+                // a button, mirroring join/[code]/page.tsx's RematchReadyButton count.
+                // Every real seated player has to click ready on their own phone (see
+                // GameSession.readyForRematch); the moderator-override "New Game"
+                // button in the header above still starts a fresh game immediately
+                // regardless.
+                <p className="shrink-0 text-sm whitespace-nowrap text-zinc-500">
+                  Waiting on players ({lobby.rematchReadyPlayerIds.length}/{lobby.seats.filter((s) => !s.isAI).length} ready)
+                </p>
+              )
             }
           />
         )}

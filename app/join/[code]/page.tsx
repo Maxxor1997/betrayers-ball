@@ -215,6 +215,7 @@ function Room() {
           myPlayerId={session.myPlayerId}
           dispatch={session.dispatch}
           rematch={session.rematch}
+          readyForRematch={session.readyForRematch}
           cardsCollapsed={cardsCollapsed}
           onCardsCollapsedChange={setCardsCollapsed}
         />
@@ -410,12 +411,42 @@ export function SeatRow({ seat, isHost, isYou }: { seat: SeatInfo; isHost: boole
   );
 }
 
+/**
+ * A screencast room's "Play again" is a one-way readiness gate, not a single click --
+ * see GameSession.readyForRematch. Every real seated player sees the same live count;
+ * only the viewer's own click state (already-clicked vs. not-yet) differs between
+ * them. Once clicked, this can't be un-clicked -- there's no onClick to remove
+ * yourself from `lobby.rematchReadyPlayerIds`, matching "click and can't unclick."
+ */
+export function RematchReadyButton({ lobby, myPlayerId, onReady }: { lobby: LobbyState; myPlayerId: string; onReady: () => void }) {
+  const realSeatCount = lobby.seats.filter((s) => !s.isAI).length;
+  const readyCount = lobby.rematchReadyPlayerIds.length;
+  const alreadyReady = lobby.rematchReadyPlayerIds.includes(myPlayerId);
+
+  if (alreadyReady) {
+    return (
+      <p className="shrink-0 text-sm whitespace-nowrap text-zinc-500">
+        ✓ Ready ({readyCount}/{realSeatCount})
+      </p>
+    );
+  }
+  return (
+    <button
+      onClick={onReady}
+      className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-sm whitespace-nowrap text-white dark:bg-zinc-100 dark:text-black"
+    >
+      Play again ({readyCount}/{realSeatCount} ready)
+    </button>
+  );
+}
+
 function GameView({
   state,
   lobby,
   myPlayerId,
   dispatch,
   rematch,
+  readyForRematch,
   cardsCollapsed,
   onCardsCollapsedChange,
   header,
@@ -431,6 +462,7 @@ function GameView({
   myPlayerId: string;
   dispatch: (action: GameAction) => void;
   rematch: (centerEffect: CenterEffectId, aiDifficulty: AiDifficulty, centerEffectMode?: CenterEffectId | "random") => void;
+  readyForRematch: () => void;
   cardsCollapsed: boolean;
   onCardsCollapsedChange: (collapsed: boolean) => void;
 }) {
@@ -599,125 +631,129 @@ function GameView({
           )}
         </div>
 
-        <BoardGrid
+      <BoardGrid
+        state={state}
+        viewerId={myPlayerId}
+        nameFor={(id) => nameFor(lobby, id)}
+        legalCellKeys={legalCellKeys}
+        flipTargetIds={flipTargetIds}
+        selectedInstanceId={selectedInstanceId}
+        dragOverKey={dragOverKey}
+        revealAll={state.phase === "ended"}
+        resolvedCards={resolvedCards}
+        onCellClick={handleBoardCellClick}
+        onCellDragOver={handleCellDragOver}
+        onCellDragLeave={() => setDragOverKey(null)}
+        onCellDrop={handleCellDrop}
+        highlighted={isMyTurn}
+      />
+
+      {state.phase === "ended" && endResult && (
+        <EndScreen
           state={state}
+          result={endResult}
           viewerId={myPlayerId}
           nameFor={(id) => nameFor(lobby, id)}
-          legalCellKeys={legalCellKeys}
-          flipTargetIds={flipTargetIds}
-          selectedInstanceId={selectedInstanceId}
-          dragOverKey={dragOverKey}
-          revealAll={state.phase === "ended"}
-          resolvedCards={resolvedCards}
-          onCellClick={handleBoardCellClick}
-          onCellDragOver={handleCellDragOver}
-          onCellDragLeave={() => setDragOverKey(null)}
-          onCellDrop={handleCellDrop}
+          footer={
+            lobby.hostIsDisplay ? (
+              // Screencast room: there's no single host token to restrict this to
+              // (the shared screen holds no seat), so every real seated player has
+              // to click "ready" themselves -- a one-way gate, not a toggle, that
+              // actually deals the next game the moment everyone's clicked (see
+              // GameSession.readyForRematch). The live count keeps it legible while
+              // waiting -- otherwise a player who already clicked would have no way
+              // to tell whether the game is stalled on someone else.
+              <RematchReadyButton lobby={lobby} myPlayerId={myPlayerId} onReady={readyForRematch} />
+            ) : isHost ? (
+              <button
+                onClick={() => {
+                  // No setup modal -- reuses this room's own settings automatically.
+                  // lobby.centerEffectMode (the RAW, pre-resolution choice, kept
+                  // server-authoritative -- see LobbyState's doc comment) is what
+                  // makes this a real reroll rather than always repeating whatever
+                  // the last game happened to land on: state.config.centerEffect
+                  // only ever holds the already-resolved concrete id, so a room
+                  // originally set to "Random" needs this separate signal to keep
+                  // rerolling each rematch instead of quietly becoming a fixed
+                  // location after game 1.
+                  const mode = lobby.centerEffectMode;
+                  const centerEffect =
+                    mode === "random"
+                      ? (() => {
+                          const pool = randomCenterEffectPool(lobby.playerCount);
+                          return pool[Math.floor(Math.random() * pool.length)];
+                        })()
+                      : mode;
+                  rematch(centerEffect, state.config.aiDifficulty, mode);
+                }}
+                className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-sm whitespace-nowrap text-white dark:bg-zinc-100 dark:text-black"
+              >
+                Play again (same room)
+              </button>
+            ) : (
+              <p className="shrink-0 text-sm whitespace-nowrap text-zinc-500">Waiting for the host to start a new game…</p>
+            )
+          }
         />
+      )}
 
-        {state.phase === "ended" && endResult && (
-          <EndScreen
-            state={state}
-            result={endResult}
-            viewerId={myPlayerId}
-            nameFor={(id) => nameFor(lobby, id)}
-            footer={
-              // Host-only for a normal single-device room -- but for a screencast
-              // (display-hosted) room, the "host" is just the shared screen and none
-              // of the real seated players hold its token, so any of them can trigger
-              // this too (the server's canRematch enforces the same rule, see
-              // session.ts) -- otherwise nobody actually playing could ever start a
-              // rematch without walking over to the shared screen themselves.
-              isHost || lobby.hostIsDisplay ? (
-                <button
-                  onClick={() => {
-                    // No setup modal -- reuses this room's own settings automatically.
-                    // lobby.centerEffectMode (the RAW, pre-resolution choice, kept
-                    // server-authoritative -- see LobbyState's doc comment) is what
-                    // makes this a real reroll rather than always repeating whatever
-                    // the last game happened to land on: state.config.centerEffect
-                    // only ever holds the already-resolved concrete id, so a room
-                    // originally set to "Random" needs this separate signal to keep
-                    // rerolling each rematch instead of quietly becoming a fixed
-                    // location after game 1.
-                    const mode = lobby.centerEffectMode;
-                    const centerEffect =
-                      mode === "random"
-                        ? (() => {
-                            const pool = randomCenterEffectPool(lobby.playerCount);
-                            return pool[Math.floor(Math.random() * pool.length)];
-                          })()
-                        : mode;
-                    rematch(centerEffect, state.config.aiDifficulty, mode);
-                  }}
-                  className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-sm whitespace-nowrap text-white dark:bg-zinc-100 dark:text-black"
-                >
-                  Play again (same room)
-                </button>
-              ) : (
-                <p className="shrink-0 text-sm whitespace-nowrap text-zinc-500">Waiting for the host to start a new game…</p>
-              )
-            }
+      {(state.phase === "playing" || state.phase === "voting") && (
+        <div className="flex w-full flex-col items-center gap-3">
+          <Hand
+            cards={me.hand}
+            selectedInstanceId={selectedInstanceId}
+            onCardClick={handleHandCardClick}
+            onCardDragStart={handleHandDragStart}
+            disabled={!isMyTurn}
+            ownerAccentClass={playerAccentClass(state.players, myPlayerId)}
           />
-        )}
+          {myMustPass && (
+            <button onClick={handlePass} className="rounded-full bg-zinc-900 px-4 py-1.5 text-sm text-white dark:bg-zinc-100 dark:text-black">
+              No legal move — Pass
+            </button>
+          )}
+        </div>
+      )}
 
-        {(state.phase === "playing" || state.phase === "voting") && (
-          <div className="flex w-full flex-col items-center gap-3">
-            <Hand
-              cards={me.hand}
-              selectedInstanceId={selectedInstanceId}
-              onCardClick={handleHandCardClick}
-              onCardDragStart={handleHandDragStart}
-              disabled={!isMyTurn}
-              ownerAccentClass={playerAccentClass(state.players, myPlayerId)}
-            />
-            {myMustPass && (
-              <button onClick={handlePass} className="rounded-full bg-zinc-900 px-4 py-1.5 text-sm text-white dark:bg-zinc-100 dark:text-black">
-                No legal move — Pass
-              </button>
-            )}
+      {myVotePending && (
+        <div className="fixed top-20 left-1/2 z-50 w-[min(90vw,20rem)] -translate-x-1/2 rounded-lg border border-zinc-300 bg-white p-3 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+          <p className="mb-2 font-medium">Vote: end the game now?</p>
+          <p className="mb-2 text-xs text-zinc-500">
+            Round {state.round} of {state.config.roundCap}. Everyone votes privately; a majority is needed to end (ties continue).
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => handleCastVote(false)}
+              className="rounded-full border border-zinc-300 px-3 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+            >
+              Keep playing
+            </button>
+            <button
+              onClick={() => handleCastVote(true)}
+              className="rounded-full bg-zinc-900 px-3 py-1 text-xs text-white dark:bg-zinc-100 dark:text-black"
+            >
+              End game
+            </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {myVotePending && (
-          <div className="fixed top-20 left-1/2 z-50 w-[min(90vw,20rem)] -translate-x-1/2 rounded-lg border border-zinc-300 bg-white p-3 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-            <p className="mb-2 font-medium">Vote: end the game now?</p>
-            <p className="mb-2 text-xs text-zinc-500">
-              Round {state.round} of {state.config.roundCap}. Everyone votes privately; a majority is needed to end (ties continue).
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => handleCastVote(false)}
-                className="rounded-full border border-zinc-300 px-3 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-              >
-                Keep playing
-              </button>
-              <button
-                onClick={() => handleCastVote(true)}
-                className="rounded-full bg-zinc-900 px-3 py-1 text-xs text-white dark:bg-zinc-100 dark:text-black"
-              >
-                End game
-              </button>
-            </div>
+      {pendingFlip && (
+        <div className="fixed top-20 left-1/2 z-50 w-[min(90vw,20rem)] -translate-x-1/2 rounded-lg border border-zinc-300 bg-white p-3 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+          <p className="mb-2">Flip {pendingFlip.label} face-up? This is permanent and uses your one flip for the turn.</p>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setPendingFlip(null)}
+              className="rounded-full border border-zinc-300 px-3 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+            <button onClick={confirmFlip} className="rounded-full bg-zinc-900 px-3 py-1 text-xs text-white dark:bg-zinc-100 dark:text-black">
+              Flip
+            </button>
           </div>
-        )}
-
-        {pendingFlip && (
-          <div className="fixed top-20 left-1/2 z-50 w-[min(90vw,20rem)] -translate-x-1/2 rounded-lg border border-zinc-300 bg-white p-3 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-            <p className="mb-2">Flip {pendingFlip.label} face-up? This is permanent and uses your one flip for the turn.</p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setPendingFlip(null)}
-                className="rounded-full border border-zinc-300 px-3 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-              >
-                Cancel
-              </button>
-              <button onClick={confirmFlip} className="rounded-full bg-zinc-900 px-3 py-1 text-xs text-white dark:bg-zinc-100 dark:text-black">
-                Flip
-              </button>
-            </div>
-          </div>
-        )}
+        </div>
+      )}
       </div>
 
       <GameStatusPanel

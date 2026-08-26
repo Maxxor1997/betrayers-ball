@@ -125,6 +125,13 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
       ack("error" in result ? { ok: false, error: result.error } : { ok: true });
     });
 
+    socket.on("room:rematchReady", ({ roomCode, token }, ack) => {
+      const session = registry.get(roomCode);
+      if (!session) return ack({ ok: false, error: "No game found at that room code." });
+      const result = session.readyForRematch(token);
+      ack("error" in result ? { ok: false, error: result.error } : { ok: true });
+    });
+
     socket.on("room:end", ({ roomCode, token }, ack) => {
       const session = registry.get(roomCode);
       if (!session) return ack({ ok: false, error: "No game found at that room code." });
