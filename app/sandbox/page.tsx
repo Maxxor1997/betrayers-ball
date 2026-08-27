@@ -8,8 +8,6 @@ import { CardArt } from "@/app/components/CardArt";
 import { HomeIcon } from "@/app/components/HomeIcon";
 import { LocationTitle } from "@/app/components/LocationTitle";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
-import { isMobileViewport } from "@/app/hooks/isMobileViewport";
-import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
 import { MAX_PLAYERS, MIN_PLAYERS, playerDotColorClass } from "@/lib/config/players";
 import { ALL_CARD_IDS, CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectLabel, selectableCenterEffects } from "@/lib/content/centerEffects";
@@ -40,9 +38,11 @@ export default function SandboxPage() {
 }
 
 function Sandbox() {
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => setIsMobile(isMobileViewport()), []);
-  const [paletteCollapsed, setPaletteCollapsed] = useDefaultCollapsed(isMobile);
+  // Open by default everywhere, including mobile -- unlike CardCatalog's own
+  // start-collapsed-on-phones default, this palette is the whole point of the page
+  // (there's nothing useful to do here without it), so hiding it up front would just
+  // be an extra tap for every visitor before they can do anything.
+  const [paletteCollapsed, setPaletteCollapsed] = useState(false);
 
   const [playerCount, setPlayerCount] = useState(4);
   const [centerEffect, setCenterEffect] = useState<CenterEffectId>("none");
@@ -246,16 +246,12 @@ function Sandbox() {
   }
 
   return (
-    <div className="flex w-full flex-1 flex-row items-start gap-8 px-4 py-8">
-      <CardPalette
-        collapsed={paletteCollapsed}
-        onCollapsedChange={setPaletteCollapsed}
-        selectedCardId={selectedCardId}
-        onSelect={setSelectedCardId}
-        onDragStartCard={handlePaletteDragStart}
-      />
+    <div className="flex w-full flex-1 flex-col gap-8 px-4 py-8 lg:flex-row lg:items-start">
+      {!paletteCollapsed && (
+        <CardPalette selectedCardId={selectedCardId} onSelect={setSelectedCardId} onDragStartCard={handlePaletteDragStart} />
+      )}
 
-      <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-1 flex-col items-center gap-6">
+      <div className="order-1 mx-auto flex w-full max-w-3xl min-w-0 flex-1 flex-col items-center gap-6 lg:order-2">
         <header className="flex w-full max-w-4xl flex-col gap-2">
           <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-2">
             <Link
@@ -272,10 +268,18 @@ function Sandbox() {
               <ThemeToggle />
             </div>
           </div>
-          <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
-            Pick a card on the left, then click any empty cell to place it. Click a placed card to flip it -- as many
-            times as you want, either direction.
-          </p>
+          <div className="flex w-full items-center justify-between gap-2">
+            <button
+              onClick={() => setPaletteCollapsed(!paletteCollapsed)}
+              className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              {paletteCollapsed ? "▶" : "◀"} Cards
+            </button>
+            <p className="flex-1 text-center text-xs text-zinc-500 dark:text-zinc-400">
+              Pick a card, then click (or drag) it onto any empty cell. Click a placed card to flip it -- as many
+              times as you want, either direction.
+            </p>
+          </div>
         </header>
 
         <SandboxControls
@@ -465,69 +469,69 @@ function SandboxControls({
   );
 }
 
+/**
+ * Renders nothing at all when collapsed (the parent page conditionally mounts this,
+ * same as CardCatalog does -- the toggle button itself lives in the page header, not
+ * here). `w-full` (not a fixed width) so it spans the whole phone screen once stacked
+ * below the board on mobile -- see the page's own top-level `flex-col lg:flex-row`
+ * (which decides "stacked" vs. "beside" in the first place) paired with `order-2
+ * lg:order-1` here (and the board column's own matching `order-1 lg:order-2`) so it's
+ * the SECOND thing on a narrow phone (scroll down to it under the board) but the
+ * FIRST, leftmost thing again once there's room for a real side-by-side layout.
+ * `lg:w-64` only kicks in at that same breakpoint, so it stops trying to fill the
+ * whole row and squeezing the board down to nothing.
+ */
 function CardPalette({
-  collapsed,
-  onCollapsedChange,
   selectedCardId,
   onSelect,
   onDragStartCard,
 }: {
-  collapsed: boolean;
-  onCollapsedChange: (collapsed: boolean) => void;
   selectedCardId: CardId | null;
   onSelect: (id: CardId | null) => void;
   onDragStartCard: (e: React.DragEvent, id: CardId) => void;
 }) {
   return (
-    <div className={`shrink-0 ${collapsed ? "w-auto" : "w-full max-w-[16rem]"} lg:self-start`}>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        {!collapsed && <span className="text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">Cards</span>}
-        <button
-          onClick={() => onCollapsedChange(!collapsed)}
-          className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-        >
-          {collapsed ? "▶ Cards" : "◀"}
-        </button>
+    <div className="order-2 w-full shrink-0 lg:order-1 lg:w-64 lg:self-start">
+      <div className="mb-2">
+        <span className="text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">Cards</span>
       </div>
-      {!collapsed && (
-        <div className="flex max-h-[80vh] flex-col gap-4 overflow-y-auto pr-1">
-          {BUCKET_ORDER.map((bucket) => {
-            const ids = PLACEABLE_CARD_IDS.filter((id) => CARD_DEFS[id].bucket === bucket).sort((a, b) =>
-              CARD_DEFS[a].name.localeCompare(CARD_DEFS[b].name)
-            );
-            return (
-              <div key={bucket}>
-                <h3 className="mb-1.5 text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">{bucket}</h3>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {ids.map((id) => {
-                    const def = CARD_DEFS[id];
-                    const selected = id === selectedCardId;
-                    return (
-                      <button
-                        key={id}
-                        title={def.fullText}
-                        onClick={() => onSelect(selected ? null : id)}
-                        draggable
-                        onDragStart={(e) => onDragStartCard(e, id)}
-                        className={`flex flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${
-                          selected
-                            ? "border-amber-500 bg-amber-50 dark:bg-amber-950"
-                            : "border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-                        }`}
-                      >
-                        <span className="w-full truncate text-[9px] leading-tight font-semibold">{def.name}</span>
-                        <CardArt cardId={id} className="h-6 w-6 shrink-0" />
-                        <span className="text-sm leading-none font-bold">{def.base}</span>
-                        {def.disabled && <span className="text-[8px] text-zinc-400">disabled</span>}
-                      </button>
-                    );
-                  })}
-                </div>
+      <div className="flex max-h-[50vh] flex-col gap-4 overflow-y-auto pr-1 lg:max-h-[80vh]">
+        {BUCKET_ORDER.map((bucket) => {
+          const ids = PLACEABLE_CARD_IDS.filter((id) => CARD_DEFS[id].bucket === bucket).sort((a, b) =>
+            CARD_DEFS[a].name.localeCompare(CARD_DEFS[b].name)
+          );
+          return (
+            <div key={bucket}>
+              <h3 className="mb-1.5 text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">{bucket}</h3>
+              <div className="grid grid-cols-3 gap-1.5">
+                {ids.map((id) => {
+                  const def = CARD_DEFS[id];
+                  const selected = id === selectedCardId;
+                  return (
+                    <button
+                      key={id}
+                      title={def.fullText}
+                      onClick={() => onSelect(selected ? null : id)}
+                      draggable
+                      onDragStart={(e) => onDragStartCard(e, id)}
+                      className={`flex flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${
+                        selected
+                          ? "border-amber-500 bg-amber-50 dark:bg-amber-950"
+                          : "border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                      }`}
+                    >
+                      <span className="w-full truncate text-[9px] leading-tight font-semibold">{def.name}</span>
+                      <CardArt cardId={id} className="h-6 w-6 shrink-0" />
+                      <span className="text-sm leading-none font-bold">{def.base}</span>
+                      {def.disabled && <span className="text-[8px] text-zinc-400">disabled</span>}
+                    </button>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-      )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
