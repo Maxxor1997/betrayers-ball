@@ -191,12 +191,18 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     themeColorClass: "text-lime-700 dark:text-lime-500",
     titleHighlight: "Lazaret",
     description:
-      "Two ownerless quarantine wards sit at opposite corners instead of the center. At the end of the game, each player's single lowest-valued card is worth double (a tie is broken by whichever was placed last).",
+      "Two ownerless quarantine wards sit at opposite corners instead of the center (coin-flipped each game between the two diagonals). At the end of the game, each player's single lowest-valued card is worth double (a tie is broken by whichever was placed last).",
     ownerlessLabel: "Ward",
-    ownerlessPositions: (bounds) => [
-      { x: 0, y: 0 },
-      { x: bounds.width - 1, y: bounds.height - 1 },
-    ],
+    ownerlessPositions: (bounds, rng) =>
+      rng() < 0.5
+        ? [
+            { x: 0, y: 0 },
+            { x: bounds.width - 1, y: bounds.height - 1 },
+          ]
+        : [
+            { x: bounds.width - 1, y: 0 },
+            { x: 0, y: bounds.height - 1 },
+          ],
     postResolution: ({ cards, totalsByOwner }) => {
       const byOwner = new Map<string, ResolvedCard[]>();
       for (const c of cards) {

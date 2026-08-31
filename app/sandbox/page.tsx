@@ -62,7 +62,18 @@ function Sandbox() {
     [playerCount]
   );
   const nameFor = (id: string) => `Player ${id.slice(1)}`;
-  const config = useMemo(() => configForPlayerCount(playerCount, centerEffect, "medium"), [playerCount, centerEffect]);
+  // Some locations (Free Cities, Lazaret) roll their ownerless tiles randomly at
+  // config-build time -- without configVersion in the deps below, this useMemo would
+  // never recompute (and so never reroll) as long as playerCount/centerEffect stay the
+  // same, even though "Clear board" is sandbox's closest thing to starting a fresh
+  // game. Bumped there so those locations' tiles actually reroll on demand, same as a
+  // real new game would.
+  const [configVersion, setConfigVersion] = useState(0);
+  const config = useMemo(
+    () => configForPlayerCount(playerCount, centerEffect, "medium"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [playerCount, centerEffect, configVersion]
+  );
 
   // Changing player count or location can change the board's dimensions/ownerless
   // tiles out from under whatever's already placed -- rather than try to carry
@@ -71,6 +82,7 @@ function Sandbox() {
   function resetBoard() {
     setBoard(new Map());
     setPlacementOrder([]);
+    setConfigVersion((v) => v + 1);
   }
 
   const resolved = useMemo(

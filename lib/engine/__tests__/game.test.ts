@@ -599,3 +599,27 @@ describe("configForPlayerCount — Free Cities' random ownerless tiles", () => {
     }
   });
 });
+
+describe("configForPlayerCount — Lazaret's coin-flipped diagonal", () => {
+  it("uses the top-left/bottom-right diagonal on one outcome", () => {
+    const config = configForPlayerCount(4, "championOfTheWeak", "medium", deterministicRng(1)); // rng() < 0.5
+    expect(config.boardBounds.ownerless).toEqual([
+      { x: 0, y: 0 },
+      { x: config.boardBounds.width - 1, y: config.boardBounds.height - 1 },
+    ]);
+  });
+
+  it("uses the top-right/bottom-left diagonal on the other outcome", () => {
+    const config = configForPlayerCount(4, "championOfTheWeak", "medium", deterministicRng(8)); // rng() >= 0.5
+    expect(config.boardBounds.ownerless).toEqual([
+      { x: config.boardBounds.width - 1, y: 0 },
+      { x: 0, y: config.boardBounds.height - 1 },
+    ]);
+  });
+
+  it("is reproducible for the same seed", () => {
+    const a = configForPlayerCount(4, "championOfTheWeak", "medium", deterministicRng(1));
+    const b = configForPlayerCount(4, "championOfTheWeak", "medium", deterministicRng(1));
+    expect(a.boardBounds.ownerless).toEqual(b.boardBounds.ownerless);
+  });
+});
