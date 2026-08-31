@@ -247,12 +247,24 @@ export function BoardGrid({
 
   return (
     <div
-      className={`grid gap-1.5 rounded-xl p-1.5 ${turnHighlighted ? "turn-glow" : ""}`}
+      className={`relative grid gap-1.5 rounded-xl p-1.5 ${turnHighlighted ? "turn-glow" : ""}`}
       style={{
         gridTemplateColumns: `repeat(${width}, minmax(0, 1fr))`,
         width: `min(100%, ${naturalWidthPx}px, ${widthForHeightBudget})`,
       }}
     >
+      {state.config.centerEffect === "mirrorPool" && (
+        // Marks the mirror axis itself (the center row -- see mirrorPool's
+        // valueModifiers: a card's mirror is the same column, reflected across this
+        // row, and a card ON this row has no distinct mirror at all) with a thin
+        // dashed line through its vertical midpoint. Every row is the same height
+        // (uniform aspect-square cells), so that midpoint is just this row's index
+        // as a fraction of the total row count, no pixel measurement needed.
+        <div
+          className="pointer-events-none absolute inset-x-0 z-10 border-t border-dashed border-zinc-400/70 dark:border-zinc-500/70"
+          style={{ top: `${((state.config.boardBounds.center.y + 0.5) / height) * 100}%` }}
+        />
+      )}
       {rows.map((y) =>
         cols.map((x) => {
           const pos = { x, y };
