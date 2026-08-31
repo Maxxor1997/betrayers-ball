@@ -3,7 +3,9 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CardArt } from "@/app/components/CardArt";
+import { LocationArt } from "@/app/components/LocationArt";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
+import { useAssetExists } from "@/app/hooks/useAssetExists";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, isAvailableAtPlayerCount } from "@/lib/content/centerEffects";
@@ -101,6 +103,19 @@ const LOCATIONS_DESCRIPTION =
   "A location is a game-wide rule this match is being played with -- it changes what the center tile does or bends a normal rule for everyone. Exactly one is active per game.";
 
 /**
+ * A location's own icon in the catalog row, if it has one -- a real component (not a
+ * bare hook call) since useAssetExists can't be called directly inside the
+ * LOCATION_COMPLEXITY_ORDER.map() below; each row needs its own hook instance, which
+ * only works if each row is its own component. Renders nothing (not a placeholder) for
+ * the many locations that don't have art yet, same as CardArt's own convention.
+ */
+function LocationIcon({ id, className }: { id: CenterEffectId; className: string }) {
+  const exists = useAssetExists(`/location-art/${id}.svg`);
+  if (!exists) return null;
+  return <LocationArt id={id} className={className} />;
+}
+
+/**
  * Reference sidebar listing every card in the game, grouped by bucket, with its copy
  * count at the current game's player count -- lets a new player see the whole card
  * pool up front instead of only discovering cards as they're drawn. Shows every card
@@ -151,9 +166,7 @@ export function CardCatalog({
   const activeTooltipId = useActiveTooltipId();
   const [activeRect, setActiveRect] = useState<DOMRect | null>(null);
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<CardBucket>>(new Set());
-  // Collapsed by default, unlike the card buckets -- center effects are secondary
-  // reference info, not something a new player needs open by default.
-  const [locationsCollapsed, setLocationsCollapsed] = useState(true);
+  const [locationsCollapsed, setLocationsCollapsed] = useState(false);
 
   function toggleBucket(bucket: CardBucket) {
     setCollapsedBuckets((prev) => {
@@ -392,27 +405,28 @@ export function CardCatalog({
                           ? `up to ${def.maxPlayerCount}p only`
                           : null;
                   const description = centerEffectDescription(id, config);
+                  // Same swatch-box + text-block row shape every real card above uses
+                  // (h-16 w-16 box with its own icon, then a flex-1 text column) --
+                  // "Current"/availability read the same way a card's own
+                  // owned/on-opponent-board tone does, via the box's border/background.
+                  const boxToneClass = isCurrent
+                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
+                    : available
+                      ? "border-zinc-300 dark:border-zinc-700"
+                      : "border-zinc-200 opacity-50 dark:border-zinc-800";
                   return (
-                    <div
-                      key={id}
-                      className={`rounded-md border p-1.5 ${
-                        isCurrent
-                          ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
-                          : available
-                            ? "border-zinc-300 dark:border-zinc-700"
-                            : "border-zinc-200 opacity-50 dark:border-zinc-800"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="text-xs font-medium">{def.label}</span>
-                        {isCurrent && (
-                          <span className="shrink-0 rounded-full bg-blue-500 px-1.5 py-0.5 text-[9px] font-semibold text-white">
-                            Current
-                          </span>
-                        )}
+                    <div key={id} className="relative flex min-w-0 items-center gap-2">
+                      <div
+                        className={`relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${boxToneClass}`}
+                      >
+                        <span className="text-[8px] font-semibold leading-tight break-words">{def.label}</span>
+                        <LocationIcon id={id} className={`h-5 w-5 shrink-0 ${def.themeColorClass}`} />
                       </div>
-                      <div className="text-[10px] text-zinc-500 dark:text-zinc-400">{description}</div>
-                      {restriction && <div className="mt-0.5 text-[9px] text-zinc-400 dark:text-zinc-500">{restriction}</div>}
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium">{def.label}</div>
+                        <div className="line-clamp-2 text-[10px] text-zinc-500 dark:text-zinc-400">{description}</div>
+                        {restriction && <div className="mt-0.5 text-[9px] text-zinc-400 dark:text-zinc-500">{restriction}</div>}
+                      </div>
                     </div>
                   );
                 })}

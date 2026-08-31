@@ -4,6 +4,22 @@ Append-only log of what changed, for manual testing — newest entry on top. Nev
 or delete an old entry; add a new one above it instead, even to correct something (add
 a follow-up entry that says what was wrong).
 
+## 2026-08-31 — Hall of Fortunes: reworked into a real per-turn draw from a shared pool
+
+- **Redesign**: previously, each player was secretly dealt a full normal-size hand at
+  the start of the game, and the "3-card offer" was just a rotating window into that
+  one fixed hand -- so the same underlying pool of cards followed you the whole game,
+  and once your hand ran low on *distinct* card types, the offer could visibly shrink
+  or repeat types. Now nobody is dealt a hand at all: the entire deck stays face-down
+  and shared, and every player's 3-card offer is drawn fresh and independently random
+  from that shared pool right when their turn starts. Any of the 3 you don't place
+  go back into the pool and get reshuffled in -- they can resurface later, to you or an
+  opponent -- so the offer is always as fresh as a real new deal, and reliably 3 cards
+  (only shrinking once the shared pool itself is nearly empty, very late game).
+  **Test**: play several rounds at Hall of Fortunes and confirm the 3 offered cards
+  never feel like they're cycling through "your same hand" -- they should read as a
+  brand new draw every single turn.
+
 ## 2026-08-30 — Hall of Fortunes: fixed hand leaking between your own turns
 
 - **Fix**: at Hall of Fortunes, your hand display was showing your *entire* remaining

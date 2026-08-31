@@ -136,7 +136,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     themeColorClass: "text-cyan-700 dark:text-cyan-400",
     titleHighlight: "Mirror",
     description:
-      "Two extra ownerless tiles sit at the top and bottom of the center column. Each card has one mirror position (same column, opposite side of the center row). If occupied, both cards get +1, or +2 each if they're the same card type.",
+      "Each card has one mirror position (same column, opposite side of the center row). If occupied, both cards get +1, or +2 each if they're the same card type.",
     ownerlessLabel: "Pool",
     ownerlessPositions: (bounds) => {
       const { x } = bounds.center;
@@ -157,18 +157,23 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "Contested Lands",
     themeColorClass: "text-orange-700 dark:text-orange-500",
     titleHighlight: "Contested",
-    description:
-      "Four ownerless checkpoints sit at the midpoint of each edge instead of the center. Every card gains +1 for each distinct opposing player with a card adjacent to it.",
-    ownerlessLabel: "Checkpoint",
+    description: "Every card gains +1 for each distinct opposing player with a card adjacent to it.",
+    ownerlessLabel: "Garrison",
+    // The 4 diagonal corners of the 3x3 block surrounding center, not out at the
+    // edges -- right where round-1's forced placement pushes everyone first, so
+    // there are fewer real neighbor slots to go around in the exact area where
+    // players collide earliest. Center's own 4 orthogonal neighbors stay real and
+    // placeable (it isn't boxed off), but a card placed there now has fewer full
+    // rings of open cells to build an all-ally pocket in -- more forced
+    // opposing-owner adjacency nearby, not less.
     ownerlessPositions: (bounds) => {
-      const midX = Math.floor(bounds.width / 2);
-      const midY = Math.floor(bounds.height / 2);
+      const { x, y } = bounds.center;
       return [
-        { x: midX, y: 0 },
-        { x: midX, y: bounds.height - 1 },
-        { x: 0, y: midY },
-        { x: bounds.width - 1, y: midY },
-      ];
+        { x: x - 1, y: y - 1 },
+        { x: x + 1, y: y - 1 },
+        { x: x - 1, y: y + 1 },
+        { x: x + 1, y: y + 1 },
+      ].filter((p) => inBounds(p, bounds));
     },
     valueModifiers: (board, bounds, addDelta) => {
       for (const [key, c] of board.entries()) {
@@ -191,7 +196,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     themeColorClass: "text-lime-700 dark:text-lime-500",
     titleHighlight: "Lazaret",
     description:
-      "Two ownerless quarantine wards sit at opposite corners instead of the center (coin-flipped each game between the two diagonals). At the end of the game, each player's single lowest-valued card is worth double (a tie is broken by whichever was placed last).",
+      "At the end of the game, each player's single lowest-valued card is worth double (a tie is broken by whichever was placed last).",
     ownerlessLabel: "Ward",
     ownerlessPositions: (bounds, rng) =>
       rng() < 0.5
@@ -234,7 +239,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     themeColorClass: "text-purple-700 dark:text-purple-500",
     titleHighlight: "Dragon",
     description:
-      "The center is free to play on. Instead, the ownerless tiles sit directly left and right of it. At the end of the game, each player's single highest-valued face-up card is worth double (a tie is broken by whichever was placed last).",
+      "At the end of the game, each player's single highest-valued face-up card is worth double (a tie is broken by whichever was placed last).",
     ownerlessLabel: "Gate",
     ownerlessPositions: (bounds) => {
       const { x, y } = bounds.center;
@@ -280,7 +285,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     themeColorClass: "text-rose-700 dark:text-rose-500",
     titleHighlight: "Fortunes",
     description:
-      "Three ownerless pillars sit in a row through the center, each with a one-tile gap between them. On each of your turns, you may only place one of 3 random, unique cards offered from your hand (equal odds each) -- a fresh offer is drawn once the previous one is used.",
+      "On each of your turns, you may only place one of 3 random, unique cards offered from your hand (equal odds each) -- a fresh offer is drawn once the previous one is used.",
     ownerlessLabel: "Pillar",
     ownerlessPositions: (bounds) => {
       const { x, y } = bounds.center;
@@ -296,7 +301,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "Corpse of the Great Wyrm",
     themeColorClass: "text-fuchsia-700 dark:text-fuchsia-500",
     titleHighlight: "Wyrm",
-    description: "Two extra ownerless tiles sit directly beside the center. Any card adjacent to any of the three heads gains +1.",
+    description: "Any card adjacent to any of the three heads gains +1.",
     ownerlessLabel: "Wyrm Head",
     ownerlessPositions: (bounds) => {
       const { x, y } = bounds.center;
@@ -332,7 +337,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "The Free Cities",
     themeColorClass: "text-amber-600 dark:text-amber-400",
     titleHighlight: "Free",
-    description: "No adjacency requirement -- any empty tile on the board is a legal placement. A handful of scattered tiles are ownerless.",
+    description: "No adjacency requirement -- any empty tile on the board is a legal placement.",
     ownerlessLabel: "City",
     ownerlessPositions: (bounds, rng) => {
       // Tunable: 1 tile at 2p/3p board sizes, 2 at 4p/5p, 3 at 6p/7p, 4 at 8p.
@@ -373,7 +378,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "No Man's Land",
     themeColorClass: "text-neutral-700 dark:text-neutral-400",
     titleHighlight: "No Man's Land",
-    description: "The ownerless tiles sit at the board's four corners instead of the center. Any card on the center's row or column takes -2.",
+    description: "Any card on the center's row or column takes -2.",
     ownerlessLabel: "Trench",
     ownerlessPositions: (bounds) => [
       { x: 0, y: 0 },

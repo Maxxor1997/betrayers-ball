@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useAssetExists } from "@/app/hooks/useAssetExists";
 import { CardId } from "@/lib/engine/types";
 
 /**
@@ -21,22 +21,7 @@ import { CardId } from "@/lib/engine/types";
  */
 export function CardArt({ cardId, className = "" }: { cardId: CardId; className?: string }) {
   const url = `/card-art/${cardId}.svg`;
-  const [exists, setExists] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const img = new Image();
-    img.onload = () => {
-      if (!cancelled) setExists(true);
-    };
-    img.onerror = () => {
-      if (!cancelled) setExists(false);
-    };
-    img.src = url;
-    return () => {
-      cancelled = true;
-    };
-  }, [url]);
+  const exists = useAssetExists(url);
 
   if (!exists) return null;
 

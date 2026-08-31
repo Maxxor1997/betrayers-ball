@@ -3,6 +3,7 @@
 import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 import { CardArt } from "@/app/components/CardArt";
 import { FixedTooltip } from "@/app/components/CardCatalog";
+import { LocationArt } from "@/app/components/LocationArt";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, KINGSLAYER_BASE_VALUE, KINGSLAYER_INSTANCE_ID } from "@/lib/content/centerEffects";
 import { inBounds, isOwnerlessPosition, parsePosKey } from "@/lib/engine/board";
@@ -10,6 +11,7 @@ import { PLAYER_COLOR_CLASSES } from "@/lib/config/players";
 import { flipBoostTargets, flipDisruptionTargets, ResolvedCard } from "@/lib/engine/resolution";
 import { GameState, Position, posKey } from "@/lib/engine/types";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
+import { useAssetExists } from "@/app/hooks/useAssetExists";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { BreakdownPopup } from "./scoreBreakdown";
 
@@ -91,6 +93,12 @@ export function BoardGrid({
   const cols = Array.from({ length: width }, (_, x) => x);
   const activeTooltipId = useActiveTooltipId();
   const hasHover = useHasHover();
+  // A single check for the whole board -- every ownerless tile shares the same
+  // location, so there's no need to probe per-cell. Defaults to false (today's
+  // plain label/tinted-box rendering) until an SVG is confirmed to exist at
+  // public/location-art/<centerEffect>.svg -- most locations don't have one yet, and
+  // this is exactly what keeps their rendering unchanged with no flash.
+  const hasLocationArt = useAssetExists(`/location-art/${state.config.centerEffect}.svg`);
   // Only one tooltip is ever open anywhere in the app at once (see activeTooltip.ts),
   // so a single locally-held rect is enough -- same reasoning as CardCatalog's own
   // activeRect. Feeds FixedTooltip (a portal, positioned `fixed` from real screen
@@ -339,13 +347,25 @@ export function BoardGrid({
                     like a mangled two-line squeeze) -- so it's just a solid tinted
                     block instead, no text. Same idea as the card name's own
                     @container cutoff, just a different fallback since this tile has
-                    no icon to fall back to. */}
+                    no icon to fall back to -- unless the location has one (see
+                    hasLocationArt above), in which case both size variants below show
+                    that icon instead of their plain fallback. */}
                 <div
-                  className={`hidden aspect-square w-full items-center justify-center overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400 @[52px]:flex ${noMansLandShadowClass}`}
+                  className={`hidden aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400 @[52px]:flex ${noMansLandShadowClass}`}
                 >
-                  {displayLabel}
+                  {hasLocationArt && (
+                    <LocationArt id={state.config.centerEffect} className={`h-1/2 w-1/2 shrink-0 ${effect.themeColorClass}`} />
+                  )}
+                  <span className="truncate">{displayLabel}</span>
                 </div>
-                <div className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} bg-current ${noMansLandShadowClass}`} />
+                {hasLocationArt ? (
+                  <LocationArt
+                    id={state.config.centerEffect}
+                    className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} ${noMansLandShadowClass}`}
+                  />
+                ) : (
+                  <div className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} bg-current ${noMansLandShadowClass}`} />
+                )}
                 {activeTooltipId === tooltipId && activeRect && (
                   <FixedTooltip rect={activeRect}>
                     {displayLabel} — {detail}

@@ -1,8 +1,7 @@
 import { getAdjacentCards, getLegalPlacementPositions, isOwnerlessPosition, parsePosKey } from "./board";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
-import { Rng, shuffle } from "./deck";
-import { Board, BoardBounds, CardId, CardInstance, FlipAction, GameConfig, GameState, PlaceAction, Position, posKey } from "./types";
+import { Board, BoardBounds, CardInstance, FlipAction, GameConfig, GameState, PlaceAction, Position, posKey } from "./types";
 
 /** True if `pos` is adjacent to a card whose def blocks its neighbors from being flipped (e.g. Cyclops). */
 function isFlipBlockedAt(board: Board, bounds: BoardBounds, pos: Position): boolean {
@@ -60,36 +59,20 @@ export function getLegalPlacementCells(state: GameState): Position[] {
 }
 
 /**
- * Hall of Fortunes only (see centerEffects.ts's `reckoning`): draws up to 3
- * unique-by-cardId cards at random from `hand` -- duplicate copies of the same cardId
- * collapse to one representative instance first (any copy is equally playable), then
- * up to 3 of those are picked with equal probability.
- */
-export function drawHandOffer(hand: CardInstance[], rng: Rng): CardInstance[] {
-  const seen = new Set<CardId>();
-  const uniqueByCard: CardInstance[] = [];
-  for (const c of hand) {
-    if (seen.has(c.cardId)) continue;
-    seen.add(c.cardId);
-    uniqueByCard.push(c);
-  }
-  return shuffle(uniqueByCard, rng).slice(0, 3);
-}
-
-/**
  * Which of a player's hand cards are actually legal to place right now -- normally
  * the player's whole hand, but Hall of Fortunes restricts it to that player's current
- * 3-card offer (see GameState.handOffers). Every legality check and AI/UI "which
- * cards can I place" call site should read hand-candidates through this, not
- * `player.hand` directly.
+ * 3-card offer (see GameState.handOffers), which for that location IS the player's
+ * whole hand at any moment (see deck.ts's redrawOffer) -- there's no larger fixed hand
+ * behind it. Every legality check and AI/UI "which cards can I place" call site should
+ * read hand-candidates through this, not `player.hand` directly.
  *
  * At Hall of Fortunes specifically, a player's offer is deleted the moment they place
- * the offered card (see applyPlace) and isn't refreshed until their next turn actually
- * starts (see game.ts's ensureHandOfferForCurrentPlayer) -- so for the whole stretch of
+ * the offered card (see applyPlace) and isn't redrawn until their next turn actually
+ * starts (see game.ts's redrawOfferForCurrentPlayer) -- so for the whole stretch of
  * opponents' turns in between, there's genuinely no live offer for them yet. Falling
  * back to their full hand in that gap (like the non-Reckoning branch below correctly
- * does) would leak every other still-unoffered card in their hand on their own screen
- * between turns -- an empty offer is the correct, honest answer there, not a fallback.
+ * does) would leak their still-unreturned leftover cards on their own screen between
+ * turns -- an empty offer is the correct, honest answer there, not a fallback.
  */
 export function offeredCardsFor(state: GameState, playerId: string): CardInstance[] {
   if (state.config.centerEffect !== "reckoning") {

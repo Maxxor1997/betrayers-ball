@@ -1,9 +1,9 @@
 import { BOARD_BOUNDS_BY_PLAYER_COUNT } from "@/lib/config/boardSizing";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
-import { dealNewGame, Rng } from "./deck";
+import { dealNewGame, redrawOffer, Rng } from "./deck";
 import { computeAiVote, computeGameResult, shouldEndGame } from "./endgame";
-import { applyFlip, applyPass, applyPlace, currentPlayerId, drawHandOffer, mustPass } from "./turns";
-import { AiDifficulty, CardInstance, CastVoteAction, CenterEffectId, GameAction, GameConfig, GameState } from "./types";
+import { applyFlip, applyPass, applyPlace, currentPlayerId, mustPass } from "./turns";
+import { AiDifficulty, CastVoteAction, CenterEffectId, GameAction, GameConfig, GameState } from "./types";
 
 /**
  * How advanceTurn decides an AI seat's vote when a round boundary auto-fills it (see
@@ -55,17 +55,18 @@ export function createGame(
   firstPlayerIndex = 0
 ): GameState {
   const effectiveRng = rng ?? Math.random;
-  const { players, remainingDeck } = dealNewGame(playerIds, config.handSize, effectiveRng);
+  // Hall of Fortunes: nobody is dealt a real starting hand -- every player starts
+  // empty-handed, and the entire built deck stays undrawn, shared, and face-down in
+  // the middle. Each player's actual "hand" only ever exists as their current 3-card
+  // offer, redrawn fresh from that shared pool right when it becomes their turn (see
+  // redrawOfferForCurrentPlayer below) -- passing handSize 0 here just means nobody's
+  // dealt anything upfront; `deal`'s own loop is a no-op at that size, so this needs
+  // no changes to deck.ts's dealing itself.
+  const handSize = config.centerEffect === "reckoning" ? 0 : config.handSize;
+  const { players, remainingDeck } = dealNewGame(playerIds, handSize, effectiveRng);
   const aiIds = new Set(aiPlayerIds);
   const finalPlayers = players.map((p) => ({ ...p, isAI: aiIds.has(p.id) }));
-  // Hall of Fortunes: every player gets an initial 3-card offer right at deal time,
-  // consumed one rng call per player in player order (deterministic, no cross-player
-  // nondeterminism -- same convention the rest of this reducer follows).
-  const handOffers: Record<string, CardInstance[]> =
-    config.centerEffect === "reckoning"
-      ? Object.fromEntries(finalPlayers.map((p) => [p.id, drawHandOffer(p.hand, effectiveRng)]))
-      : {};
-  return {
+  const state: GameState = {
     config,
     board: new Map(),
     deck: remainingDeck,
@@ -79,26 +80,32 @@ export function createGame(
     voteHistory: [],
     flipHistory: [],
     placementOrder: [],
-    handOffers,
+    handOffers: {},
     phase: "playing",
     result: null,
   };
+  // Only the starting player needs an offer right now -- everyone else's gets drawn
+  // lazily, the exact same way, the moment turn order actually reaches them (see
+  // redrawOfferForCurrentPlayer's own call sites in advanceTurn/tallyVotes below).
+  const { players: playersWithOffer, deck, handOffers } = redrawOfferForCurrentPlayer(state, effectiveRng);
+  return { ...state, players: playersWithOffer, deck, handOffers };
 }
 
 /**
- * Hall of Fortunes only: whenever the current player doesn't already have a live
- * offer (a fresh turn after their last one was consumed by a placement), draw one
- * from their present hand. A no-op for every other center effect, and a no-op if the
- * player already has one (e.g. right after createGame's own initial offers, or after
- * a pass, which never consumes the offer).
+ * Hall of Fortunes only: redraws the current player's offer completely fresh from the
+ * shared undrawn pool every single time it becomes their turn -- never a subset of a
+ * larger fixed hand, and never reused/persisted from their last turn even if some of
+ * it went unplaced (see deck.ts's redrawOffer for exactly how those leftovers get
+ * returned to the pool first). A no-op for every other center effect.
  */
-function ensureHandOfferForCurrentPlayer(state: GameState, rng: Rng): Record<string, CardInstance[]> {
-  if (state.config.centerEffect !== "reckoning") return state.handOffers;
+function redrawOfferForCurrentPlayer(state: GameState, rng: Rng): Pick<GameState, "players" | "deck" | "handOffers"> {
+  if (state.config.centerEffect !== "reckoning") return { players: state.players, deck: state.deck, handOffers: state.handOffers };
   const playerId = currentPlayerId(state);
-  if (state.handOffers[playerId]) return state.handOffers;
-  const player = state.players.find((p) => p.id === playerId);
-  if (!player || player.hand.length === 0) return state.handOffers;
-  return { ...state.handOffers, [playerId]: drawHandOffer(player.hand, rng) };
+  const player = state.players.find((p) => p.id === playerId)!;
+  const { hand, deck } = redrawOffer(state.deck, player.hand, playerId, rng);
+  const players = state.players.map((p) => (p.id === playerId ? { ...p, hand } : p));
+  const handOffers = { ...state.handOffers, [playerId]: hand };
+  return { players, deck, handOffers };
 }
 
 /**
@@ -171,7 +178,7 @@ function advanceTurn(state: GameState, rng: Rng, computeVote: ComputeVoteFn = co
 
   if (!isRoundBoundary) {
     const nextState = { ...state, currentPlayerIndex: nextIndex, hasFlippedThisTurn: false, turnsThisRound };
-    return { ...nextState, handOffers: ensureHandOfferForCurrentPlayer(nextState, rng) };
+    return { ...nextState, ...redrawOfferForCurrentPlayer(nextState, rng) };
   }
 
   const completedRound = state.round;
@@ -201,7 +208,7 @@ function advanceTurn(state: GameState, rng: Rng, computeVote: ComputeVoteFn = co
   const nextRound = completedRound + 1;
   const roundStart = applyRoundStart(state, nextRound, rng);
   const nextState = { ...state, ...roundStart, currentPlayerIndex: nextIndex, round: nextRound, hasFlippedThisTurn: false, turnsThisRound: 0 };
-  return { ...nextState, handOffers: ensureHandOfferForCurrentPlayer(nextState, rng) };
+  return { ...nextState, ...redrawOfferForCurrentPlayer(nextState, rng) };
 }
 
 /**
@@ -233,7 +240,7 @@ function tallyVotes(state: GameState, rng: Rng): GameState {
   const nextRound = state.round + 1;
   const roundStart = applyRoundStart(state, nextRound, rng);
   const nextState = { ...state, ...roundStart, phase: "playing" as const, votes: {}, voteHistory, round: nextRound, hasFlippedThisTurn: false };
-  return { ...nextState, handOffers: ensureHandOfferForCurrentPlayer(nextState, rng) };
+  return { ...nextState, ...redrawOfferForCurrentPlayer(nextState, rng) };
 }
 
 /**

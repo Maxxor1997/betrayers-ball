@@ -472,10 +472,10 @@ describe("advanceTurn — round-start seat rotation", () => {
   });
 });
 
-describe("Hall of Fortunes center effect — per-turn 3-card offer", () => {
+describe("Hall of Fortunes center effect — per-turn 3-card offer, redrawn fresh from a shared pool", () => {
   const config: GameConfig = {
     boardBounds: { width: 9, height: 9, center: { x: 4, y: 4 } },
-    handSize: 7,
+    handSize: 7, // unused for this location -- nobody's dealt a real starting hand (see createGame)
     roundCap: 10,
     flipUnlockRound: 2,
     centerEffect: "reckoning",
@@ -491,61 +491,69 @@ describe("Hall of Fortunes center effect — per-turn 3-card offer", () => {
     return applyAction(state, { type: "place", playerId: player.id, instanceId: offered.instanceId, position: cell });
   }
 
-  it("gives every player an initial offer of up to 3 unique-by-cardId cards at deal time", () => {
+  /** deck.length + every player's hand.length + however many cards are already on the board -- should never change: cards only ever move between these three buckets. */
+  function totalCirculatingCards(state: GameState): number {
+    return state.deck.length + state.players.reduce((sum, p) => sum + p.hand.length, 0) + state.board.size;
+  }
+
+  it("gives only the starting player an offer at deal time -- nobody else has a hand yet", () => {
     const state = createGame(["p1", "p2"], config, deterministicRng(6));
-    for (const player of state.players) {
-      const offer = state.handOffers[player.id];
-      expect(offer.length).toBeGreaterThan(0);
-      expect(offer.length).toBeLessThanOrEqual(3);
-      expect(new Set(offer.map((c) => c.cardId)).size).toBe(offer.length); // unique by cardId
-      for (const c of offer) expect(player.hand.some((h) => h.instanceId === c.instanceId)).toBe(true);
-    }
+    const [p1, p2] = state.players;
+    expect(state.handOffers[p1.id]).toHaveLength(3);
+    expect(new Set(state.handOffers[p1.id].map((c) => c.cardId)).size).toBe(3); // unique by cardId
+    expect(p1.hand).toEqual(state.handOffers[p1.id]);
+    expect(p2.hand).toEqual([]);
+    expect(state.handOffers[p2.id]).toBeUndefined();
   });
 
   it("rejects placing a hand card that isn't in the current offer", () => {
     const state = createGame(["p1", "p2"], config, deterministicRng(6));
     const player = state.players[0];
     const offer = state.handOffers[player.id];
-    const notOffered = player.hand.find((c) => !offer.some((o) => o.instanceId === c.instanceId));
-    expect(notOffered).toBeDefined();
+    // Every card in `hand` IS the offer here (no larger fixed hand behind it), so
+    // reaching for an "unoffered" card means a fabricated instanceId, not a real one.
     const cell = getLegalPlacementCells(state)[0];
-    expect(() =>
-      applyAction(state, { type: "place", playerId: player.id, instanceId: notOffered!.instanceId, position: cell })
-    ).toThrow();
+    expect(() => applyAction(state, { type: "place", playerId: player.id, instanceId: "not-a-real-card", position: cell })).toThrow();
+    expect(offer).toHaveLength(3);
   });
 
-  it("consumes the offer once the offered card is placed", () => {
+  it("consumes the offer once the offered card is placed, leaving the other 2 cards briefly in hand", () => {
     let state = createGame(["p1", "p2"], config, deterministicRng(6));
     const playerId = state.players[0].id;
     state = placeOfferedCard(state);
     expect(state.handOffers[playerId]).toBeUndefined();
+    expect(state.players.find((p) => p.id === playerId)!.hand).toHaveLength(2);
   });
 
-  it("shows no offered cards for a player between their own turns, instead of leaking their whole remaining hand", () => {
+  it("shows no offered cards for a player between their own turns, even though 2 leftover cards are still technically in hand", () => {
     let state = createGame(["p1", "p2"], config, deterministicRng(6));
     const p1 = state.players[0].id;
     state = placeOfferedCard(state); // p1's offer is now consumed; it's p2's turn
-    expect(state.players.find((p) => p.id === p1)!.hand.length).toBeGreaterThan(0); // p1 still has real cards left
-    expect(offeredCardsFor(state, p1)).toEqual([]); // but nothing should show as offered until p1's next turn
+    expect(offeredCardsFor(state, p1)).toEqual([]); // nothing should show as offered until p1's next turn
   });
 
-  it("draws a fresh offer once the player's turn comes back around", () => {
+  it("redraws a completely fresh 3-card offer once the player's turn comes back around", () => {
     let state = createGame(["p1", "p2"], config, deterministicRng(6));
     const p1 = state.players[0].id;
+    const beforeCirculating = totalCirculatingCards(state);
     state = placeOfferedCard(state); // p1 places, consuming their offer
     state = placeOfferedCard(state); // p2 places -- round completes, back to p1
     expect(state.currentPlayerIndex).toBe(0); // 2p has no round-boundary rotation shift
-    expect(state.handOffers[p1]).toBeDefined();
-    expect(state.handOffers[p1]!.length).toBeGreaterThan(0);
+    expect(state.handOffers[p1]).toHaveLength(3);
+    expect(state.players.find((p) => p.id === p1)!.hand).toEqual(state.handOffers[p1]);
+    // Nothing was created or destroyed -- deck+hands+board (totalCirculatingCards)
+    // stays constant all game; only which bucket a given card sits in changes.
+    expect(totalCirculatingCards(state)).toBe(beforeCirculating);
   });
 
-  it("mustPass is true once a player's hand (and so their offer) is empty", () => {
-    const singleCardConfig: GameConfig = { ...config, handSize: 1 };
-    let state = createGame(["p1", "p2"], singleCardConfig, deterministicRng(6));
-    expect(mustPass(state)).toBe(false);
-    state = placeOfferedCard(state); // p1 empties their hand
-    state = placeOfferedCard(state); // p2 empties theirs -- back to p1
-    expect(mustPass(state)).toBe(true);
+  it("conserves the total card count across many turns -- cards only ever move between the deck, hands, and the board", () => {
+    let state = createGame(["p1", "p2"], config, deterministicRng(6));
+    const initial = totalCirculatingCards(state);
+    for (let i = 0; i < 10; i++) {
+      state = placeOfferedCard(state);
+      expect(totalCirculatingCards(state)).toBe(initial);
+      expect(state.board.size).toBe(i + 1);
+    }
   });
 });
 

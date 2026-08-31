@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildDeck, deal, dealNewGame, shuffle } from "../deck";
+import { buildDeck, deal, dealNewGame, redrawOffer, shuffle } from "../deck";
 import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
-import { CardBucket, CardId } from "../types";
+import { CardBucket, CardId, CardInstance, DeckCard } from "../types";
 
 /** Sum of every card's copy count at `playerCount`, derived from CARD_DEFS -- the
  * expected total, computed independently of `buildDeck`'s own iteration. */
@@ -119,4 +119,66 @@ describe("dealNewGame", () => {
     expect(players[0].hand).toHaveLength(7);
     expect(remainingDeck).toHaveLength(totalCopiesAt(2) - 14);
   });
+
+  it("gives every player an empty hand and leaves the deck untouched at handSize 0 -- how Hall of Fortunes deals", () => {
+    const { players, remainingDeck } = dealNewGame(["p1", "p2"], 0, () => 0.42);
+    expect(players[0].hand).toEqual([]);
+    expect(players[1].hand).toEqual([]);
+    expect(remainingDeck).toHaveLength(totalCopiesAt(2));
+  });
 });
+
+describe("redrawOffer", () => {
+  const rng = () => 0.5;
+
+  function deckOf(...cardIds: CardId[]): DeckCard[] {
+    return cardIds.map((cardId, i) => ({ instanceId: `d${i}`, cardId }));
+  }
+
+  it("draws 3 cards from the deck when the previous hand is empty (the initial draw)", () => {
+    const deck = deckOf("Footman", "Exile", "Warlord", "Giant", "Bannerman");
+    const { hand, deck: remaining } = redrawOffer(deck, [], "p1", rng);
+    expect(hand).toHaveLength(3);
+    expect(hand.every((c) => c.ownerId === "p1" && c.faceUp === false)).toBe(true);
+    expect(remaining).toHaveLength(2);
+  });
+
+  it("returns the previous hand back into the pool before drawing, conserving the total count", () => {
+    const deck = deckOf("Footman", "Exile");
+    const previousHand: CardInstance[] = [{ instanceId: "prev1", cardId: "Warlord", ownerId: "p1", faceUp: false }];
+    const { hand, deck: remaining } = redrawOffer(deck, previousHand, "p1", rng);
+    // Pool was 2 (deck) + 1 (returned) = 3 total -- all 3 drawn, none left over.
+    expect(hand).toHaveLength(3);
+    expect(remaining).toHaveLength(0);
+    const allIds = new Set(hand.map((c) => c.instanceId));
+    expect(allIds.has("prev1")).toBe(true); // the returned card is a real candidate again, not discarded
+  });
+
+  it("draws fewer than 3 only once the combined pool itself has fewer than 3 cards", () => {
+    const deck = deckOf("Footman");
+    const { hand, deck: remaining } = redrawOffer(deck, [], "p1", rng);
+    expect(hand).toHaveLength(1);
+    expect(remaining).toHaveLength(0);
+  });
+
+  it("returns an empty hand when the pool is completely exhausted", () => {
+    const { hand, deck } = redrawOffer([], [], "p1", rng);
+    expect(hand).toEqual([]);
+    expect(deck).toEqual([]);
+  });
+
+  it("is reproducible for the same seed", () => {
+    const deck = deckOf("Footman", "Exile", "Warlord", "Giant", "Bannerman", "Truthseeker");
+    const a = redrawOffer(deck, [], "p1", deterministicRng(3));
+    const b = redrawOffer(deck, [], "p1", deterministicRng(3));
+    expect(a.hand.map((c) => c.instanceId)).toEqual(b.hand.map((c) => c.instanceId));
+  });
+});
+
+function deterministicRng(seed: number) {
+  let s = seed;
+  return () => {
+    s = (s * 9301 + 49297) % 233280;
+    return s / 233280;
+  };
+}
