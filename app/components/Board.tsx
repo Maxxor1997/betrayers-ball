@@ -276,7 +276,7 @@ export function BoardGrid({
         // (uniform aspect-square cells), so that midpoint is just this row's index
         // as a fraction of the total row count, no pixel measurement needed.
         <div
-          className="pointer-events-none absolute inset-x-0 z-10 border-t border-dashed border-zinc-400/70 dark:border-zinc-500/70"
+          className={`pointer-events-none absolute inset-x-0 z-10 border-t border-dashed border-current opacity-70 ${CENTER_EFFECTS.mirrorPool.themeColorClass}`}
           style={{ top: `${((state.config.boardBounds.center.y + 0.5) / height) * 100}%` }}
         />
       )}
@@ -295,12 +295,39 @@ export function BoardGrid({
           const inNoMansLandCross =
             state.config.centerEffect === "noMansLand" &&
             (pos.x === state.config.boardBounds.center.x || pos.y === state.config.boardBounds.center.y);
+          // Corpse of the Great Wyrm's +1 always lands on any card adjacent to any of
+          // the 3 heads (see threeHeadedDragon's valueModifiers) -- a static zone,
+          // purely positional (known before anything is even placed), so a light wash
+          // in the location's own theme color highlights it the same way No Man's
+          // Land's grey wash marks its debuff zone, just for a buff instead.
+          const inWyrmHeadZone =
+            state.config.centerEffect === "threeHeadedDragon" &&
+            (state.config.boardBounds.ownerless ?? [state.config.boardBounds.center]).some(
+              (h) => Math.abs(h.x - pos.x) + Math.abs(h.y - pos.y) === 1
+            );
+          // The Frontier's edge/corner bonus (see borderlands' valueModifiers) is
+          // purely positional -- a light wash marks the +1 edge, a stronger one marks
+          // the +2 corners, visible before anything is even placed.
+          const { width: boardWidth, height: boardHeight } = state.config.boardBounds;
+          const onFrontierEdge =
+            state.config.centerEffect === "borderlands" &&
+            (pos.x === 0 || pos.y === 0 || pos.x === boardWidth - 1 || pos.y === boardHeight - 1);
+          const onFrontierCorner =
+            onFrontierEdge && (pos.x === 0 || pos.x === boardWidth - 1) && (pos.y === 0 || pos.y === boardHeight - 1);
           // An inset box-shadow, not a separate absolutely-positioned overlay div --
           // painted directly on each cell's own bordered/rounded box (whichever
           // element that is per branch below), so it's pixel-identical to that box no
           // matter how its own wrapper happens to be sized, instead of relying on a
           // sibling `inset-0` div to independently end up the same size.
-          const noMansLandShadowClass = inNoMansLandCross ? "shadow-[inset_0_0_0_9999px_rgba(113,113,122,0.1)]" : "";
+          const effectHighlightClass = inNoMansLandCross
+            ? "shadow-[inset_0_0_0_9999px_rgba(113,113,122,0.1)]"
+            : inWyrmHeadZone
+              ? "shadow-[inset_0_0_0_9999px_rgba(192,38,211,0.15)]"
+              : onFrontierCorner
+                ? "shadow-[inset_0_0_0_9999px_rgba(245,158,11,0.28)]"
+                : onFrontierEdge
+                  ? "shadow-[inset_0_0_0_9999px_rgba(245,158,11,0.14)]"
+                  : "";
 
           if (isOwnerless) {
             const effect = CENTER_EFFECTS[state.config.centerEffect];
@@ -367,7 +394,7 @@ export function BoardGrid({
                     hasLocationArt above), in which case both size variants below show
                     that icon instead of their plain fallback. */}
                 <div
-                  className={`hidden aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400 @[52px]:flex ${noMansLandShadowClass}`}
+                  className={`hidden aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400 @[52px]:flex ${effectHighlightClass}`}
                 >
                   {hasArtForThisTile && (
                     <LocationArt
@@ -382,10 +409,10 @@ export function BoardGrid({
                   <LocationArt
                     id={state.config.centerEffect}
                     variant={artVariant}
-                    className={`aspect-square w-full rounded-md ${BOLD_LOCATION_ART_IDS.has(state.config.centerEffect) ? "" : "opacity-60"} @[52px]:hidden ${effect.themeColorClass} ${noMansLandShadowClass}`}
+                    className={`aspect-square w-full rounded-md ${BOLD_LOCATION_ART_IDS.has(state.config.centerEffect) ? "" : "opacity-60"} @[52px]:hidden ${effect.themeColorClass} ${effectHighlightClass}`}
                   />
                 ) : (
-                  <div className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} bg-current ${noMansLandShadowClass}`} />
+                  <div className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} bg-current ${effectHighlightClass}`} />
                 )}
                 {activeTooltipId === tooltipId && activeRect && (
                   <FixedTooltip rect={activeRect}>
@@ -504,7 +531,7 @@ export function BoardGrid({
                   title={clickable ? "Tap to flip face-up" : undefined}
                   className={`@container flex aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 p-1 text-center ${ownerColorClass(state, card.ownerId)} ${
                     clickable ? "cursor-pointer ring-2 ring-amber-400" : ""
-                  } ${highlighted ? "ring-2 ring-sky-400 dark:ring-sky-500" : ""} ${flippingIds.has(card.instanceId) ? "[perspective:600px]" : ""} ${disruptedIds.has(card.instanceId) ? "card-disrupted" : ""} ${boostedIds.has(card.instanceId) ? "card-boosted" : ""} ${noMansLandShadowClass}`}
+                  } ${highlighted ? "ring-2 ring-sky-400 dark:ring-sky-500" : ""} ${flippingIds.has(card.instanceId) ? "[perspective:600px]" : ""} ${disruptedIds.has(card.instanceId) ? "card-disrupted" : ""} ${boostedIds.has(card.instanceId) ? "card-boosted" : ""} ${effectHighlightClass}`}
                 >
                   {flippingIds.has(card.instanceId) ? (
                     // Briefly renders BOTH faces stacked in 3D (see .card-flip-* in
@@ -579,7 +606,7 @@ export function BoardGrid({
                     ? "border-emerald-600 bg-emerald-200 dark:bg-emerald-800"
                     : "border-emerald-300/70 bg-emerald-50/50 dark:border-emerald-800/70 dark:bg-emerald-950/40"
                   : "border-zinc-200 dark:border-zinc-800"
-              } ${noMansLandShadowClass}`}
+              } ${effectHighlightClass}`}
             />
           );
         })
