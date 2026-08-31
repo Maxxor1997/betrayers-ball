@@ -3,7 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CardArt } from "@/app/components/CardArt";
-import { LocationArt } from "@/app/components/LocationArt";
+import { BOLD_LOCATION_ART_IDS, LocationArt } from "@/app/components/LocationArt";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useAssetExists } from "@/app/hooks/useAssetExists";
 import { useHasHover } from "@/app/hooks/useHasHover";
@@ -420,7 +420,10 @@ export function CardCatalog({
                         className={`relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${boxToneClass}`}
                       >
                         <span className="text-[8px] font-semibold leading-tight break-words">{def.label}</span>
-                        <LocationIcon id={id} className={`h-5 w-5 shrink-0 ${def.themeColorClass}`} />
+                        <LocationIcon
+                          id={id}
+                          className={`${BOLD_LOCATION_ART_IDS.has(id) ? "h-7 w-7" : "h-5 w-5"} shrink-0 ${def.themeColorClass}`}
+                        />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-xs font-medium">{def.label}</div>

@@ -158,7 +158,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     themeColorClass: "text-orange-700 dark:text-orange-500",
     titleHighlight: "Contested",
     description: "Every card gains +1 for each distinct opposing player with a card adjacent to it.",
-    ownerlessLabel: "Garrison",
+    ownerlessLabel: "Watchtower",
     // The 4 diagonal corners of the 3x3 block surrounding center, not out at the
     // edges -- right where round-1's forced placement pushes everyone first, so
     // there are fewer real neighbor slots to go around in the exact area where

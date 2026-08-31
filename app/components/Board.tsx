@@ -3,7 +3,7 @@
 import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 import { CardArt } from "@/app/components/CardArt";
 import { FixedTooltip } from "@/app/components/CardCatalog";
-import { LocationArt } from "@/app/components/LocationArt";
+import { BOLD_LOCATION_ART_IDS, LocationArt } from "@/app/components/LocationArt";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, KINGSLAYER_BASE_VALUE, KINGSLAYER_INSTANCE_ID } from "@/lib/content/centerEffects";
 import { inBounds, isOwnerlessPosition, parsePosKey } from "@/lib/engine/board";
@@ -93,12 +93,19 @@ export function BoardGrid({
   const cols = Array.from({ length: width }, (_, x) => x);
   const activeTooltipId = useActiveTooltipId();
   const hasHover = useHasHover();
-  // A single check for the whole board -- every ownerless tile shares the same
-  // location, so there's no need to probe per-cell. Defaults to false (today's
+  // Checked once for the whole board, not per-cell -- every ownerless tile shares the
+  // same location, so there's no need to probe per-cell, and hooks can't be called
+  // conditionally inside the per-cell map below anyway. Defaults to false (today's
   // plain label/tinted-box rendering) until an SVG is confirmed to exist at
   // public/location-art/<centerEffect>.svg -- most locations don't have one yet, and
   // this is exactly what keeps their rendering unchanged with no flash.
   const hasLocationArt = useAssetExists(`/location-art/${state.config.centerEffect}.svg`);
+  // A location can optionally split its icon across left/right-of-center ownerless
+  // tiles instead of repeating one icon on both (see Dragon Gate's own left/right
+  // half-gate art) -- these two checks are harmless 404s for every other location,
+  // which just falls back to hasLocationArt above.
+  const hasLeftLocationArt = useAssetExists(`/location-art/${state.config.centerEffect}-left.svg`);
+  const hasRightLocationArt = useAssetExists(`/location-art/${state.config.centerEffect}-right.svg`);
   // Only one tooltip is ever open anywhere in the app at once (see activeTooltip.ts),
   // so a single locally-held rect is enough -- same reasoning as CardCatalog's own
   // activeRect. Feeds FixedTooltip (a portal, positioned `fixed` from real screen
@@ -299,6 +306,15 @@ export function BoardGrid({
             const effect = CENTER_EFFECTS[state.config.centerEffect];
             const label = effect.ownerlessLabel ?? effect.label;
             const detail = centerEffectDescription(state.config.centerEffect, state.config);
+            // Which half-art variant (if any) applies to THIS specific ownerless
+            // tile, based purely on its position relative to center -- see
+            // hasLeftLocationArt/hasRightLocationArt above.
+            const sideOfCenter = pos.x < state.config.boardBounds.center.x ? "left" : pos.x > state.config.boardBounds.center.x ? "right" : undefined;
+            const artVariant =
+              (sideOfCenter === "left" && hasLeftLocationArt) || (sideOfCenter === "right" && hasRightLocationArt)
+                ? sideOfCenter
+                : undefined;
+            const hasArtForThisTile = artVariant !== undefined || hasLocationArt;
             // Always the flat base value, never the live computed one -- some of its
             // adjacency modifiers (Bannerman's, notably) don't require face-up, so
             // showing the true live value would leak a face-down card's identity
@@ -353,15 +369,20 @@ export function BoardGrid({
                 <div
                   className={`hidden aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400 @[52px]:flex ${noMansLandShadowClass}`}
                 >
-                  {hasLocationArt && (
-                    <LocationArt id={state.config.centerEffect} className={`h-1/2 w-1/2 shrink-0 ${effect.themeColorClass}`} />
+                  {hasArtForThisTile && (
+                    <LocationArt
+                      id={state.config.centerEffect}
+                      variant={artVariant}
+                      className={`${BOLD_LOCATION_ART_IDS.has(state.config.centerEffect) ? "h-3/4 w-3/4" : "h-1/2 w-1/2"} shrink-0 ${effect.themeColorClass}`}
+                    />
                   )}
                   <span className="truncate">{displayLabel}</span>
                 </div>
-                {hasLocationArt ? (
+                {hasArtForThisTile ? (
                   <LocationArt
                     id={state.config.centerEffect}
-                    className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} ${noMansLandShadowClass}`}
+                    variant={artVariant}
+                    className={`aspect-square w-full rounded-md ${BOLD_LOCATION_ART_IDS.has(state.config.centerEffect) ? "" : "opacity-60"} @[52px]:hidden ${effect.themeColorClass} ${noMansLandShadowClass}`}
                   />
                 ) : (
                   <div className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} bg-current ${noMansLandShadowClass}`} />
