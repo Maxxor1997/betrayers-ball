@@ -9,11 +9,11 @@ describe("isAvailableAtPlayerCount", () => {
   });
 
   it("respects minPlayerCount ('only for larger boards')", () => {
-    const original = CENTER_EFFECTS.twoTowers.minPlayerCount;
-    CENTER_EFFECTS.twoTowers.minPlayerCount = 5;
-    expect(isAvailableAtPlayerCount("twoTowers", 4)).toBe(false);
-    expect(isAvailableAtPlayerCount("twoTowers", 5)).toBe(true);
-    CENTER_EFFECTS.twoTowers.minPlayerCount = original;
+    const original = CENTER_EFFECTS.threeHeadedDragon.minPlayerCount;
+    CENTER_EFFECTS.threeHeadedDragon.minPlayerCount = 5;
+    expect(isAvailableAtPlayerCount("threeHeadedDragon", 4)).toBe(false);
+    expect(isAvailableAtPlayerCount("threeHeadedDragon", 5)).toBe(true);
+    CENTER_EFFECTS.threeHeadedDragon.minPlayerCount = original;
   });
 
   it("respects maxPlayerCount", () => {

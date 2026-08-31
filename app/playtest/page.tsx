@@ -4,11 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { BoardGrid } from "@/app/components/Board";
+import { IntegerField } from "@/app/components/IntegerField";
 import { FixedTooltip, LOCATION_COMPLEXITY_ORDER } from "@/app/components/CardCatalog";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
-import { CENTER_EFFECTS, randomCenterEffectPool, selectableCenterEffects } from "@/lib/content/centerEffects";
+import { CENTER_EFFECTS, centerEffectLabel, randomCenterEffectPool, selectableCenterEffects } from "@/lib/content/centerEffects";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { ResolvedCard, resolveBoard } from "@/lib/engine/resolution";
 import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS, DEFAULT_AI_DIFFICULTY } from "@/lib/ai/difficulty";
@@ -726,7 +727,7 @@ function Playtest() {
             className="w-full min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
           >
             <option value="random">Random</option>
-            <option value="none">None</option>
+            <option value="none">{centerEffectLabel("none")}</option>
             {selectableCenterEffects(runAllPlayerCounts ? MAX_PLAYERS : playerCount).map((id) => (
               <option key={id} value={id}>
                 {CENTER_EFFECTS[id].label}
@@ -748,14 +749,13 @@ function Playtest() {
             ))}
           </select>
           <label htmlFor="pt-games">Games{runAllPlayerCounts ? " (per player count)" : ""}</label>
-          <input
+          <IntegerField
             id="pt-games"
-            type="number"
             min={1}
             max={50000}
             value={gameCount}
             disabled={running}
-            onChange={(e) => setGameCount(Math.max(1, Math.min(50000, Number(e.target.value) || 1)))}
+            onChange={setGameCount}
             className="w-full min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
           />
           <label htmlFor="pt-all-counts" className="flex items-center gap-1.5">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyAction, configForPlayerCount, createGame } from "../game";
-import { getLegalFlipTargets, getLegalPlacementCells } from "../turns";
+import { getLegalFlipTargets, getLegalPlacementCells, mustPass, offeredCardsFor } from "../turns";
 import { Board, GameConfig, GameState, posKey } from "../types";
 
 function deterministicRng(seed: number) {
@@ -331,6 +331,7 @@ describe("applyAction — centerEffect threads through to a real end-of-game res
       voteHistory: [],
       flipHistory: [],
       placementOrder: [],
+      handOffers: {},
       phase: "playing",
       result: null,
     };
@@ -471,78 +472,80 @@ describe("advanceTurn — round-start seat rotation", () => {
   });
 });
 
-describe("Reckoning center effect — discard & redraw hands at round 4", () => {
+describe("Hall of Fortunes center effect — per-turn 3-card offer", () => {
   const config: GameConfig = {
     boardBounds: { width: 9, height: 9, center: { x: 4, y: 4 } },
     handSize: 7,
     roundCap: 10,
     flipUnlockRound: 2,
     centerEffect: "reckoning",
-    minRoundFloor: 3,
+    minRoundFloor: 10, // keep voting out of the way for these tests
     playerCount: 2,
     aiDifficulty: "medium",
   };
 
-  function placeCurrentPlayersFirstCard(state: GameState): GameState {
+  function placeOfferedCard(state: GameState): GameState {
     const player = state.players[state.currentPlayerIndex];
+    const offered = offeredCardsFor(state, player.id)[0];
     const cell = getLegalPlacementCells(state)[0];
-    return applyAction(state, { type: "place", playerId: player.id, instanceId: player.hand[0].instanceId, position: cell });
+    return applyAction(state, { type: "place", playerId: player.id, instanceId: offered.instanceId, position: cell });
   }
 
-  function continueAnyPendingVotes(state: GameState): GameState {
-    let next = state;
-    while (next.phase === "voting") {
-      const voter = next.players.find((p) => !(p.id in next.votes))!;
-      next = applyAction(next, { type: "castVote", playerId: voter.id, vote: false });
+  it("gives every player an initial offer of up to 3 unique-by-cardId cards at deal time", () => {
+    const state = createGame(["p1", "p2"], config, deterministicRng(6));
+    for (const player of state.players) {
+      const offer = state.handOffers[player.id];
+      expect(offer.length).toBeGreaterThan(0);
+      expect(offer.length).toBeLessThanOrEqual(3);
+      expect(new Set(offer.map((c) => c.cardId)).size).toBe(offer.length); // unique by cardId
+      for (const c of offer) expect(player.hand.some((h) => h.instanceId === c.instanceId)).toBe(true);
     }
-    return next;
-  }
-
-  it("redraws every hand at round 4 via the default vote-continue path, preserving hand size but not card identity", () => {
-    // No AI players -- every vote is cast explicitly below, so the outcome is fully deterministic.
-    let state = createGame(["p1", "p2"], config, deterministicRng(6));
-
-    // Rounds 1 and 2: no vote yet (minRoundFloor is 3).
-    for (let i = 0; i < 4; i++) state = placeCurrentPlayersFirstCard(state);
-    expect(state.round).toBe(3);
-
-    // Round 3: both placements -- completing it opens a vote (round 3 >= minRoundFloor).
-    state = placeCurrentPlayersFirstCard(state);
-    state = placeCurrentPlayersFirstCard(state);
-    expect(state.phase).toBe("voting");
-    expect(state.round).toBe(3); // still round 3 -- the vote hasn't resolved yet
-
-    const beforeHandIds = state.players.map((p) => p.hand.map((c) => c.instanceId).sort());
-    const beforeHandSizes = state.players.map((p) => p.hand.length);
-
-    state = continueAnyPendingVotes(state); // both vote to continue -> round 4, Reckoning fires
-
-    expect(state.round).toBe(4);
-    const afterHandSizes = state.players.map((p) => p.hand.length);
-    const afterHandIds = state.players.map((p) => p.hand.map((c) => c.instanceId).sort());
-
-    expect(afterHandSizes).toEqual(beforeHandSizes);
-    expect(afterHandIds).not.toEqual(beforeHandIds);
   });
 
-  it("also redraws via the plain continue path when minRoundFloor is raised above 4", () => {
-    const highFloorConfig: GameConfig = { ...config, minRoundFloor: 10 };
-    let state = createGame(["p1", "p2"], highFloorConfig, deterministicRng(6));
+  it("rejects placing a hand card that isn't in the current offer", () => {
+    const state = createGame(["p1", "p2"], config, deterministicRng(6));
+    const player = state.players[0];
+    const offer = state.handOffers[player.id];
+    const notOffered = player.hand.find((c) => !offer.some((o) => o.instanceId === c.instanceId));
+    expect(notOffered).toBeDefined();
+    const cell = getLegalPlacementCells(state)[0];
+    expect(() =>
+      applyAction(state, { type: "place", playerId: player.id, instanceId: notOffered!.instanceId, position: cell })
+    ).toThrow();
+  });
 
-    // Rounds 1-2 (4 placements) plus p1's round-3 placement.
-    for (let i = 0; i < 5; i++) state = placeCurrentPlayersFirstCard(state);
-    expect(state.round).toBe(3);
+  it("consumes the offer once the offered card is placed", () => {
+    let state = createGame(["p1", "p2"], config, deterministicRng(6));
+    const playerId = state.players[0].id;
+    state = placeOfferedCard(state);
+    expect(state.handOffers[playerId]).toBeUndefined();
+  });
 
-    // p2's round-3 placement is the one that completes the round and triggers Reckoning.
-    const p2 = state.players[state.currentPlayerIndex];
-    const handWithoutRedraw = p2.hand.slice(1).map((c) => c.instanceId).sort(); // what p2's hand would be if only the placement happened
+  it("shows no offered cards for a player between their own turns, instead of leaking their whole remaining hand", () => {
+    let state = createGame(["p1", "p2"], config, deterministicRng(6));
+    const p1 = state.players[0].id;
+    state = placeOfferedCard(state); // p1's offer is now consumed; it's p2's turn
+    expect(state.players.find((p) => p.id === p1)!.hand.length).toBeGreaterThan(0); // p1 still has real cards left
+    expect(offeredCardsFor(state, p1)).toEqual([]); // but nothing should show as offered until p1's next turn
+  });
 
-    state = placeCurrentPlayersFirstCard(state);
+  it("draws a fresh offer once the player's turn comes back around", () => {
+    let state = createGame(["p1", "p2"], config, deterministicRng(6));
+    const p1 = state.players[0].id;
+    state = placeOfferedCard(state); // p1 places, consuming their offer
+    state = placeOfferedCard(state); // p2 places -- round completes, back to p1
+    expect(state.currentPlayerIndex).toBe(0); // 2p has no round-boundary rotation shift
+    expect(state.handOffers[p1]).toBeDefined();
+    expect(state.handOffers[p1]!.length).toBeGreaterThan(0);
+  });
 
-    expect(state.round).toBe(4);
-    const p2After = state.players.find((p) => p.id === p2.id)!;
-    expect(p2After.hand).toHaveLength(4);
-    expect(p2After.hand.map((c) => c.instanceId).sort()).not.toEqual(handWithoutRedraw);
+  it("mustPass is true once a player's hand (and so their offer) is empty", () => {
+    const singleCardConfig: GameConfig = { ...config, handSize: 1 };
+    let state = createGame(["p1", "p2"], singleCardConfig, deterministicRng(6));
+    expect(mustPass(state)).toBe(false);
+    state = placeOfferedCard(state); // p1 empties their hand
+    state = placeOfferedCard(state); // p2 empties theirs -- back to p1
+    expect(mustPass(state)).toBe(true);
   });
 });
 
@@ -560,5 +563,39 @@ describe("configForPlayerCount — 2p flip delay", () => {
   it("sets playerCount to match", () => {
     expect(configForPlayerCount(2).playerCount).toBe(2);
     expect(configForPlayerCount(4).playerCount).toBe(4);
+  });
+});
+
+describe("configForPlayerCount — Free Cities' random ownerless tiles", () => {
+  it("picks the same tiles for the same seed (reproducible)", () => {
+    const a = configForPlayerCount(4, "freeCities", "medium", deterministicRng(7));
+    const b = configForPlayerCount(4, "freeCities", "medium", deterministicRng(7));
+    expect(a.boardBounds.ownerless).toEqual(b.boardBounds.ownerless);
+  });
+
+  it("picks different tiles for a different seed", () => {
+    const a = configForPlayerCount(4, "freeCities", "medium", deterministicRng(7));
+    const b = configForPlayerCount(4, "freeCities", "medium", deterministicRng(99));
+    expect(a.boardBounds.ownerless).not.toEqual(b.boardBounds.ownerless);
+  });
+
+  it("scales ownerless tile count with board size", () => {
+    const small = configForPlayerCount(2, "freeCities", "medium", deterministicRng(7));
+    const large = configForPlayerCount(8, "freeCities", "medium", deterministicRng(7));
+    expect(small.boardBounds.ownerless?.length).toBeGreaterThanOrEqual(1);
+    expect(large.boardBounds.ownerless?.length ?? 0).toBeGreaterThan(small.boardBounds.ownerless?.length ?? 0);
+  });
+
+  it("every generated tile is unique and in bounds", () => {
+    const config = configForPlayerCount(8, "freeCities", "medium", deterministicRng(3));
+    const tiles = config.boardBounds.ownerless ?? [];
+    const keys = new Set(tiles.map((p) => `${p.x},${p.y}`));
+    expect(keys.size).toBe(tiles.length);
+    for (const p of tiles) {
+      expect(p.x).toBeGreaterThanOrEqual(0);
+      expect(p.x).toBeLessThan(config.boardBounds.width);
+      expect(p.y).toBeGreaterThanOrEqual(0);
+      expect(p.y).toBeLessThan(config.boardBounds.height);
+    }
   });
 });

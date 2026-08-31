@@ -10,7 +10,7 @@ import { PLAYER_TEXT_COLOR_CLASSES, playerDotColorClass } from "@/lib/config/pla
 import { estimatedResolutionFor } from "@/lib/engine/endgame";
 import { roundRotationShiftFor } from "@/lib/engine/game";
 import { currentPlayerId } from "@/lib/engine/turns";
-import { GameState } from "@/lib/engine/types";
+import { CardInstance, GameState } from "@/lib/engine/types";
 import { BreakdownPopup } from "./scoreBreakdown";
 
 /** Index-based, not identity-based -- same as Board.tsx's ownerColorClass, just the text-color palette. */
@@ -181,6 +181,9 @@ function TurnOrderTracker({ state, viewerId, nameFor }: { state: GameState; view
   // state, since nothing on GameState names "next round's start seat" directly.
   const nextRoundStartIndex = (roundStartIndex + roundRotationShiftFor(playerCount)) % playerCount;
   const nextRoundStartId = state.players[nextRoundStartIndex].id;
+  // For "Last played" below -- built once, not per-row, since every row needs the
+  // same board-by-instanceId lookup.
+  const boardByInstanceId = new Map(Array.from(state.board.values()).map((c) => [c.instanceId, c]));
 
   return (
     <div className="flex w-full flex-col gap-1">
@@ -206,6 +209,26 @@ function TurnOrderTracker({ state, viewerId, nameFor }: { state: GameState; view
           const isRoundLeader = p.id === roundStartId;
           const vote = lastVoteRound?.votes[p.id];
           const flips = state.flipHistory.filter((f) => f.playerId === p.id);
+          const lastFlip = flips[flips.length - 1];
+          // Most recently placed card still owned by this player -- searched from the
+          // end of placementOrder (chronological) for the first one whose card belongs
+          // to them.
+          let lastPlacedCard: CardInstance | undefined;
+          for (let i = state.placementOrder.length - 1; i >= 0; i--) {
+            const c = boardByInstanceId.get(state.placementOrder[i]);
+            if (c && c.ownerId === p.id) {
+              lastPlacedCard = c;
+              break;
+            }
+          }
+          // Same hidden-info rule Board.tsx's own tooltips use: only name a card if
+          // it's the viewer's own, or it's currently face-up -- otherwise a generic
+          // "a face-down card" so this never leaks a face-down card's identity.
+          const lastPlayedLabel = !lastPlacedCard
+            ? "none yet"
+            : p.id === viewerId || lastPlacedCard.faceUp
+              ? CARD_DEFS[lastPlacedCard.cardId].name
+              : "a face-down card";
           const tooltipId = `turnorder:${p.id}`;
           return (
             <div
@@ -251,20 +274,24 @@ function TurnOrderTracker({ state, viewerId, nameFor }: { state: GameState; view
                       {p.id === viewerId ? " (You)" : ""}
                     </span>
                     <span>
-                      Flipped:{" "}
-                      {flips.length === 0
-                        ? "none yet"
-                        : flips.map((f, i) => (
-                            // Colored by the flipped card's owner, not the flipper --
-                            // a player can blind-flip an opponent's face-down card
-                            // too, so this is what tells you whose card got revealed.
-                            <span key={f.instanceId}>
-                              {i > 0 && ", "}
-                              <span className={ownerTextColorClass(state, f.ownerId)}>{CARD_DEFS[f.cardId].name}</span>
-                            </span>
-                          ))}
+                      Last flip:{" "}
+                      {!lastFlip ? (
+                        "none yet"
+                      ) : (
+                        // Colored by the flipped card's owner, not the flipper -- a
+                        // player can blind-flip an opponent's face-down card too, so
+                        // this is what tells you whose card got revealed.
+                        <span className={ownerTextColorClass(state, lastFlip.ownerId)}>{CARD_DEFS[lastFlip.cardId].name}</span>
+                      )}
                     </span>
-                    <span>Last vote: {vote === undefined ? "none yet" : `${vote ? "end" : "continue"} (round ${lastVoteRound!.round})`}</span>
+                    <span>
+                      Last played:{" "}
+                      {lastPlacedCard && (p.id === viewerId || lastPlacedCard.faceUp) ? (
+                        <span className={ownerTextColorClass(state, p.id)}>{lastPlayedLabel}</span>
+                      ) : (
+                        lastPlayedLabel
+                      )}
+                    </span>
                   </div>
                 </FixedTooltip>
               )}

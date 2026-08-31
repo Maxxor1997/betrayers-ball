@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
+import { IntegerField } from "@/app/components/IntegerField";
 import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS } from "@/lib/ai/difficulty";
 import { DEFAULT_TWO_PLY_OPTIONS } from "@/lib/ai/twoPly";
-import { CENTER_EFFECTS, randomCenterEffectPool, selectableCenterEffects } from "@/lib/content/centerEffects";
+import { CENTER_EFFECTS, centerEffectLabel, randomCenterEffectPool, selectableCenterEffects } from "@/lib/content/centerEffects";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { AiDifficulty, CenterEffectId } from "@/lib/engine/types";
 import {
@@ -369,39 +370,34 @@ function SeatConfigRow({
         <>
           <label className="flex items-center gap-1">
             <span className="text-xs">ms</span>
-            <input
-              type="number"
+            <IntegerField
               min={5}
               max={ARENA_HARD_BUDGET_MAX_MS}
               value={config.timeBudgetMs}
               disabled={disabled}
-              onChange={(e) => onChange({ ...config, timeBudgetMs: e.target.value === "" ? 0 : Number(e.target.value) })}
-              onBlur={() => onChange({ ...config, timeBudgetMs: Math.max(5, Math.min(ARENA_HARD_BUDGET_MAX_MS, config.timeBudgetMs || 5)) })}
+              onChange={(timeBudgetMs) => onChange({ ...config, timeBudgetMs })}
               className="w-16 min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
             />
           </label>
           <label className="flex items-center gap-1">
             <span className="text-xs">candidates</span>
-            <input
-              type="number"
+            <IntegerField
               min={1}
+              max={Number.MAX_SAFE_INTEGER}
               value={config.maxCandidates}
               disabled={disabled}
-              onChange={(e) => onChange({ ...config, maxCandidates: e.target.value === "" ? 0 : Number(e.target.value) })}
-              onBlur={() => onChange({ ...config, maxCandidates: Math.max(1, config.maxCandidates || 1) })}
+              onChange={(maxCandidates) => onChange({ ...config, maxCandidates })}
               className="w-14 min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
             />
           </label>
           <label className="flex items-center gap-1">
             <span className="text-xs">rounds ahead</span>
-            <input
-              type="number"
+            <IntegerField
               min={1}
               max={5}
               value={config.roundsAhead}
               disabled={disabled}
-              onChange={(e) => onChange({ ...config, roundsAhead: e.target.value === "" ? 0 : Number(e.target.value) })}
-              onBlur={() => onChange({ ...config, roundsAhead: Math.max(1, Math.min(5, config.roundsAhead || 1)) })}
+              onChange={(roundsAhead) => onChange({ ...config, roundsAhead })}
               className="w-12 min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
             />
           </label>
@@ -652,7 +648,7 @@ function Arena() {
             className="w-full min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
           >
             <option value="random">Random</option>
-            <option value="none">None</option>
+            <option value="none">{centerEffectLabel("none")}</option>
             {selectableCenterEffects(playerCount).map((id) => (
               <option key={id} value={id}>
                 {CENTER_EFFECTS[id].label}
@@ -660,19 +656,13 @@ function Arena() {
             ))}
           </select>
           <label htmlFor="arena-games">Games</label>
-          <input
+          <IntegerField
             id="arena-games"
-            type="number"
             min={1}
             max={50000}
             value={gameCount}
             disabled={running}
-            // Only the digits typed so far -- NOT clamped here, since clamping mid-edit
-            // (e.g. snapping an emptied field straight back to the minimum) makes it
-            // impossible to ever get past one digit while retyping a number. Clamped
-            // once, on blur, instead.
-            onChange={(e) => setGameCount(e.target.value === "" ? 0 : Number(e.target.value))}
-            onBlur={() => setGameCount((v) => Math.max(1, Math.min(50000, v || 1)))}
+            onChange={setGameCount}
             className="w-full min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
           />
         </div>
@@ -697,16 +687,13 @@ function Arena() {
                 >
                   Hard search budget (ms)
                 </label>
-                <input
+                <IntegerField
                   id="arena-hard-budget"
-                  type="number"
                   min={5}
                   max={ARENA_HARD_BUDGET_MAX_MS}
                   value={hardBudgetMs}
                   disabled={running}
-                  // Same "don't clamp mid-edit" reasoning as the Games field above.
-                  onChange={(e) => setHardBudgetMs(e.target.value === "" ? 0 : Number(e.target.value))}
-                  onBlur={() => setHardBudgetMs((v) => Math.max(5, Math.min(ARENA_HARD_BUDGET_MAX_MS, v || 5)))}
+                  onChange={setHardBudgetMs}
                   className="w-20 min-w-0 rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-sm disabled:opacity-50 dark:border-zinc-700"
                 />
                 <span className="text-xs">(real games use {DEFAULT_TWO_PLY_OPTIONS.timeBudgetMs}ms)</span>

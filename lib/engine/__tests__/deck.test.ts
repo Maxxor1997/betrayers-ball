@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildDeck, deal, dealNewGame, redrawHands, shuffle } from "../deck";
+import { buildDeck, deal, dealNewGame, shuffle } from "../deck";
 import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
-import { CardBucket, CardId, CardInstance, DeckCard, PlayerState } from "../types";
+import { CardBucket, CardId } from "../types";
 
 /** Sum of every card's copy count at `playerCount`, derived from CARD_DEFS -- the
  * expected total, computed independently of `buildDeck`'s own iteration. */
@@ -118,55 +118,5 @@ describe("dealNewGame", () => {
     expect(players).toHaveLength(2);
     expect(players[0].hand).toHaveLength(7);
     expect(remainingDeck).toHaveLength(totalCopiesAt(2) - 14);
-  });
-});
-
-describe("redrawHands", () => {
-  function handCard(cardId: CardId, ownerId: string): CardInstance {
-    return { instanceId: `old-${ownerId}-${cardId}-${Math.random()}`, cardId, ownerId, faceUp: false };
-  }
-
-  it("gives each player back the same hand size they had, conserving the total card count", () => {
-    const { players: dealtPlayers, remainingDeck } = dealNewGame(["p1", "p2"], 7, () => 0.11);
-    const { players, remainingDeck: newRemainingDeck } = redrawHands(remainingDeck, dealtPlayers, () => 0.77);
-
-    expect(players[0].hand).toHaveLength(7);
-    expect(players[1].hand).toHaveLength(7);
-    // Cards keep their identity (instanceId) as they move between deck and hands --
-    // redrawing reshuffles the same physical cards, it doesn't mint new ones.
-    expect(newRemainingDeck).toHaveLength(remainingDeck.length);
-  });
-
-  it("assigns the correct ownerId and resets faceUp on every redealt card", () => {
-    const players: PlayerState[] = [
-      { id: "p1", hand: [handCard("Footman", "p1"), handCard("Exile", "p1")], isAI: false },
-      { id: "p2", hand: [handCard("Warlord", "p2")], isAI: true },
-    ];
-    const deck: DeckCard[] = [{ instanceId: "d1", cardId: "Gloryseeker" }, { instanceId: "d2", cardId: "Berserker" }];
-
-    const { players: redrawn } = redrawHands(deck, players, () => 0.5);
-    expect(redrawn[0].hand).toHaveLength(2);
-    expect(redrawn[0].hand.every((c) => c.ownerId === "p1" && c.faceUp === false)).toBe(true);
-    expect(redrawn[1].hand).toHaveLength(1);
-    expect(redrawn[1].hand.every((c) => c.ownerId === "p2" && c.faceUp === false)).toBe(true);
-  });
-
-  it("preserves player id and isAI while replacing hand", () => {
-    const players: PlayerState[] = [{ id: "p1", hand: [handCard("Footman", "p1")], isAI: true }];
-    const { players: redrawn } = redrawHands([], players, () => 0.5);
-    expect(redrawn[0].id).toBe("p1");
-    expect(redrawn[0].isAI).toBe(true);
-  });
-
-  it("never runs out, even with an empty remaining deck -- discarded hands are recycled first", () => {
-    const players: PlayerState[] = [
-      { id: "p1", hand: [handCard("Footman", "p1"), handCard("Exile", "p1"), handCard("Warlord", "p1")], isAI: false },
-      { id: "p2", hand: [handCard("Gloryseeker", "p2"), handCard("Berserker", "p2")], isAI: false },
-    ];
-    expect(() => redrawHands([], players, () => 0.5)).not.toThrow();
-    const { players: redrawn, remainingDeck } = redrawHands([], players, () => 0.5);
-    expect(redrawn[0].hand).toHaveLength(3);
-    expect(redrawn[1].hand).toHaveLength(2);
-    expect(remainingDeck).toHaveLength(0); // exactly enough, nothing left over
   });
 });

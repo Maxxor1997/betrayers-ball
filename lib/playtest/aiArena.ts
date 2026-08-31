@@ -172,7 +172,7 @@ export function simulateArenaGame(
   const playerIds = Array.from({ length: playerCount }, (_, i) => `arena${i}`);
   const seatDifficulties = assignSeatDifficulties(playerCount, difficulties, rng);
   const difficultyByPlayerId = new Map(playerIds.map((id, i) => [id, seatDifficulties[i]]));
-  const config = configForPlayerCount(playerCount, centerEffect);
+  const config = configForPlayerCount(playerCount, centerEffect, undefined, rng);
   const firstPlayerIndex = Math.floor(rng() * playerIds.length);
   let state = createGame(playerIds, config, rng, playerIds, firstPlayerIndex);
 
@@ -392,7 +392,7 @@ export function summarizeFixedSeatArenaStats(seatConfigs: ArenaSeatConfig[], buc
 export function simulateFixedSeatArenaGame(centerEffect: CenterEffectId, seatConfigs: ArenaSeatConfig[], buckets: ArenaSeatBuckets, rng: () => number): void {
   const playerCount = seatConfigs.length;
   const playerIds = Array.from({ length: playerCount }, (_, i) => `arena${i}`);
-  const config = configForPlayerCount(playerCount, centerEffect);
+  const config = configForPlayerCount(playerCount, centerEffect, undefined, rng);
   const firstPlayerIndex = Math.floor(rng() * playerIds.length);
   let state = createGame(playerIds, config, rng, playerIds, firstPlayerIndex);
 

@@ -3,7 +3,7 @@ import { copiesForPlayerCount, CARD_DEFS } from "../content/cards";
 import { shuffle } from "../engine/deck";
 import { computeAiVote, computeGameResult, estimateMargin } from "../engine/endgame";
 import { applyAction } from "../engine/game";
-import { applyPlace, currentPlayerId, getLegalFlipTargets, getLegalPlacementCells } from "../engine/turns";
+import { applyPlace, currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, offeredCardsFor } from "../engine/turns";
 import { CardId, CardInstance, GameAction, GameState, Position } from "../engine/types";
 import { chooseGreedyAiAction, flipCandidateScore, placementHeuristicAdjustment } from "./greedyAi";
 
@@ -269,10 +269,9 @@ export const DEFAULT_HARD_FAST_OPTIONS: HardFastOptions = {
 /** Same ranking Medium's own choosePlacement uses (estimateMargin + placementHeuristicAdjustment), kept to placements only -- see chooseHardFastAction for why flip/pass aren't touched here. Pruning to the top few keeps the round-robin evaluation loop below cheap enough to run several passes within budget. */
 function rankedPlacementCandidates(state: GameState, playerId: string, maxCandidates: number): { instanceId: string; position: Position }[] {
   const start = performance.now();
-  const player = state.players.find((p) => p.id === playerId)!;
   const legalCells = getLegalPlacementCells(state);
   const candidates: { instanceId: string; position: Position }[] = [];
-  for (const card of player.hand) {
+  for (const card of offeredCardsFor(state, playerId)) {
     for (const position of legalCells) candidates.push({ instanceId: card.instanceId, position });
   }
 
@@ -348,13 +347,13 @@ function fastRolloutAction(state: GameState, playerId: string, rng: Rng): GameAc
     return { type: "flip", playerId, instanceId: target.instanceId };
   }
 
-  const player = state.players.find((p) => p.id === playerId)!;
+  const candidates = offeredCardsFor(state, playerId);
   const legalCells = getLegalPlacementCells(state);
-  if (player.hand.length === 0 || legalCells.length === 0) {
+  if (candidates.length === 0 || legalCells.length === 0) {
     return { type: "pass", playerId };
   }
 
-  const card = player.hand[Math.floor(rng() * player.hand.length)];
+  const card = candidates[Math.floor(rng() * candidates.length)];
 
   let bestCells: Position[] = [];
   let bestCount = -1;

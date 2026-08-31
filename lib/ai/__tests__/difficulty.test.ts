@@ -5,8 +5,8 @@ import { chooseGreedyAiAction } from "../greedyAi";
 import { chooseRandomAiAction } from "../randomAi";
 import { chooseExpertVote, chooseHardFastAction, DEFAULT_HARD_FAST_OPTIONS } from "../hardFast";
 import { chooseTwoPlyAction, TwoPlyOptions } from "../twoPly";
-import { applyAction, createGame, DEFAULT_2P_CONFIG } from "../../engine/game";
-import { currentPlayerId } from "../../engine/turns";
+import { applyAction, configForPlayerCount, createGame, DEFAULT_2P_CONFIG } from "../../engine/game";
+import { currentPlayerId, offeredCardsFor } from "../../engine/turns";
 import { GameState } from "../../engine/types";
 
 /**
@@ -87,6 +87,26 @@ describe("chooseAiActionForDifficulty", () => {
       while (state.phase !== "ended" && iterations < 500) {
         const playerId = activePlayerId(state);
         const action = chooseAiActionForDifficulty(state, playerId, difficulty, rng, FAST_TWO_PLY_OPTIONS);
+        state = applyAction(state, action, rng, (s, pId, r) => computeVoteForDifficulty(s, pId, difficulty, r, FAST_TWO_PLY_OPTIONS));
+        iterations++;
+      }
+      expect(state.phase).toBe("ended");
+    }
+  });
+
+  it("at Hall of Fortunes, every difficulty only ever places one of the current offered cards", () => {
+    const config = configForPlayerCount(2, "reckoning");
+    for (const difficulty of AI_DIFFICULTIES) {
+      const rng = deterministicRng(3);
+      let state: GameState = createGame(["p1", "p2"], config, rng);
+      let iterations = 0;
+      while (state.phase !== "ended" && iterations < 500) {
+        const playerId = activePlayerId(state);
+        const action = chooseAiActionForDifficulty(state, playerId, difficulty, rng, FAST_TWO_PLY_OPTIONS);
+        if (action.type === "place") {
+          const offer = offeredCardsFor(state, playerId);
+          expect(offer.some((c) => c.instanceId === action.instanceId)).toBe(true);
+        }
         state = applyAction(state, action, rng, (s, pId, r) => computeVoteForDifficulty(s, pId, difficulty, r, FAST_TWO_PLY_OPTIONS));
         iterations++;
       }

@@ -391,7 +391,7 @@ export function* simulateOneGameSteps(
   aiDifficulty: AiDifficulty = DEFAULT_AI_DIFFICULTY
 ): Generator<GameState, GameState, void> {
   const playerIds = Array.from({ length: playerCount }, (_, i) => `sim${i}`);
-  const config = configForPlayerCount(playerCount, centerEffect, aiDifficulty);
+  const config = configForPlayerCount(playerCount, centerEffect, aiDifficulty, rng);
   const firstPlayerIndex = Math.floor(rng() * playerIds.length);
   let state = createGame(playerIds, config, rng, playerIds, firstPlayerIndex);
 

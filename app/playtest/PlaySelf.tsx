@@ -181,7 +181,11 @@ export function PlaySelf({
           state.players.map((p) => p.id)
         )
       : null;
-  const resolvedCards = endResult ? new Map(endResult.cards.map((c) => [c.instanceId, c])) : undefined;
+  // kingslayerCard (Kingslayer only -- see resolveBoard's own doc comment) isn't part
+  // of `cards`, so it's merged in here too.
+  const resolvedCards = endResult
+    ? new Map([...endResult.cards, ...(endResult.kingslayerCard ? [endResult.kingslayerCard] : [])].map((c) => [c.instanceId, c]))
+    : undefined;
 
   return (
     <div className="flex w-full flex-1 flex-col gap-6 lg:flex-row lg:items-start lg:justify-center">

@@ -39,6 +39,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     voteHistory: [],
     flipHistory: [],
     placementOrder: [],
+    handOffers: {},
     phase: "playing",
     result: null,
     ...overrides,

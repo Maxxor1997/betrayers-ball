@@ -25,7 +25,7 @@ import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { playerAccentClass, playerDotColorClass } from "@/lib/config/players";
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
-import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
+import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass, offeredCardsFor } from "@/lib/engine/turns";
 import { AiDifficulty, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { LobbyState, SeatInfo } from "@/lib/server/protocol";
 
@@ -516,7 +516,12 @@ function GameView({
     state.phase === "ended"
       ? resolveBoard(state.board, state.config.boardBounds, state.round, state.config.centerEffect, state.players.map((p) => p.id))
       : null;
-  const resolvedCards = endResult ? new Map(endResult.cards.map((c) => [c.instanceId, c])) : undefined;
+  // kingslayerCard (Kingslayer only -- see resolveBoard's own doc comment) isn't part
+  // of `cards`, so it's merged in here too -- this is the one Map every "look up a
+  // resolved card by instanceId" consumer (BoardGrid's hover) reads from.
+  const resolvedCards = endResult
+    ? new Map([...endResult.cards, ...(endResult.kingslayerCard ? [endResult.kingslayerCard] : [])].map((c) => [c.instanceId, c]))
+    : undefined;
 
   function placeCard(instanceId: string, pos: Position) {
     if (!legalCellKeys.has(posKey(pos))) return;
@@ -700,7 +705,7 @@ function GameView({
       {(state.phase === "playing" || state.phase === "voting") && (
         <div className="flex w-full flex-col items-center gap-3">
           <Hand
-            cards={me.hand}
+            cards={offeredCardsFor(state, myPlayerId)}
             selectedInstanceId={selectedInstanceId}
             onCardClick={handleHandCardClick}
             onCardDragStart={handleHandDragStart}

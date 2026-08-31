@@ -80,11 +80,16 @@ export function redactedStateFor(state: GameState, viewerId: string): GameState 
   const players: PlayerState[] = state.players.map((p) => (p.id === viewerId ? p : { ...p, hand: [] }));
   const votes = Object.fromEntries(Object.entries(state.votes).filter(([playerId]) => playerId === viewerId));
   const board = state.phase === "ended" ? state.board : redactedBoardFor(state.board, viewerId);
+  // Hall of Fortunes' handOffers holds real CardInstance objects (with real cardId) --
+  // same hidden-info rule as `hand` above, an opponent's offer must not leak over the
+  // wire before it's played.
+  const handOffers = Object.fromEntries(Object.entries(state.handOffers).filter(([playerId]) => playerId === viewerId));
   return {
     ...state,
     board,
     deck: [],
     players,
     votes,
+    handOffers,
   };
 }

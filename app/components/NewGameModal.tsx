@@ -1,7 +1,7 @@
 "use client";
 
 import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS } from "@/lib/ai/difficulty";
-import { CENTER_EFFECTS, isAvailableAtPlayerCount, selectableCenterEffects } from "@/lib/content/centerEffects";
+import { CENTER_EFFECTS, centerEffectLabel, isAvailableAtPlayerCount, selectableCenterEffects } from "@/lib/content/centerEffects";
 import { SELECTABLE_LOBBY_SIZES } from "@/lib/config/players";
 import { AiDifficulty, CenterEffectId } from "@/lib/engine/types";
 
@@ -140,7 +140,7 @@ export function NewGameModal({
             className={controlClass}
           >
             <option value="random">Random</option>
-            <option value="none">None</option>
+            <option value="none">{centerEffectLabel("none")}</option>
             {selectableCenterEffects(setup.playerCount).map((id) => (
               <option key={id} value={id}>
                 {CENTER_EFFECTS[id].label}

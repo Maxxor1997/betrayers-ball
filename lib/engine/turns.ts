@@ -1,7 +1,8 @@
 import { getAdjacentCards, getLegalPlacementPositions, isOwnerlessPosition, parsePosKey } from "./board";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
-import { Board, BoardBounds, CardInstance, FlipAction, GameConfig, GameState, PlaceAction, Position, posKey } from "./types";
+import { Rng, shuffle } from "./deck";
+import { Board, BoardBounds, CardId, CardInstance, FlipAction, GameConfig, GameState, PlaceAction, Position, posKey } from "./types";
 
 /** True if `pos` is adjacent to a card whose def blocks its neighbors from being flipped (e.g. Cyclops). */
 function isFlipBlockedAt(board: Board, bounds: BoardBounds, pos: Position): boolean {
@@ -58,10 +59,50 @@ export function getLegalPlacementCells(state: GameState): Position[] {
   return getLegalPlacementPositions(state.board, state.config.boardBounds, { anywhere });
 }
 
+/**
+ * Hall of Fortunes only (see centerEffects.ts's `reckoning`): draws up to 3
+ * unique-by-cardId cards at random from `hand` -- duplicate copies of the same cardId
+ * collapse to one representative instance first (any copy is equally playable), then
+ * up to 3 of those are picked with equal probability.
+ */
+export function drawHandOffer(hand: CardInstance[], rng: Rng): CardInstance[] {
+  const seen = new Set<CardId>();
+  const uniqueByCard: CardInstance[] = [];
+  for (const c of hand) {
+    if (seen.has(c.cardId)) continue;
+    seen.add(c.cardId);
+    uniqueByCard.push(c);
+  }
+  return shuffle(uniqueByCard, rng).slice(0, 3);
+}
+
+/**
+ * Which of a player's hand cards are actually legal to place right now -- normally
+ * the player's whole hand, but Hall of Fortunes restricts it to that player's current
+ * 3-card offer (see GameState.handOffers). Every legality check and AI/UI "which
+ * cards can I place" call site should read hand-candidates through this, not
+ * `player.hand` directly.
+ *
+ * At Hall of Fortunes specifically, a player's offer is deleted the moment they place
+ * the offered card (see applyPlace) and isn't refreshed until their next turn actually
+ * starts (see game.ts's ensureHandOfferForCurrentPlayer) -- so for the whole stretch of
+ * opponents' turns in between, there's genuinely no live offer for them yet. Falling
+ * back to their full hand in that gap (like the non-Reckoning branch below correctly
+ * does) would leak every other still-unoffered card in their hand on their own screen
+ * between turns -- an empty offer is the correct, honest answer there, not a fallback.
+ */
+export function offeredCardsFor(state: GameState, playerId: string): CardInstance[] {
+  if (state.config.centerEffect !== "reckoning") {
+    const player = state.players.find((p) => p.id === playerId);
+    return player?.hand ?? [];
+  }
+  return state.handOffers[playerId] ?? [];
+}
+
 /** True if the current player has no legal move and must pass this turn. */
 export function mustPass(state: GameState): boolean {
   const player = state.players[state.currentPlayerIndex];
-  if (player.hand.length === 0) return true;
+  if (offeredCardsFor(state, player.id).length === 0) return true;
   return getLegalPlacementCells(state).length === 0;
 }
 
@@ -106,6 +147,11 @@ export function applyPlace(state: GameState, action: PlaceAction): GameState {
   if (handIndex === -1) throw new Error(`${action.playerId} has no card ${action.instanceId} in hand`);
   const card = player.hand[handIndex];
 
+  const offer = state.handOffers[action.playerId];
+  if (offer && !offer.some((c) => c.instanceId === action.instanceId)) {
+    throw new Error(`${CENTER_EFFECTS[state.config.centerEffect].label}: that card isn't one of your currently offered options`);
+  }
+
   const bounds = state.config.boardBounds;
   if (isOwnerlessPosition(action.position, bounds)) throw new Error("Cannot place on the center tile");
   const anywhere = CENTER_EFFECTS[state.config.centerEffect].placementAnywhere;
@@ -131,7 +177,13 @@ export function applyPlace(state: GameState, action: PlaceAction): GameState {
     i === state.currentPlayerIndex ? { ...p, hand: [...p.hand.slice(0, handIndex), ...p.hand.slice(handIndex + 1)] } : p
   );
 
-  return { ...state, board, players, placementOrder: [...state.placementOrder, card.instanceId] };
+  let handOffers = state.handOffers;
+  if (offer) {
+    handOffers = { ...state.handOffers };
+    delete handOffers[action.playerId];
+  }
+
+  return { ...state, board, players, placementOrder: [...state.placementOrder, card.instanceId], handOffers };
 }
 
 export function applyPass(state: GameState, playerId: string): GameState {

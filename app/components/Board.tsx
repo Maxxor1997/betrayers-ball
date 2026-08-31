@@ -4,10 +4,10 @@ import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 import { CardArt } from "@/app/components/CardArt";
 import { FixedTooltip } from "@/app/components/CardCatalog";
 import { CARD_DEFS } from "@/lib/content/cards";
-import { CENTER_EFFECTS, centerEffectDescription, pseudoCardLiveValue } from "@/lib/content/centerEffects";
+import { CENTER_EFFECTS, centerEffectDescription, KINGSLAYER_BASE_VALUE, KINGSLAYER_INSTANCE_ID } from "@/lib/content/centerEffects";
 import { inBounds, isOwnerlessPosition, parsePosKey } from "@/lib/engine/board";
 import { PLAYER_COLOR_CLASSES } from "@/lib/config/players";
-import { computeNegatedInstanceIds, flipBoostTargets, flipDisruptionTargets, ResolvedCard } from "@/lib/engine/resolution";
+import { flipBoostTargets, flipDisruptionTargets, ResolvedCard } from "@/lib/engine/resolution";
 import { GameState, Position, posKey } from "@/lib/engine/types";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useHasHover } from "@/app/hooks/useHasHover";
@@ -261,14 +261,36 @@ export function BoardGrid({
           const isOwnerless = isOwnerlessPosition(pos, state.config.boardBounds);
           const card = state.board.get(key);
           const isLegal = forceAllClickable || legalCellKeys.has(key);
+          // No Man's Land's -2 hits every card on the center's row AND column (see
+          // noMansLand's valueModifiers) -- a plain grey wash over every cell in that
+          // cross (occupied or not) makes the debuffed zone visible at a glance,
+          // instead of only discovering it card by card via a breakdown popup.
+          const inNoMansLandCross =
+            state.config.centerEffect === "noMansLand" &&
+            (pos.x === state.config.boardBounds.center.x || pos.y === state.config.boardBounds.center.y);
+          // An inset box-shadow, not a separate absolutely-positioned overlay div --
+          // painted directly on each cell's own bordered/rounded box (whichever
+          // element that is per branch below), so it's pixel-identical to that box no
+          // matter how its own wrapper happens to be sized, instead of relying on a
+          // sibling `inset-0` div to independently end up the same size.
+          const noMansLandShadowClass = inNoMansLandCross ? "shadow-[inset_0_0_0_9999px_rgba(113,113,122,0.1)]" : "";
 
           if (isOwnerless) {
             const effect = CENTER_EFFECTS[state.config.centerEffect];
             const label = effect.ownerlessLabel ?? effect.label;
             const detail = centerEffectDescription(state.config.centerEffect, state.config);
-            const negated = computeNegatedInstanceIds(state.board, state.config.boardBounds);
-            const liveValue = pseudoCardLiveValue(state.config.centerEffect, state.board, state.config.boardBounds, negated);
-            const displayLabel = liveValue === null ? label : `${label} (${liveValue})`;
+            // Always the flat base value, never the live computed one -- some of its
+            // adjacency modifiers (Bannerman's, notably) don't require face-up, so
+            // showing the true live value would leak a face-down card's identity
+            // before anyone actually flips it. The real end-of-game math is untouched
+            // (see kingslayer's postResolution in centerEffects.ts) -- this is a
+            // display-only simplification.
+            const displayLabel = state.config.centerEffect === "kingslayer" ? `${label} (${KINGSLAYER_BASE_VALUE})` : label;
+            // Only exists once the game has ended (see resolvedCards' own doc comment)
+            // and only for Kingslayer, which is the only location whose center itself
+            // has a real value/breakdown to show -- see its postResolution hook in
+            // centerEffects.ts.
+            const kingslayerCard = resolvedCards?.get(KINGSLAYER_INSTANCE_ID);
             const tooltipId = `board:${key}`;
             return (
               <div
@@ -307,14 +329,19 @@ export function BoardGrid({
                     @container cutoff, just a different fallback since this tile has
                     no icon to fall back to. */}
                 <div
-                  className={`hidden aspect-square w-full items-center justify-center overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400 @[52px]:flex`}
+                  className={`hidden aspect-square w-full items-center justify-center overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400 @[52px]:flex ${noMansLandShadowClass}`}
                 >
                   {displayLabel}
                 </div>
-                <div className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} bg-current`} />
+                <div className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} bg-current ${noMansLandShadowClass}`} />
                 {activeTooltipId === tooltipId && activeRect && (
                   <FixedTooltip rect={activeRect}>
                     {displayLabel} — {detail}
+                    {kingslayerCard && (
+                      <div className="mt-1 border-t border-white/20 pt-1 dark:border-black/20">
+                        <BreakdownPopup breakdown={kingslayerCard.breakdown} finalValue={kingslayerCard.finalValue} />
+                      </div>
+                    )}
                   </FixedTooltip>
                 )}
               </div>
@@ -424,7 +451,7 @@ export function BoardGrid({
                   title={clickable ? "Tap to flip face-up" : undefined}
                   className={`@container flex aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 p-1 text-center ${ownerColorClass(state, card.ownerId)} ${
                     clickable ? "cursor-pointer ring-2 ring-amber-400" : ""
-                  } ${highlighted ? "ring-2 ring-sky-400 dark:ring-sky-500" : ""} ${flippingIds.has(card.instanceId) ? "[perspective:600px]" : ""} ${disruptedIds.has(card.instanceId) ? "card-disrupted" : ""} ${boostedIds.has(card.instanceId) ? "card-boosted" : ""}`}
+                  } ${highlighted ? "ring-2 ring-sky-400 dark:ring-sky-500" : ""} ${flippingIds.has(card.instanceId) ? "[perspective:600px]" : ""} ${disruptedIds.has(card.instanceId) ? "card-disrupted" : ""} ${boostedIds.has(card.instanceId) ? "card-boosted" : ""} ${noMansLandShadowClass}`}
                 >
                   {flippingIds.has(card.instanceId) ? (
                     // Briefly renders BOTH faces stacked in 3D (see .card-flip-* in
@@ -499,7 +526,7 @@ export function BoardGrid({
                     ? "border-emerald-600 bg-emerald-200 dark:bg-emerald-800"
                     : "border-emerald-300/70 bg-emerald-50/50 dark:border-emerald-800/70 dark:bg-emerald-950/40"
                   : "border-zinc-200 dark:border-zinc-800"
-              }`}
+              } ${noMansLandShadowClass}`}
             />
           );
         })

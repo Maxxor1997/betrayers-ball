@@ -1,6 +1,7 @@
 import { getAdjacentCards, inBounds, parsePosKey, posKey } from "@/lib/engine/board";
-import { redrawHands, Rng } from "@/lib/engine/deck";
-import { FLOORED_AT_ZERO_LABEL, type ResolvedCard } from "@/lib/engine/resolution";
+import { CARD_DEFS } from "@/lib/content/cards";
+import { Rng } from "@/lib/engine/deck";
+import { computeSyntheticCardContributions, FLOORED_AT_ZERO_LABEL, type ResolvedCard, type ScoreContribution } from "@/lib/engine/resolution";
 import { Board, BoardBounds, CardInstance, CenterEffectId, GameConfig, GameState, Position } from "@/lib/engine/types";
 
 /**
@@ -45,6 +46,15 @@ export interface CenterEffectDef {
   valueModifiers?: (board: Board, bounds: BoardBounds, addDelta: (instanceId: string, amount: number, label: string) => void) => void;
 
   /**
+   * Kingslayer only: the printed base a face-down Facestealer/Infiltrator should treat
+   * the center as, when comparing it against its other adjacent face-up candidates for
+   * its swap (see resolution.ts's computeIdentitySwaps). Undefined everywhere else --
+   * an ownerless tile with no real, swappable value of its own is simply never a
+   * candidate.
+   */
+  facestealerCandidateBase?: number;
+
+  /**
    * Post-resolution award/zeroing off final totals. May mutate `cards`/`totalsByOwner`
    * in place (e.g. zeroing a card's finalValue); returned fields become part of the
    * ResolutionResult.
@@ -52,11 +62,14 @@ export interface CenterEffectDef {
   postResolution?: (ctx: {
     board: Board;
     bounds: BoardBounds;
+    round: number;
     negated: Set<string>;
     cards: ResolvedCard[];
     totalsByOwner: Record<string, number>;
     playerIds?: string[];
-  }) => { kingslayerHit?: string[] };
+    /** instanceIds of any face-down Facestealer(s) that won the center as their swap target instead of a real neighbor -- see facestealerCandidateBase. */
+    centerSwaps: Set<string>;
+  }) => { kingslayerHit?: string[]; kingslayerCard?: ResolvedCard };
 
   /** Overrides the default `round >= flipUnlockRound` gate. Unused by any current effect -- kept for a future round-gating effect. */
   flipGate?: (round: number, config: GameConfig) => boolean;
@@ -72,7 +85,7 @@ export interface CenterEffectDef {
    * Populated into `BoardBounds.ownerless` once, at config-build time
    * (configForPlayerCount).
    */
-  ownerlessPositions?: (bounds: BoardBounds) => Position[];
+  ownerlessPositions?: (bounds: BoardBounds, rng: Rng) => Position[];
   /** UI label shown on each ownerless tile when set. Defaults to `label`. */
   ownerlessLabel?: string;
 
@@ -81,62 +94,26 @@ export interface CenterEffectDef {
 }
 
 /**
- * Kingslayer only: the center is "a scorable card worth KINGSLAYER_BASE_VALUE
- * (modifiable by adjacent buff/dent effects during resolution)". A fully general
- * version would mean synthesizing a fake CardInstance for the center and teaching
- * every CardId-keyed lookup (deck building, CARD_DEFS) to tolerate a non-drawable
- * pseudo-card -- real rework, not additive. This scopes it to the flat, identity-blind
- * positional modifiers: Bannerman (+1 -- center is never a Footman), Earthshaker (-1 if
- * face-up and center shares its row), Skysplitter (-3 if directly above/below).
- */
-export function computeCenterModifier(board: Board, bounds: BoardBounds, negated: Set<string>): number {
-  let delta = 0;
-  const center = bounds.center;
-  for (const [key, c] of board.entries()) {
-    if (negated.has(c.instanceId)) continue;
-    const pos = parsePosKey(key);
-    const dx = Math.abs(pos.x - center.x);
-    const dy = Math.abs(pos.y - center.y);
-
-    switch (c.cardId) {
-      case "Bannerman":
-        if (dx + dy === 1) delta += 1;
-        break;
-      case "Earthshaker":
-        if (c.faceUp && pos.y === center.y) delta -= 1;
-        break;
-      case "Skysplitter":
-        if (pos.x === center.x && dy === 1) delta -= 3;
-        break;
-      default:
-        break;
-    }
-  }
-  return delta;
-}
-
-/** Round the Reckoning center effect fires on -- discard & redraw every hand. */
-const RECKONING_TRIGGER_ROUND = 4;
-
-/**
- * Base "value" of the Kingslayer pseudo-card, before computeCenterModifier's adjacency
- * adjustments -- exported so tests can compute expected totals from this instead of
- * duplicating the literal.
+ * Base "value" of the Kingslayer pseudo-card, before any adjacency contributions --
+ * exported so tests can compute expected totals from this instead of duplicating the
+ * literal.
  */
 export const KINGSLAYER_BASE_VALUE = 5;
 
 /**
- * Live (pre-resolution) value of the center pseudo-card for Kingslayer, for UI
- * display -- same base + computeCenterModifier math postResolution uses, just run
- * against the board as it currently sits instead of at scoring time. Null for every
- * other center effect, including Champion of the Weak (The Lazaret) -- it doubles an
- * already-placed card's value rather than awarding a pseudo-card of its own, so there's
- * nothing to show a live value for.
+ * Fixed instanceId/ownerId for Kingslayer's synthetic center "card" -- see
+ * computeSyntheticCardContributions and the `kingslayer` postResolution hook below.
+ * Never appears in a real GameState/board -- only ever constructed transiently, for
+ * the one game (Kingslayer) that needs it, and returned separately as
+ * ResolutionResult.kingslayerCard, never folded into `cards`/`totalsByOwner`.
+ * KINGSLAYER_OWNER_ID never collides with a real seat id (those are always `p${n}`/
+ * `ai-${n}`), and nothing reads it as a real player -- see this file's own doc
+ * comment on why this stays a display-only, scoring-time fiction rather than a real
+ * extra seat.
  */
-export function pseudoCardLiveValue(id: CenterEffectId, board: Board, bounds: BoardBounds, negated: Set<string>): number | null {
-  if (id !== "kingslayer") return null;
-  return KINGSLAYER_BASE_VALUE + computeCenterModifier(board, bounds, negated);
-}
+export const KINGSLAYER_INSTANCE_ID = "__kingslayer_center__";
+const KINGSLAYER_OWNER_ID = "__kingslayer__";
+
 
 /** Splits a location's label around its titleHighlight for a two-tone title (default-color prefix/suffix, themeColorClass-colored highlight) -- see CenterEffectDef.titleHighlight. Falls back to the whole label as the highlight if it's somehow not found (shouldn't happen for any real entry below). */
 export function splitTitle(def: CenterEffectDef): { prefix: string; highlight: string; suffix: string } {
@@ -159,7 +136,12 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     themeColorClass: "text-cyan-700 dark:text-cyan-400",
     titleHighlight: "Mirror",
     description:
-      "Each card has one mirror position (same column, opposite side of the center row). If occupied, both cards get +1, or +2 each if they're the same card type.",
+      "Two extra ownerless tiles sit at the top and bottom of the center column. Each card has one mirror position (same column, opposite side of the center row). If occupied, both cards get +1, or +2 each if they're the same card type.",
+    ownerlessLabel: "Pool",
+    ownerlessPositions: (bounds) => {
+      const { x } = bounds.center;
+      return [{ x, y: 0 }, { x, y: bounds.height - 1 }];
+    },
     valueModifiers: (board, bounds, addDelta) => {
       for (const [key, c] of board.entries()) {
         const pos = parsePosKey(key);
@@ -175,7 +157,19 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "Contested Lands",
     themeColorClass: "text-orange-700 dark:text-orange-500",
     titleHighlight: "Contested",
-    description: "Every card gains +1 for each distinct opposing player with a card adjacent to it.",
+    description:
+      "Four ownerless checkpoints sit at the midpoint of each edge instead of the center. Every card gains +1 for each distinct opposing player with a card adjacent to it.",
+    ownerlessLabel: "Checkpoint",
+    ownerlessPositions: (bounds) => {
+      const midX = Math.floor(bounds.width / 2);
+      const midY = Math.floor(bounds.height / 2);
+      return [
+        { x: midX, y: 0 },
+        { x: midX, y: bounds.height - 1 },
+        { x: 0, y: midY },
+        { x: bounds.width - 1, y: midY },
+      ];
+    },
     valueModifiers: (board, bounds, addDelta) => {
       for (const [key, c] of board.entries()) {
         const pos = parsePosKey(key);
@@ -196,11 +190,16 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "The Lazaret",
     themeColorClass: "text-lime-700 dark:text-lime-500",
     titleHighlight: "Lazaret",
-    description: "At the end of the game, each player's single lowest-valued face-down card is worth double (a tie is broken by whichever was placed last).",
+    description:
+      "Two ownerless quarantine wards sit at opposite corners instead of the center. At the end of the game, each player's single lowest-valued card is worth double (a tie is broken by whichever was placed last).",
+    ownerlessLabel: "Ward",
+    ownerlessPositions: (bounds) => [
+      { x: 0, y: 0 },
+      { x: bounds.width - 1, y: bounds.height - 1 },
+    ],
     postResolution: ({ cards, totalsByOwner }) => {
       const byOwner = new Map<string, ResolvedCard[]>();
       for (const c of cards) {
-        if (c.faceUp) continue;
         const list = byOwner.get(c.ownerId);
         if (list) list.push(c);
         else byOwner.set(c.ownerId, [c]);
@@ -216,7 +215,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
           if (c.finalValue <= lowest.finalValue) lowest = c;
         }
         const bonus = lowest.finalValue;
-        lowest.breakdown.push({ label: `${CENTER_EFFECTS.championOfTheWeak.label} (lowest face-down, doubled)`, amount: bonus, source: "external" });
+        lowest.breakdown.push({ label: `${CENTER_EFFECTS.championOfTheWeak.label} (lowest value, doubled)`, amount: bonus, source: "external" });
         lowest.finalValue += bonus;
         totalsByOwner[lowest.ownerId] = (totalsByOwner[lowest.ownerId] ?? 0) + bonus;
       }
@@ -228,7 +227,13 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "Dragon Gate",
     themeColorClass: "text-purple-700 dark:text-purple-500",
     titleHighlight: "Dragon",
-    description: "At the end of the game, each player's single highest-valued face-up card is worth double (a tie is broken by whichever was placed last).",
+    description:
+      "The center is free to play on. Instead, the ownerless tiles sit directly left and right of it. At the end of the game, each player's single highest-valued face-up card is worth double (a tie is broken by whichever was placed last).",
+    ownerlessLabel: "Gate",
+    ownerlessPositions: (bounds) => {
+      const { x, y } = bounds.center;
+      return [{ x: x - 1, y }, { x: x + 1, y }].filter((p) => inBounds(p, bounds));
+    },
     postResolution: ({ cards, totalsByOwner }) => {
       const byOwner = new Map<string, ResolvedCard[]>();
       for (const c of cards) {
@@ -268,11 +273,16 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "Hall of Fortunes",
     themeColorClass: "text-rose-700 dark:text-rose-500",
     titleHighlight: "Fortunes",
-    description: "At the start of round 4, every player discards their hand and draws the same number of fresh cards.",
-    onRoundStart: (state, newRound, rng) => {
-      if (newRound !== RECKONING_TRIGGER_ROUND) return { players: state.players, deck: state.deck };
-      const { players, remainingDeck } = redrawHands(state.deck, state.players, rng);
-      return { players, deck: remainingDeck };
+    description:
+      "Three ownerless pillars sit in a row through the center, each with a one-tile gap between them. On each of your turns, you may only place one of 3 random, unique cards offered from your hand (equal odds each) -- a fresh offer is drawn once the previous one is used.",
+    ownerlessLabel: "Pillar",
+    ownerlessPositions: (bounds) => {
+      const { x, y } = bounds.center;
+      return [
+        { x: x - 2, y },
+        { x, y },
+        { x: x + 2, y },
+      ].filter((p) => inBounds(p, bounds));
     },
   },
 
@@ -301,6 +311,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     themeColorClass: "text-teal-700 dark:text-teal-500",
     titleHighlight: "Isles",
     description: "The center is free to play on. Instead, the ownerless tiles sit at the far left and far right ends of its row.",
+    disabled: true,
     ownerlessLabel: "Island",
     ownerlessPositions: (bounds) => {
       const { y } = bounds.center;
@@ -315,8 +326,62 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     label: "The Free Cities",
     themeColorClass: "text-amber-600 dark:text-amber-400",
     titleHighlight: "Free",
-    description: "No adjacency requirement -- any empty tile on the board is a legal placement.",
+    description: "No adjacency requirement -- any empty tile on the board is a legal placement. A handful of scattered tiles are ownerless.",
+    ownerlessLabel: "City",
+    ownerlessPositions: (bounds, rng) => {
+      // Tunable: 1 tile at 2p/3p board sizes, 2 at 4p/5p, 3 at 6p/7p, 4 at 8p.
+      const count = Math.max(1, Math.round((bounds.width * bounds.height) / 30));
+      const all: Position[] = [];
+      for (let x = 0; x < bounds.width; x++) {
+        for (let y = 0; y < bounds.height; y++) all.push({ x, y });
+      }
+      // Fisher-Yates partial shuffle, driven by the passed rng so this is reproducible
+      // under a seeded rng (tests, replay) and genuinely random otherwise.
+      for (let i = all.length - 1; i > all.length - 1 - count && i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [all[i], all[j]] = [all[j], all[i]];
+      }
+      return all.slice(all.length - count);
+    },
     placementAnywhere: true,
+  },
+
+  borderlands: {
+    label: "The Frontier",
+    themeColorClass: "text-stone-700 dark:text-stone-400",
+    titleHighlight: "Frontier",
+    ownerlessLabel: "Outpost",
+    description: "Cards on the board's edge gain +1. Cards in a corner instead gain +2 (flat, not stacked with the edge bonus).",
+    valueModifiers: (board, bounds, addDelta) => {
+      for (const [key, c] of board.entries()) {
+        const pos = parsePosKey(key);
+        const onEdge = pos.x === 0 || pos.y === 0 || pos.x === bounds.width - 1 || pos.y === bounds.height - 1;
+        if (!onEdge) continue;
+        const onCorner = (pos.x === 0 || pos.x === bounds.width - 1) && (pos.y === 0 || pos.y === bounds.height - 1);
+        addDelta(c.instanceId, onCorner ? 2 : 1, CENTER_EFFECTS.borderlands.label);
+      }
+    },
+  },
+
+  noMansLand: {
+    label: "No Man's Land",
+    themeColorClass: "text-neutral-700 dark:text-neutral-400",
+    titleHighlight: "No Man's Land",
+    description: "The ownerless tiles sit at the board's four corners instead of the center. Any card on the center's row or column takes -2.",
+    ownerlessLabel: "Trench",
+    ownerlessPositions: (bounds) => [
+      { x: 0, y: 0 },
+      { x: bounds.width - 1, y: 0 },
+      { x: 0, y: bounds.height - 1 },
+      { x: bounds.width - 1, y: bounds.height - 1 },
+    ],
+    valueModifiers: (board, bounds, addDelta) => {
+      const { x, y } = bounds.center;
+      for (const [key, c] of board.entries()) {
+        const pos = parsePosKey(key);
+        if (pos.x === x || pos.y === y) addDelta(c.instanceId, -2, CENTER_EFFECTS.noMansLand.label);
+      }
+    },
   },
 
   kingslayer: {
@@ -326,10 +391,87 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     // The board tile itself just says "Kingslayer" -- "Kingslayer's Court" is the
     // location's full name (catalog, New Game picker), too long to sit on the tile.
     ownerlessLabel: "Kingslayer",
-    description: `Kingslayer counts as a card worth ${KINGSLAYER_BASE_VALUE} (modified by buffs/debuffs). After scoring, its value is subtracted from the highest-value card(s) on the board -- tied cards all get hit.`,
-    postResolution: ({ board, bounds, negated, cards, totalsByOwner }) => {
-      if (cards.length === 0) return {};
-      const kingslayerValue = KINGSLAYER_BASE_VALUE + computeCenterModifier(board, bounds, negated);
+    // A face-down Facestealer/Infiltrator can target the center as its swap
+    // candidate too, same as any real card -- see resolution.ts's
+    // computeIdentitySwaps.
+    facestealerCandidateBase: KINGSLAYER_BASE_VALUE,
+    description: `Kingslayer counts as a card worth ${KINGSLAYER_BASE_VALUE}. After scoring, its value is subtracted from the highest-value card(s) on the board -- tied cards all get hit.`,
+    postResolution: ({ board, bounds, round, cards, totalsByOwner, centerSwaps }) => {
+      const cardNameByInstanceId = new Map(Array.from(board.values(), (c) => [c.instanceId, CARD_DEFS[c.cardId].name]));
+
+      // A face-down Facestealer that won the center as its swap target scores AS
+      // Kingslayer FROM ITS OWN POSITION -- same "the borrowed rule runs from the
+      // thief's own spot" precedent a real swap follows (see applyIdentitySwaps'
+      // own doc comment) -- while the true center itself scores as a plain
+      // Infiltrator instead (below). Multiple Facestealers can each independently
+      // win it, same as a real target.
+      for (const instanceId of centerSwaps) {
+        const entry = Array.from(board.entries()).find(([, c]) => c.instanceId === instanceId);
+        if (!entry) continue;
+        const [key, thief] = entry;
+        const synthetic: CardInstance = { instanceId, cardId: "Unknown", ownerId: thief.ownerId, faceUp: true };
+        const { contributions } = computeSyntheticCardContributions(board, bounds, round, "kingslayer", parsePosKey(key), synthetic);
+        const breakdown: ScoreContribution[] = [{ label: "Scoring as Kingslayer (Facestealer effect)", amount: 0, source: "self" }];
+        breakdown.push({ label: "Base", amount: KINGSLAYER_BASE_VALUE, source: "self" });
+        breakdown.push(...contributions);
+        const rawTotal = KINGSLAYER_BASE_VALUE + contributions.reduce((sum, d) => sum + (d.informational ? 0 : d.amount), 0);
+        const finalValue = Math.max(0, rawTotal);
+        if (finalValue !== rawTotal) breakdown.push({ label: FLOORED_AT_ZERO_LABEL, amount: finalValue - rawTotal, source: "self" });
+
+        const resolved = cards.find((c) => c.instanceId === instanceId);
+        if (!resolved) continue;
+        totalsByOwner[resolved.ownerId] = (totalsByOwner[resolved.ownerId] ?? 0) + (finalValue - resolved.finalValue);
+        resolved.finalValue = finalValue;
+        resolved.breakdown = breakdown;
+      }
+
+      // Treated as a genuine card for scoring purposes -- see
+      // computeSyntheticCardContributions's own doc comment for why this is computed
+      // as an isolated, throwaway side calculation rather than a real extra board
+      // entry/player (it would otherwise hand real points to e.g. an adjacent
+      // Mercenary for "an extra adjacent enemy"). If a Facestealer won it above, the
+      // center itself now scores as a plain Infiltrator instead -- same "the target
+      // loses its own identity/rule" precedent a real swap follows -- though incoming
+      // effects from its neighbors still land exactly as they would on any other
+      // scoring-as-Infiltrator target.
+      const swappedAway = centerSwaps.size > 0;
+      const centerBaseValue = swappedAway ? CARD_DEFS.Infiltrator.base : KINGSLAYER_BASE_VALUE;
+      const synthetic: CardInstance = { instanceId: KINGSLAYER_INSTANCE_ID, cardId: "Unknown", ownerId: KINGSLAYER_OWNER_ID, faceUp: true };
+      const { contributions, negatedBy } = computeSyntheticCardContributions(board, bounds, round, "kingslayer", bounds.center, synthetic);
+
+      const breakdown: ScoreContribution[] = [];
+      if (swappedAway) breakdown.push({ label: `Scoring as ${CARD_DEFS.Infiltrator.name} (Facestealer effect)`, amount: 0, source: "self" });
+      if (negatedBy.length > 0) {
+        const negatorNames = negatedBy.map((id) => cardNameByInstanceId.get(id) ?? "negation");
+        breakdown.push({ label: `Negated by ${negatorNames.join(", ")}`, amount: 0, source: "self" });
+      }
+      breakdown.push({ label: "Base", amount: centerBaseValue, source: "self" });
+      breakdown.push(...contributions);
+      const rawTotal = centerBaseValue + contributions.reduce((sum, d) => sum + (d.informational ? 0 : d.amount), 0);
+      // Same universal "never scores negative" floor every real card's own value gets.
+      const kingslayerValue = Math.max(0, rawTotal);
+      if (kingslayerValue !== rawTotal) breakdown.push({ label: FLOORED_AT_ZERO_LABEL, amount: kingslayerValue - rawTotal, source: "self" });
+
+      const kingslayerCard: ResolvedCard = {
+        instanceId: KINGSLAYER_INSTANCE_ID,
+        cardId: "Unknown",
+        ownerId: KINGSLAYER_OWNER_ID,
+        position: bounds.center,
+        faceUp: true,
+        baseValue: centerBaseValue,
+        finalValue: kingslayerValue,
+        negated: negatedBy.length > 0,
+        breakdown,
+      };
+
+      if (cards.length === 0) return { kingslayerCard };
+      // Lictor/Suppressor negating Kingslayer cancels its own printed rule -- the
+      // steal ability -- same as it would for any other card's rule; its tracked
+      // value above still updates normally (negation only ever cancels a target's own
+      // outgoing/self effects, never what neighbors still do to it -- see
+      // resolution.ts's own doc comment on this).
+      if (negatedBy.length > 0) return { kingslayerCard };
+
       const maxValue = Math.max(...cards.map((c) => c.finalValue));
       const kingslayerHit: string[] = [];
       for (const c of cards) {
@@ -348,7 +490,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
           kingslayerHit.push(c.instanceId);
         }
       }
-      return { kingslayerHit };
+      return { kingslayerHit, kingslayerCard };
     },
   },
 };

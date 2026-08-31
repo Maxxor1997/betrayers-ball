@@ -81,7 +81,9 @@ export type CenterEffectId =
   | "twoTowers"
   | "freeCities"
   | "frontier"
-  | "summit";
+  | "summit"
+  | "borderlands"
+  | "noMansLand";
 
 /**
  * Which strategy module an AI seat's turns are computed by -- see
@@ -168,6 +170,16 @@ export interface GameState {
   flipHistory: { round: number; playerId: string; ownerId: string; instanceId: string; cardId: CardId }[];
   /** instanceIds in the order they were placed on the board — for turn-order UI/history. */
   placementOrder: string[];
+  /**
+   * Hall of Fortunes only (see centerEffects.ts's `reckoning`): each player's current
+   * "offer" of 3 unique-by-cardId cards drawn at random from their hand — the only
+   * cards legal to place on their turn at this location. Empty otherwise. Populated at
+   * deal time and refreshed whenever a player's turn begins with no live offer; consumed
+   * (deleted) when the offered card is placed. See turns.ts's `offeredCardsFor`, the
+   * shared selector every legality check/AI/UI call site should read hand-candidates
+   * through instead of `player.hand` directly.
+   */
+  handOffers: Record<string, CardInstance[]>;
   phase: "playing" | "voting" | "ended";
   result: GameResult | null;
 }

@@ -77,7 +77,12 @@ function Sandbox() {
     () => resolveBoard(board, config.boardBounds, round, centerEffect, players.map((p) => p.id)),
     [board, config.boardBounds, round, centerEffect, players]
   );
-  const resolvedCardsMap = useMemo(() => new Map(resolved.cards.map((c) => [c.instanceId, c])), [resolved]);
+  // kingslayerCard (Kingslayer only -- see resolveBoard's own doc comment) isn't part
+  // of `cards`, so it's merged in here too.
+  const resolvedCardsMap = useMemo(
+    () => new Map([...resolved.cards, ...(resolved.kingslayerCard ? [resolved.kingslayerCard] : [])].map((c) => [c.instanceId, c])),
+    [resolved]
+  );
   const gameResult: GameResult = useMemo(() => {
     const scores: Record<string, number> = {};
     for (const p of players) scores[p.id] = resolved.totalsByOwner[p.id] ?? 0;
@@ -104,6 +109,7 @@ function Sandbox() {
     voteHistory: [],
     flipHistory: [],
     placementOrder,
+    handOffers: {},
     phase: "playing",
     result: showScoring ? gameResult : null,
   };
@@ -371,10 +377,16 @@ function SandboxControls({
   const controlClass = "rounded border border-zinc-300 bg-transparent px-2 py-1 text-xs dark:border-zinc-700";
   const availableLocations = selectableCenterEffects(playerCount);
 
+  // Each control is its own full-width "label ... control" row on a narrow phone
+  // (flex-col, justify-between) so every row's control lines up along the same right
+  // edge instead of wrapping into a ragged mix of widths -- reverts to the original
+  // inline wrapped-row layout at sm: and up, where there's room for it.
+  const rowClass = "flex items-center justify-between gap-2 text-xs text-zinc-600 sm:w-auto sm:justify-start sm:gap-1.5 dark:text-zinc-400";
+
   return (
     <div className="flex w-full flex-col gap-3 rounded-xl border border-zinc-300 p-3 dark:border-zinc-700">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <label className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2">
+        <label className={rowClass}>
           Players
           <select
             value={playerCount}
@@ -389,7 +401,7 @@ function SandboxControls({
           </select>
         </label>
 
-        <label className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+        <label className={rowClass}>
           Location
           <select
             value={centerEffect}
@@ -407,7 +419,7 @@ function SandboxControls({
           </select>
         </label>
 
-        <label className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+        <label className={rowClass}>
           Round
           <select value={round} onChange={(e) => onRoundChange(Number(e.target.value))} className={controlClass}>
             {Array.from({ length: roundCap }, (_, i) => i + 1).map((n) => (
@@ -420,14 +432,14 @@ function SandboxControls({
 
         <button
           onClick={onClearBoard}
-          className="ml-auto rounded-full border border-red-300 px-2.5 py-1 text-xs whitespace-nowrap text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+          className="rounded-full border border-red-300 px-2.5 py-1 text-xs whitespace-nowrap text-red-600 hover:bg-red-50 sm:ml-auto dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
         >
           Clear board
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2">
+        <div className={rowClass}>
           Playing as
           <div className="flex flex-wrap gap-1">
             {players.map((p, i) => (

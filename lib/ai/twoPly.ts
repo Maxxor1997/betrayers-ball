@@ -2,7 +2,7 @@ import { copiesForPlayerCount, CARD_DEFS } from "../content/cards";
 import { shuffle } from "../engine/deck";
 import { computeAiVote, computeGameResult, estimateMargin } from "../engine/endgame";
 import { applyAction } from "../engine/game";
-import { applyPlace, currentPlayerId, getLegalPlacementCells } from "../engine/turns";
+import { applyPlace, currentPlayerId, getLegalPlacementCells, offeredCardsFor } from "../engine/turns";
 import { CardId, GameAction, GameState, Position } from "../engine/types";
 import { chooseGreedyAiAction, placementHeuristicAdjustment } from "./greedyAi";
 
@@ -160,10 +160,9 @@ export const DEFAULT_TWO_PLY_OPTIONS: TwoPlyOptions = {
 
 /** Same ranking Medium's own choosePlacement uses (estimateMargin + placementHeuristicAdjustment), kept to placements only -- see chooseTwoPlyAction for why flip/pass aren't touched here. Pruning to the top few keeps the round-robin evaluation loop below cheap enough to run several passes within budget. */
 function rankedPlacementCandidates(state: GameState, playerId: string, maxCandidates: number): { instanceId: string; position: Position }[] {
-  const player = state.players.find((p) => p.id === playerId)!;
   const legalCells = getLegalPlacementCells(state);
   const candidates: { instanceId: string; position: Position }[] = [];
-  for (const card of player.hand) {
+  for (const card of offeredCardsFor(state, playerId)) {
     for (const position of legalCells) candidates.push({ instanceId: card.instanceId, position });
   }
 

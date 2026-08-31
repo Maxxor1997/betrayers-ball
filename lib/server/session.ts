@@ -380,8 +380,8 @@ export class GameSession {
     this.rematchReady.clear();
     const allIds = [...this.seats.keys()];
     const aiIds = [...this.seats.values()].filter((s) => s.isAI).map((s) => s.playerId);
-    const config = configForPlayerCount(this.playerCount, this.centerEffect, this.aiDifficulty);
     const rand = this.rng ?? Math.random;
+    const config = configForPlayerCount(this.playerCount, this.centerEffect, this.aiDifficulty, rand);
     const firstPlayerIndex = Math.floor(rand() * allIds.length);
     this.setState(createGame(allIds, config, this.rng, aiIds, firstPlayerIndex));
     this.scheduleAiTurnIfNeeded();

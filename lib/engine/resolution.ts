@@ -1,4 +1,4 @@
-import { getAdjacentCards, parsePosKey } from "./board";
+import { getAdjacentCards, parsePosKey, posKey } from "./board";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { Board, BoardBounds, CardId, CardInstance, CenterEffectId, Position } from "./types";
@@ -24,8 +24,24 @@ interface IdentitySwap {
  * Facestealer's own candidates break by board/placement order (board.entries()
  * iteration order), same as everywhere else in this engine that needs a deterministic
  * first-among-equals.
+ *
+ * `facestealerCenterBase`, when given (Kingslayer only -- see
+ * CenterEffectDef.facestealerCandidateBase), makes the center itself an additional,
+ * always-face-up candidate in the exact same comparison -- ties still favor whichever
+ * candidate would have won without it (a strict `>`, not `>=`, is required for the
+ * center to beat the best real candidate), matching this function's own existing
+ * tie-break style. The center can never be swapped TO via the normal `swaps` map
+ * (there's no real CardId for it, and no real board entry to rewrite) -- a winning
+ * Infiltrator instead goes into the returned `centerSwaps` set, and it's on the
+ * caller (kingslayer's postResolution hook) to compute what "scoring as Kingslayer at
+ * this Infiltrator's own position" and "the center now scoring as an Infiltrator"
+ * actually mean, via computeSyntheticCardContributions.
  */
-function computeIdentitySwaps(board: Board, bounds: BoardBounds): { swaps: Map<string, IdentitySwap>; thievesOf: Map<string, string[]> } {
+function computeIdentitySwaps(
+  board: Board,
+  bounds: BoardBounds,
+  facestealerCenterBase?: number
+): { swaps: Map<string, IdentitySwap>; thievesOf: Map<string, string[]>; centerSwaps: Set<string> } {
   const swaps = new Map<string, IdentitySwap>();
   // Reverse edge (target instanceId -> the Facestealer instance(s) that stole from
   // it) -- computeIdentitySwaps' own per-instance map has no way to recover this,
@@ -34,22 +50,31 @@ function computeIdentitySwaps(board: Board, bounds: BoardBounds): { swaps: Map<s
   // correct specific thief instance(s), same "attribute back to exactly which card
   // instance caused it" requirement every other external contribution already meets.
   const thievesOf = new Map<string, string[]>();
+  const centerSwaps = new Set<string>();
   for (const [key, c] of board.entries()) {
     if (c.faceUp || c.cardId !== "Infiltrator") continue;
     const pos = parsePosKey(key);
     const candidates = getAdjacentCards(board, bounds, pos).filter((n) => n.faceUp && n.cardId !== "Infiltrator");
-    if (candidates.length === 0) continue;
-    let target = candidates[0];
-    for (const candidate of candidates.slice(1)) {
-      if (CARD_DEFS[candidate.cardId].base > CARD_DEFS[target.cardId].base) target = candidate;
+    const centerIsAdjacent = facestealerCenterBase !== undefined && Math.abs(pos.x - bounds.center.x) + Math.abs(pos.y - bounds.center.y) === 1;
+    if (candidates.length === 0 && !centerIsAdjacent) continue;
+
+    let target: CardInstance | null = candidates[0] ?? null;
+    for (const candidate of candidates.slice(target ? 1 : 0)) {
+      if (CARD_DEFS[candidate.cardId].base > (target ? CARD_DEFS[target.cardId].base : -Infinity)) target = candidate;
     }
+    if (centerIsAdjacent && facestealerCenterBase! > (target ? CARD_DEFS[target.cardId].base : -Infinity)) {
+      centerSwaps.add(c.instanceId);
+      continue;
+    }
+    if (!target) continue;
+
     swaps.set(c.instanceId, { originalCardId: "Infiltrator", newCardId: target.cardId });
     swaps.set(target.instanceId, { originalCardId: target.cardId, newCardId: "Infiltrator" });
     const list = thievesOf.get(target.instanceId);
     if (list) list.push(c.instanceId);
     else thievesOf.set(target.instanceId, [c.instanceId]);
   }
-  return { swaps, thievesOf };
+  return { swaps, thievesOf, centerSwaps };
 }
 
 /**
@@ -165,6 +190,13 @@ export interface ResolutionResult {
   totalsByOwner: Record<string, number>;
   /** instanceIds of any card(s) hit by a center effect that subtracts from the board's highest value, if the active center effect does that. */
   kingslayerHit: string[];
+  /**
+   * Kingslayer only: the center's own value/breakdown, computed as if it were a real
+   * card -- see computeSyntheticCardContributions. Deliberately not folded into `cards`/
+   * `totalsByOwner` -- see that function's own doc comment for why keeping it fully
+   * separate from the real scoring pass matters.
+   */
+  kingslayerCard?: ResolvedCard;
 }
 
 /**
@@ -206,6 +238,56 @@ function computeNegatorsOf(board: Board, bounds: BoardBounds): Map<string, strin
 export function computeNegatedInstanceIds(board: Board, bounds: BoardBounds): Set<string> {
   const swapped = applyIdentitySwaps(board, computeIdentitySwaps(board, bounds).swaps);
   return new Set(computeNegatorsOf(swapped, bounds).keys());
+}
+
+/**
+ * Kingslayer only: what a synthetic CardInstance placed at `pos` would receive from
+ * every OTHER real card's own valueModifier hook, plus whether it would itself get
+ * negated by an adjacent Suppressor -- reusing the exact same generic value-modifier/
+ * negation machinery every real card goes through, so any adjacency card (present now
+ * or added later) applies to it automatically, with no per-card special-casing needed
+ * in centerEffects.ts.
+ *
+ * Deliberately isolated from the real scoring pass: `board` is only ever copied here,
+ * never mutated, and this result is never merged back into resolveBoard's own
+ * `cards`/`totalsByOwner`. That isolation is the whole point -- if `synthetic` were a
+ * genuine extra entry in the real board instead, a real Mercenary next to it would see
+ * one more "unique adjacent enemy" and collect a real point for it, the way it
+ * genuinely would next to a real extra player's real card. Running this as a
+ * throwaway side computation gets Kingslayer real adjacency effects and negation
+ * without that side effect.
+ *
+ * `synthetic.cardId` only matters for looking up its own (in practice nonexistent)
+ * valueModifier/negatesNeighborsIf hooks -- callers should pick something with neither
+ * (e.g. "Unknown") so it can't accidentally apply a self-buff onto its own returned
+ * contributions or falsely register as a negator of its neighbors. "Unknown" specifically
+ * is also the safest available choice for a second, narrower reason: unlike any real
+ * drawable CardId, it never appears on a genuinely finished board (a completed game
+ * always reveals every card), so a real PlagueBearer near the center can never see it
+ * as a false "matching type" -- the one place this can still theoretically happen is
+ * during the AI's own mid-game margin *estimate* (estimatedResolutionFor), whose board
+ * already stands in a hidden opponent card with this same "Unknown" placeholder -- a
+ * PlagueBearer adjacent to both could see a spurious pair there. That's an existing,
+ * accepted category of imprecision for that already-provisional estimate (see its own
+ * doc comment), not a new correctness issue for real end-of-game scoring.
+ */
+export function computeSyntheticCardContributions(
+  board: Board,
+  bounds: BoardBounds,
+  round: number,
+  centerEffect: CenterEffectId,
+  pos: Position,
+  synthetic: CardInstance
+): { contributions: ScoreContribution[]; negatedBy: string[] } {
+  const augmented = new Map(board);
+  augmented.set(posKey(pos), synthetic);
+  const negatorsOf = computeNegatorsOf(augmented, bounds);
+  const negated = new Set(negatorsOf.keys());
+  const allContributions = computeValueModifiers(augmented, bounds, round, negated, negatorsOf, centerEffect);
+  return {
+    contributions: allContributions.get(synthetic.instanceId) ?? [],
+    negatedBy: negatorsOf.get(synthetic.instanceId) ?? [],
+  };
 }
 
 /** One delta a card's valueModifier hook would produce, with the original label it was raised under -- see contributionsOf. */
@@ -433,7 +515,7 @@ export function resolveBoard(
   // swapped card's own. `originalBoard` is consulted again below only to recover each
   // instance's *real* cardId for display (see the cards.push loop) -- see
   // applyIdentitySwaps' own doc comment for the full reasoning.
-  const { swaps, thievesOf } = computeIdentitySwaps(originalBoard, bounds);
+  const { swaps, thievesOf, centerSwaps } = computeIdentitySwaps(originalBoard, bounds, CENTER_EFFECTS[centerEffect].facestealerCandidateBase);
   const board = applyIdentitySwaps(originalBoard, swaps);
 
   const negatorsOf = computeNegatorsOf(board, bounds);
@@ -544,11 +626,12 @@ export function resolveBoard(
     totalsByOwner[c.ownerId] = (totalsByOwner[c.ownerId] ?? 0) + finalValue;
   }
 
-  const postResult = CENTER_EFFECTS[centerEffect].postResolution?.({ board, bounds, negated, cards, totalsByOwner, playerIds });
+  const postResult = CENTER_EFFECTS[centerEffect].postResolution?.({ board, bounds, round, negated, cards, totalsByOwner, playerIds, centerSwaps });
 
   return {
     cards,
     totalsByOwner,
     kingslayerHit: postResult?.kingslayerHit ?? [],
+    kingslayerCard: postResult?.kingslayerCard,
   };
 }

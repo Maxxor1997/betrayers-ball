@@ -2,8 +2,8 @@ import { BOARD_BOUNDS_BY_PLAYER_COUNT } from "@/lib/config/boardSizing";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { dealNewGame, Rng } from "./deck";
 import { computeAiVote, computeGameResult, shouldEndGame } from "./endgame";
-import { applyFlip, applyPass, applyPlace, currentPlayerId, mustPass } from "./turns";
-import { AiDifficulty, CastVoteAction, CenterEffectId, GameAction, GameConfig, GameState } from "./types";
+import { applyFlip, applyPass, applyPlace, currentPlayerId, drawHandOffer, mustPass } from "./turns";
+import { AiDifficulty, CardInstance, CastVoteAction, CenterEffectId, GameAction, GameConfig, GameState } from "./types";
 
 /**
  * How advanceTurn decides an AI seat's vote when a round boundary auto-fills it (see
@@ -18,13 +18,18 @@ import { AiDifficulty, CastVoteAction, CenterEffectId, GameAction, GameConfig, G
  */
 export type ComputeVoteFn = (state: GameState, playerId: string, rng: Rng) => boolean;
 
-export function configForPlayerCount(playerCount: number, centerEffect: CenterEffectId = "none", aiDifficulty: AiDifficulty = "medium"): GameConfig {
+export function configForPlayerCount(
+  playerCount: number,
+  centerEffect: CenterEffectId = "none",
+  aiDifficulty: AiDifficulty = "medium",
+  rng: Rng = Math.random
+): GameConfig {
   const baseBounds = BOARD_BOUNDS_BY_PLAYER_COUNT[playerCount];
   if (!baseBounds) throw new Error(`No board sizing configured for ${playerCount} players (supported: 2-6)`);
   // A center effect can override which tiles are ownerless -- baked into boardBounds
   // here, once, so every downstream board.ts lookup that only ever took `bounds` (not
   // centerEffect) keeps working unchanged.
-  const ownerlessPositions = CENTER_EFFECTS[centerEffect].ownerlessPositions?.(baseBounds);
+  const ownerlessPositions = CENTER_EFFECTS[centerEffect].ownerlessPositions?.(baseBounds, rng);
   const boardBounds = ownerlessPositions ? { ...baseBounds, ownerless: ownerlessPositions } : baseBounds;
   return {
     boardBounds,
@@ -49,13 +54,22 @@ export function createGame(
   aiPlayerIds: Iterable<string> = [],
   firstPlayerIndex = 0
 ): GameState {
-  const { players, remainingDeck } = dealNewGame(playerIds, config.handSize, rng);
+  const effectiveRng = rng ?? Math.random;
+  const { players, remainingDeck } = dealNewGame(playerIds, config.handSize, effectiveRng);
   const aiIds = new Set(aiPlayerIds);
+  const finalPlayers = players.map((p) => ({ ...p, isAI: aiIds.has(p.id) }));
+  // Hall of Fortunes: every player gets an initial 3-card offer right at deal time,
+  // consumed one rng call per player in player order (deterministic, no cross-player
+  // nondeterminism -- same convention the rest of this reducer follows).
+  const handOffers: Record<string, CardInstance[]> =
+    config.centerEffect === "reckoning"
+      ? Object.fromEntries(finalPlayers.map((p) => [p.id, drawHandOffer(p.hand, effectiveRng)]))
+      : {};
   return {
     config,
     board: new Map(),
     deck: remainingDeck,
-    players: players.map((p) => ({ ...p, isAI: aiIds.has(p.id) })),
+    players: finalPlayers,
     currentPlayerIndex: firstPlayerIndex,
     round: 1,
     turnsThisRound: 0,
@@ -65,9 +79,26 @@ export function createGame(
     voteHistory: [],
     flipHistory: [],
     placementOrder: [],
+    handOffers,
     phase: "playing",
     result: null,
   };
+}
+
+/**
+ * Hall of Fortunes only: whenever the current player doesn't already have a live
+ * offer (a fresh turn after their last one was consumed by a placement), draw one
+ * from their present hand. A no-op for every other center effect, and a no-op if the
+ * player already has one (e.g. right after createGame's own initial offers, or after
+ * a pass, which never consumes the offer).
+ */
+function ensureHandOfferForCurrentPlayer(state: GameState, rng: Rng): Record<string, CardInstance[]> {
+  if (state.config.centerEffect !== "reckoning") return state.handOffers;
+  const playerId = currentPlayerId(state);
+  if (state.handOffers[playerId]) return state.handOffers;
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player || player.hand.length === 0) return state.handOffers;
+  return { ...state.handOffers, [playerId]: drawHandOffer(player.hand, rng) };
 }
 
 /**
@@ -139,7 +170,8 @@ function advanceTurn(state: GameState, rng: Rng, computeVote: ComputeVoteFn = co
   const nextIndex = (state.currentPlayerIndex + 1 + roundRotationShift) % state.players.length;
 
   if (!isRoundBoundary) {
-    return { ...state, currentPlayerIndex: nextIndex, hasFlippedThisTurn: false, turnsThisRound };
+    const nextState = { ...state, currentPlayerIndex: nextIndex, hasFlippedThisTurn: false, turnsThisRound };
+    return { ...nextState, handOffers: ensureHandOfferForCurrentPlayer(nextState, rng) };
   }
 
   const completedRound = state.round;
@@ -168,7 +200,8 @@ function advanceTurn(state: GameState, rng: Rng, computeVote: ComputeVoteFn = co
 
   const nextRound = completedRound + 1;
   const roundStart = applyRoundStart(state, nextRound, rng);
-  return { ...state, ...roundStart, currentPlayerIndex: nextIndex, round: nextRound, hasFlippedThisTurn: false, turnsThisRound: 0 };
+  const nextState = { ...state, ...roundStart, currentPlayerIndex: nextIndex, round: nextRound, hasFlippedThisTurn: false, turnsThisRound: 0 };
+  return { ...nextState, handOffers: ensureHandOfferForCurrentPlayer(nextState, rng) };
 }
 
 /**
@@ -199,7 +232,8 @@ function tallyVotes(state: GameState, rng: Rng): GameState {
   // the same onRoundStart check as advanceTurn's plain continue-branch.
   const nextRound = state.round + 1;
   const roundStart = applyRoundStart(state, nextRound, rng);
-  return { ...state, ...roundStart, phase: "playing", votes: {}, voteHistory, round: nextRound, hasFlippedThisTurn: false };
+  const nextState = { ...state, ...roundStart, phase: "playing" as const, votes: {}, voteHistory, round: nextRound, hasFlippedThisTurn: false };
+  return { ...nextState, handOffers: ensureHandOfferForCurrentPlayer(nextState, rng) };
 }
 
 /**

@@ -1,5 +1,5 @@
 import { aiVoteProbability } from "../engine/endgame";
-import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells } from "../engine/turns";
+import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, offeredCardsFor } from "../engine/turns";
 import { GameAction, GameState } from "../engine/types";
 
 export type Rng = () => number;
@@ -39,13 +39,13 @@ export function chooseRandomAiAction(
     return { type: "flip", playerId, instanceId: target.instanceId };
   }
 
-  const player = state.players[state.currentPlayerIndex];
+  const candidates = offeredCardsFor(state, playerId);
   const legalCells = getLegalPlacementCells(state);
-  if (player.hand.length === 0 || legalCells.length === 0) {
+  if (candidates.length === 0 || legalCells.length === 0) {
     return { type: "pass", playerId };
   }
 
   const cell = legalCells[Math.floor(rng() * legalCells.length)];
-  const card = player.hand[Math.floor(rng() * player.hand.length)];
+  const card = candidates[Math.floor(rng() * candidates.length)];
   return { type: "place", playerId, instanceId: card.instanceId, position: cell };
 }

@@ -7,7 +7,7 @@ import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
-import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
+import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass, offeredCardsFor } from "@/lib/engine/turns";
 import { AiDifficulty, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
 import { AI_DIFFICULTIES, chooseAiActionForDifficulty, computeVoteForDifficulty, DEFAULT_AI_DIFFICULTY } from "@/lib/ai/difficulty";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, playerAccentClass, playerDotColorClass } from "@/lib/config/players";
@@ -467,7 +467,12 @@ function Game() {
           state.players.map((p) => p.id)
         )
       : null;
-  const resolvedCards = endResult ? new Map(endResult.cards.map((c) => [c.instanceId, c])) : undefined;
+  // kingslayerCard (Kingslayer only -- see resolveBoard's own doc comment) isn't part
+  // of `cards`, so it's merged in here too -- this is the one Map every "look up a
+  // resolved card by instanceId" consumer (BoardGrid's hover) reads from.
+  const resolvedCards = endResult
+    ? new Map([...endResult.cards, ...(endResult.kingslayerCard ? [endResult.kingslayerCard] : [])].map((c) => [c.instanceId, c]))
+    : undefined;
 
   function copyBoardState() {
     navigator.clipboard.writeText(buildBoardStateMarkdown(state, endResult)).then(() => {
@@ -591,7 +596,7 @@ function Game() {
       {(state.phase === "playing" || state.phase === "voting") && (
         <div className="flex w-full flex-col items-center gap-3">
           <Hand
-            cards={human.hand}
+            cards={offeredCardsFor(state, HUMAN)}
             selectedInstanceId={selectedInstanceId}
             onCardClick={handleHandCardClick}
             onCardDragStart={handleHandDragStart}

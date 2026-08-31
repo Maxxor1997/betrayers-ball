@@ -3,7 +3,7 @@ import { CARD_DEFS, copiesForPlayerCount } from "../content/cards";
 import { computeAiVote, estimateMargin } from "../engine/endgame";
 import { redactedBoardFor } from "../engine/playerView";
 import { resolveBoard } from "../engine/resolution";
-import { applyPlace, currentPlayerId, getLegalFlipTargets, getLegalPlacementCells } from "../engine/turns";
+import { applyPlace, currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, offeredCardsFor } from "../engine/turns";
 import { Board, BoardBounds, CardId, CardInstance, GameAction, GameConfig, GameState, Position } from "../engine/types";
 
 export type Rng = () => number;
@@ -918,14 +918,14 @@ export function placementHeuristicAdjustment(
 
 /** Places whichever (card, cell) combination yields the best resulting margin. */
 function choosePlacement(state: GameState, playerId: string, rng: Rng): GameAction {
-  const player = state.players.find((p) => p.id === playerId)!;
+  const offered = offeredCardsFor(state, playerId);
   const legalCells = getLegalPlacementCells(state);
-  if (player.hand.length === 0 || legalCells.length === 0) {
+  if (offered.length === 0 || legalCells.length === 0) {
     return { type: "pass", playerId };
   }
 
   const candidates: { instanceId: string; position: Position }[] = [];
-  for (const card of player.hand) {
+  for (const card of offered) {
     for (const position of legalCells) {
       candidates.push({ instanceId: card.instanceId, position });
     }

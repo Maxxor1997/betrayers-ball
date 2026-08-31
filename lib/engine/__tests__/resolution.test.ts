@@ -1198,21 +1198,21 @@ describe("resolveBoard — center effect: Champion of the Weak", () => {
     expect(find(cards, p2card.instanceId).finalValue).toBe(CARD_DEFS.Giant.base * 2);
   });
 
-  it("ignores face-up cards even if they'd otherwise be the lowest value", () => {
+  it("doubles the lowest-valued card even if it's face-up", () => {
     const board: Board = new Map();
-    const shown = place(board, 0, 0, "Berserker", "p1", true); // lowest value, but face-up -- ineligible
-    const hidden = place(board, 5, 5, "Footman", "p1", false); // only face-down card
+    const shown = place(board, 0, 0, "Berserker", "p1", true); // lowest value, face-up -- still eligible
+    const hidden = place(board, 5, 5, "Footman", "p1", false); // higher value, face-down -- not the target
     const { cards, totalsByOwner } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1"]);
-    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Berserker.base); // untouched
-    expect(find(cards, hidden.instanceId).finalValue).toBe(CARD_DEFS.Footman.base * 2); // doubled as the only eligible card
-    expect(totalsByOwner.p1).toBe(CARD_DEFS.Berserker.base + CARD_DEFS.Footman.base * 2);
+    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Berserker.base * 2); // doubled despite being face-up
+    expect(find(cards, hidden.instanceId).finalValue).toBe(CARD_DEFS.Footman.base); // untouched
+    expect(totalsByOwner.p1).toBe(CARD_DEFS.Berserker.base * 2 + CARD_DEFS.Footman.base);
   });
 
-  it("gives no bonus to a player whose only cards are face-up", () => {
+  it("doubles a player's only card even when it's face-up", () => {
     const board: Board = new Map();
     place(board, 0, 0, "Footman", "p1", true);
     const { totalsByOwner } = resolveBoard(board, BOUNDS, 3, "championOfTheWeak", ["p1"]);
-    expect(totalsByOwner.p1).toBe(CARD_DEFS.Footman.base);
+    expect(totalsByOwner.p1).toBe(CARD_DEFS.Footman.base * 2);
   });
 
   it("on a tie for lowest, doubles whichever was placed last -- same tiebreak as the Summit", () => {
@@ -1231,7 +1231,7 @@ describe("resolveBoard — center effect: Champion of the Weak", () => {
     const resolved = find(cards, only.instanceId);
     const last = resolved.breakdown[resolved.breakdown.length - 1];
     expect(last).toEqual({
-      label: `${CENTER_EFFECTS.championOfTheWeak.label} (lowest face-down, doubled)`,
+      label: `${CENTER_EFFECTS.championOfTheWeak.label} (lowest value, doubled)`,
       amount: CARD_DEFS.Footman.base,
       source: "external",
     });
@@ -1284,6 +1284,128 @@ describe("resolveBoard — center effect: Kingslayer", () => {
     // should reflect Kingslayer's Bannerman-boosted value, not the unmodified
     // KINGSLAYER_BASE_VALUE.
     expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - (KINGSLAYER_BASE_VALUE + 1));
+  });
+
+  it("is debuffed by a face-up Earthshaker sharing the center's column, not just its row", () => {
+    const board: Board = new Map();
+    place(board, 4, 5, "Earthshaker", "p1", true); // center is (4,4) -- directly below it, same column
+    const shown = place(board, 0, 0, "Exile", "p2", true); // isolated, no neighbor penalty
+    const { cards } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    // Real Earthshaker debuffs -2, not -1 -- the pseudo-card version was also wrong on
+    // magnitude, not just missing the column check.
+    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - (KINGSLAYER_BASE_VALUE - 2));
+  });
+
+  it("only debuffs when actually connected -- Earthshaker's row/col run stops at a real gap, same as it would for a real neighbor card", () => {
+    const board: Board = new Map();
+    place(board, 4, 0, "Earthshaker", "p1", true); // same column as center, but 3 empty cells away -- the run breaks before ever reaching it
+    const shown = place(board, 0, 0, "Exile", "p2", true);
+    const { cards } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - KINGSLAYER_BASE_VALUE);
+  });
+
+  it("passes straight through the center instead of stopping the run there, same as it would for any other ownerless tile", () => {
+    const board: Board = new Map();
+    const e = place(board, 3, 4, "Earthshaker", "p1", true); // directly left of center
+    const farSide = place(board, 5, 4, "Footman", "p2"); // directly right of center -- reached by passing through it
+    const { cards } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    expect(find(cards, farSide.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 2);
+  });
+
+  it("is debuffed by a face-up Chronicler orthogonally adjacent to the center", () => {
+    const board: Board = new Map();
+    place(board, 4, 3, "Chronicler", "p1", true); // adjacent to center (4,4) -> -3
+    const shown = place(board, 0, 0, "Exile", "p2", true); // isolated, no neighbor penalty
+    const { cards } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - (KINGSLAYER_BASE_VALUE - 3));
+  });
+
+  it("is not debuffed by a face-down Chronicler adjacent to the center", () => {
+    const board: Board = new Map();
+    place(board, 4, 3, "Chronicler", "p1", false); // adjacent, but face-down -- inactive
+    const shown = place(board, 0, 0, "Exile", "p2", true);
+    const { cards } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - KINGSLAYER_BASE_VALUE);
+  });
+
+  it("is not debuffed by an adjacent Truthseeker -- the center counts as permanently face-up, so it never qualifies as Truthseeker's face-down target", () => {
+    const board: Board = new Map();
+    place(board, 4, 3, "Truthseeker", "p1", true); // adjacent to center
+    const shown = place(board, 0, 0, "Exile", "p2", true);
+    const { cards } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - KINGSLAYER_BASE_VALUE);
+  });
+
+  it("is debuffed by an adjacent Plague Rat, same as any real neighbor", () => {
+    const board: Board = new Map();
+    place(board, 4, 3, "PlagueRat", "p1", true); // adjacent to center -> -1 plague
+    const shown = place(board, 0, 0, "Exile", "p2", true); // isolated, no neighbor penalty
+    const { cards } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Exile.base - (KINGSLAYER_BASE_VALUE - 1));
+  });
+
+  it("an adjacent Suppressor with 3+ neighbors negates Kingslayer's steal ability entirely, same as it would negate any other card's printed rule", () => {
+    const board: Board = new Map();
+    // Adjacent to center (4,4); center itself plus these two neighbors reach the 3+
+    // occupied-neighbor threshold Suppressor's own negation condition needs.
+    place(board, 4, 3, "Suppressor", "p1");
+    place(board, 3, 3, "Footman", "p1");
+    place(board, 5, 3, "Footman", "p1");
+    const shown = place(board, 0, 0, "Exile", "p2", true); // would otherwise be the unique highest and get hit
+    const { cards, totalsByOwner, kingslayerHit, kingslayerCard } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    expect(kingslayerHit).toEqual([]);
+    expect(find(cards, shown.instanceId).finalValue).toBe(CARD_DEFS.Exile.base); // never hit
+    expect(totalsByOwner.p2).toBe(CARD_DEFS.Exile.base);
+    expect(kingslayerCard?.negated).toBe(true);
+  });
+
+  it("returns a kingslayerCard reflecting the same real adjacency contributions, for a hover breakdown", () => {
+    const board: Board = new Map();
+    place(board, 4, 3, "Bannerman", "p1", true); // adjacent to center -> +1
+    const { kingslayerCard } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    expect(kingslayerCard).toBeDefined();
+    expect(kingslayerCard!.finalValue).toBe(KINGSLAYER_BASE_VALUE + 1);
+    expect(kingslayerCard!.baseValue).toBe(KINGSLAYER_BASE_VALUE);
+    expect(kingslayerCard!.negated).toBe(false);
+    expect(kingslayerCard!.breakdown.some((d) => d.label.includes(CARD_DEFS.Bannerman.name))).toBe(true);
+  });
+
+  it("a face-down Facestealer swaps with the center when it's the highest-base candidate", () => {
+    const board: Board = new Map();
+    const inf = place(board, 4, 3, "Infiltrator", "p1", false); // adjacent to center, no other neighbors
+    const { cards, kingslayerHit, kingslayerCard } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    const resolvedInf = find(cards, inf.instanceId);
+    expect(resolvedInf.breakdown.some((d) => d.label === "Scoring as Kingslayer (Facestealer effect)")).toBe(true);
+    // The true center now scores as a plain Infiltrator (3) instead of Kingslayer (5).
+    expect(kingslayerCard!.baseValue).toBe(CARD_DEFS.Infiltrator.base);
+    expect(kingslayerCard!.breakdown.some((d) => d.label === `Scoring as ${CARD_DEFS.Infiltrator.name} (Facestealer effect)`)).toBe(true);
+    // The thief is now the sole highest-value card on the board (5, from Kingslayer's
+    // own base), so its stolen ability -- still firing from the true center, using the
+    // center's own deflated tracked value (3) -- turns right back around and hits it.
+    expect(resolvedInf.finalValue).toBe(KINGSLAYER_BASE_VALUE - CARD_DEFS.Infiltrator.base);
+    expect(kingslayerHit).toEqual([inf.instanceId]);
+  });
+
+  it("a real higher-base neighbor still wins the swap over the center", () => {
+    const board: Board = new Map();
+    const inf = place(board, 4, 3, "Infiltrator", "p1", false); // adjacent to center
+    place(board, 4, 2, "Exile", "p2", true); // also adjacent to Infiltrator, base 9 > Kingslayer's 5
+    const { cards, kingslayerCard } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    const resolvedInf = find(cards, inf.instanceId);
+    expect(resolvedInf.breakdown.some((d) => d.label === `Scoring as ${CARD_DEFS.Exile.name} (Facestealer effect)`)).toBe(true);
+    expect(resolvedInf.breakdown.some((d) => d.label === "Scoring as Kingslayer (Facestealer effect)")).toBe(false);
+    // The center was never swapped away -- still tracks its own real Kingslayer value.
+    expect(kingslayerCard!.baseValue).toBe(KINGSLAYER_BASE_VALUE);
+  });
+
+  it("a tie between the center and a real candidate favors the real candidate", () => {
+    const board: Board = new Map();
+    const inf = place(board, 4, 3, "Infiltrator", "p1", false); // adjacent to center
+    place(board, 4, 2, "Footman", "p2", true); // also adjacent to Infiltrator, isolated -- base 5, exactly tying Kingslayer's 5
+    const { cards, kingslayerCard } = resolveBoard(board, BOUNDS, 3, "kingslayer");
+    const resolvedInf = find(cards, inf.instanceId);
+    expect(resolvedInf.breakdown.some((d) => d.label === `Scoring as ${CARD_DEFS.Footman.name} (Facestealer effect)`)).toBe(true);
+    expect(kingslayerCard!.baseValue).toBe(KINGSLAYER_BASE_VALUE); // center untouched
   });
 
   it("floors a hit card at 0 instead of letting it go negative, same universal floor every card's own rule gets", () => {
