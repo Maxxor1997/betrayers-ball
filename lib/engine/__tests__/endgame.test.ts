@@ -169,7 +169,7 @@ describe("estimateMargin — fair, per-viewer evaluation", () => {
     // Bannerman, while Bannerman's own value is untouched (its effect only targets
     // neighbors, not itself). On top of that, expectedHiddenNeighborAdjustments now
     // also credits/discounts p1's own Bannerman for whatever that same hidden card
-    // might turn out to be once revealed (e.g. a hidden Skysplitter would hit it, a
+    // might turn out to be once revealed (e.g. a hidden Doomherald would hit it, a
     // hidden Bannerman would help it) -- see estimateMargin's doc comment. A hidden
     // Earthshaker candidate contributes nothing here: its own valueModifier is now
     // gated on being face-up (see cards.ts), and a still-hidden card is by definition

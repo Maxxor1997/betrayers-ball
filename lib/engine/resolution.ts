@@ -340,7 +340,7 @@ function contributionsOf(board: Board, bounds: BoardBounds, round: number, pos: 
  * not just that a card turned over. Two mechanisms feed this, same two negation
  * already has to handle:
  * - A direct outgoing addDelta a card's own hook applies to a neighbor (Earthshaker's
- *   row/col, Chronicler/Skysplitter/PlagueBearer/Truthseeker's/PlagueRat's various
+ *   row/col, Chronicler/PlagueBearer/Truthseeker's/PlagueRat's various
  *   adjacency effects) -- only the NEGATIVE ones count as a "hit" worth flashing;
  *   Bannerman's positive adjacent buff, for instance, deliberately doesn't qualify.
  * - Suppressor/Lictor's negatesNeighborsIf, which doesn't go through addDelta at all

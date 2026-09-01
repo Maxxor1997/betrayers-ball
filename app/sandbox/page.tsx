@@ -18,7 +18,7 @@ import { Board, CardBucket, CardId, CardInstance, CenterEffectId, GameResult, Ga
 /** Same order the card catalog groups by -- Slam (aggressive/simple), Engine (build-up), Control (disruptive/situational). */
 const BUCKET_ORDER: CardBucket[] = ["Slam", "Engine", "Control"];
 
-/** Every real, placeable card -- "Unknown" is a synthetic placeholder, never a real card (see its own doc comment in types.ts). Disabled cards (currently just Skysplitter) are still included on purpose: this is a testing tool, and previewing a shelved card's animation is exactly the kind of thing it's for. */
+/** Every real, placeable card -- "Unknown" is a synthetic placeholder, never a real card (see its own doc comment in types.ts). Any disabled/shelved card would still be included here on purpose (none currently exist): this is a testing tool, and previewing a shelved card's animation is exactly the kind of thing it's for. */
 const PLACEABLE_CARD_IDS = ALL_CARD_IDS.filter((id) => id !== "Unknown");
 
 /** Drag payload for a palette card being dragged straight onto the board -- see handlePaletteDragStart/handleCellDrop. */

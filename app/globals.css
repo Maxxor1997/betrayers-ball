@@ -745,6 +745,38 @@ html {
   }
 }
 
+/* Skysplitter/Zeus-Born -- a bright flash and pop, like it's charging up, flavor
+   for "+1 per round elapsed" (it only ever gets stronger from here). Plays after
+   the card has settled into its plain face-up render (see Board.tsx's
+   chargePulseIds/CHARGE_PULSE_MS), not during the flip itself, and slower than
+   the original mid-flip version -- reads as its own distinct beat instead of
+   racing the reveal. Settles back to inherit (not a fixed color) so the handoff
+   to the icon's own normal color is seamless in both light and dark mode. */
+@keyframes card-icon-charge-pulse {
+  0% {
+    color: inherit;
+    transform: scale(1);
+  }
+  45% {
+    color: rgb(250 204 21);
+    transform: scale(1.18);
+  }
+  100% {
+    color: inherit;
+    transform: scale(1);
+  }
+}
+
+.card-icon-charge-pulse {
+  animation: card-icon-charge-pulse 1s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-charge-pulse {
+    animation: none;
+  }
+}
+
 @keyframes card-horn-pulse {
   0%,
   25% {

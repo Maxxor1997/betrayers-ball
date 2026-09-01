@@ -318,17 +318,18 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Skysplitter: {
     id: "Skysplitter",
     name: "Zeus-Born",
-    base: 4,
-    bucket: "Control",
-    text: "−3 above and below",
-    fullText: "−3 to the card directly above and directly below (any owner).",
-    count: [4, 4, 4, 4, 0, 0, 0],
-    disabled: true,
-    valueModifier: ({ board, pos, addDelta }) => {
-      const above = board.get(posKey({ x: pos.x, y: pos.y - 1 }));
-      const below = board.get(posKey({ x: pos.x, y: pos.y + 1 }));
-      if (above) addDelta(above.instanceId, -3, `${CARD_DEFS.Skysplitter.name} (adjacent, vertical)`);
-      if (below) addDelta(below.instanceId, -3, `${CARD_DEFS.Skysplitter.name} (adjacent, vertical)`);
+    // Formerly Chronicler's own ability, back when that card was disabled/unused
+    // (see d3b74bd, which reworked Chronicler into Doomherald's face-up trap
+    // effect and dropped this one entirely) -- reassigned here as a plain,
+    // unconditional growth Engine card instead of leaving it retired. Same base/
+    // count/valueModifier as that original.
+    base: 2,
+    bucket: "Engine",
+    text: "+1 per round elapsed",
+    fullText: "+1 for every round elapsed when the game ends.",
+    count: [4, 4, 4, 4, 5, 6, 8],
+    valueModifier: ({ round, self, addDelta }) => {
+      if (round > 0) addDelta(self.instanceId, round, `${CARD_DEFS.Skysplitter.name} (round ${round} elapsed)`);
     },
   },
   Bannerman: {

@@ -704,7 +704,7 @@ const NON_LEADER_DISRUPTION_WEIGHT = 0.5;
  * subtracts their total), but bestOther is a max, not a sum: knocking down a rival
  * who isn't in the lead moves the margin not at all, even though it's genuinely
  * lowering that player's score. Applies to any card whose effect touches another
- * player's total -- Earthshaker, Skysplitter, Plague Bearer, a Suppressor negating a
+ * player's total -- Earthshaker, Doomherald, Plague Bearer, a Suppressor negating a
  * beneficial neighbor effect, etc. -- not just a fixed list, since it's measured off
  * real pre/post totals rather than guessing at which cards are "disruptive".
  * Weighted at a fraction of the real swing (never enough on its own to override a
@@ -906,6 +906,16 @@ export function placementHeuristicAdjustment(
         // base-expectedFinalRound). Dock it down to what it's really expected to be
         // worth once the game actually ends.
         return -(expectedFinalRound(postState.config) - postState.round);
+      }
+
+      case "Skysplitter": {
+        // +1 per round elapsed *when the game ends* -- the same expectedFinalRound
+        // correction as DyingGod, opposite sign: the fair margin's postState.round
+        // snapshot systematically *undervalues* it the earlier it's placed (round 1
+        // looks like base+1, when it's really headed toward base+expectedFinalRound).
+        // Credit it up to what it's really expected to be worth once the game
+        // actually ends.
+        return expectedFinalRound(postState.config) - postState.round;
       }
 
       default:

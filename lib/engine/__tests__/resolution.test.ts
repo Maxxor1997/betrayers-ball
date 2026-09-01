@@ -167,7 +167,7 @@ describe("resolveBoard — scoring breakdown", () => {
     const f0 = place(board, 2, 2, "Footman", "p1");
     place(board, 1, 2, "Earthshaker", "p2", true); // same row, contiguous -- -2 to f0
     place(board, 3, 2, "Earthshaker", "p3", true); // same row, contiguous on the other side -- another -2 to f0
-    place(board, 2, 1, "Skysplitter", "p4", true); // directly above -- -3 to f0 (disabled card, still placeable for a test board)
+    place(board, 2, 1, "Chronicler", "p4", true); // directly above, face-up -- -3 to every adjacent card, including f0
     const { cards } = resolveBoard(board, BOUNDS, 3);
     const resolved = find(cards, f0.instanceId);
     // base 5 - 2 - 2 - 3 = -2 on paper -- floors to 0.
@@ -473,19 +473,16 @@ describe("resolveBoard — Earthshaker", () => {
   });
 });
 
-describe("resolveBoard — Skysplitter", () => {
-  it("gives -3 to the card above and below, not left/right", () => {
-    const board: Board = new Map();
-    const s = place(board, 1, 1, "Skysplitter", "p1");
-    const above = place(board, 1, 0, "Footman", "p2");
-    const below = place(board, 1, 2, "Footman", "p2");
-    const side = place(board, 0, 1, "Footman", "p2");
-    const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, above.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 3);
-    expect(find(cards, below.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 3);
-    expect(find(cards, side.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
-    expect(find(cards, s.instanceId).finalValue).toBe(CARD_DEFS.Skysplitter.base);
-  });
+describe("resolveBoard — Zeus-Born", () => {
+  it.each([3, 4, 5, 6].map((round) => [round, CARD_DEFS.Skysplitter.base + round]))(
+    "round %i -> value %i",
+    (round, expected) => {
+      const board: Board = new Map();
+      const c = place(board, 0, 0, "Skysplitter", "p1");
+      const { cards } = resolveBoard(board, BOUNDS, round);
+      expect(find(cards, c.instanceId).finalValue).toBe(expected);
+    }
+  );
 });
 
 describe("resolveBoard — Truthseeker", () => {
@@ -1275,7 +1272,7 @@ describe("resolveBoard — center effect: Kingslayer", () => {
     expect(totalsByOwner.p2).toBe(CARD_DEFS.Footman.base);
   });
 
-  it("Kingslayer's own value is modified by adjacent Bannerman/Earthshaker/Skysplitter, same as the center", () => {
+  it("Kingslayer's own value is modified by adjacent Bannerman/Earthshaker, same as the center", () => {
     const board: Board = new Map();
     place(board, 4, 3, "Bannerman", "p1", true); // adjacent to center (4,4) -> +1
     const shown = place(board, 0, 0, "Exile", "p2", true); // isolated, no neighbor penalty -- high enough base to survive the boosted hit without flooring

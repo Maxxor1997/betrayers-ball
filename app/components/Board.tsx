@@ -40,8 +40,8 @@ function ownerTextColorClass(state: GameState, ownerId: string): string {
  * -- see each one's own doc comment near flippingIds). See each class's own keyframe
  * in globals.css for the flavor behind it: Bannerman/Hornblower raises up mid-call.
  * Everyone else in the "Engine flourish" set is NOT here -- see
- * slideIds/chargeIds/coinFlipIds/igniteIds/flickerIds/hydraIds near flippingIds
- * instead.
+ * slideIds/chargeIds/coinFlipIds/igniteIds/flickerIds/hydraIds/chargePulseIds near
+ * flippingIds instead.
  */
 const MID_FLIP_ICON_CLASS: Partial<Record<CardId, string>> = {
   Bannerman: "card-icon-raise-call",
@@ -301,6 +301,13 @@ export function BoardGrid({
   // starting black. Settled-only means the viewer always sees the normal black
   // icon first, then the flash plays after.
   const FLAME_FLASH_MS = FLIP_ANIMATION_MS + 900;
+  // Skysplitter (Zeus-Born) only -- a bright pulse, flavor for "+1 per round
+  // elapsed" (it only ever gets stronger from here). Applied ONLY at the settled
+  // call site, same reasoning/timing as Inquisitor's flame flash above -- the
+  // viewer sees the card finish flipping first, then the pulse plays after, rather
+  // than the pulse racing the reveal itself. Slower than the original mid-flip
+  // version too (was 0.5s), now that it's not competing with the flip's own 500ms.
+  const CHARGE_PULSE_MS = FLIP_ANIMATION_MS + 1000;
   // Slightly longer than the flip itself and starting from the same moment -- reads as
   // "the flip caused this," not a separate, disconnected blink, while still giving a
   // beat after the card settles for the affected cells to actually register.
@@ -324,7 +331,8 @@ export function BoardGrid({
   const [heraldRiseIds, setHeraldRiseIds] = useState<Set<string>>(new Set());
   const [swordSwingIds, setSwordSwingIds] = useState<Set<string>>(new Set());
   const [flameFlashIds, setFlameFlashIds] = useState<Set<string>>(new Set());
-  // Neighbor/row/col cells a just-flipped card (Earthshaker, Chronicler, Skysplitter,
+  const [chargePulseIds, setChargePulseIds] = useState<Set<string>>(new Set());
+  // Neighbor/row/col cells a just-flipped card (Earthshaker, Chronicler/Doomherald,
   // Suppressor/Lictor, Truthseeker/Inquisitor, PlagueBearer, PlagueRat, ...) actually
   // hits -- see flipDisruptionTargets. Flashed with a red pulse (.card-disrupted in
   // globals.css) so a disruptive card's reveal reads as *why* it matters, not just
@@ -402,6 +410,7 @@ export function BoardGrid({
       })
       .map((key) => state.board.get(key)!.instanceId);
     const newlyFlameFlashed = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Truthseeker").map((key) => state.board.get(key)!.instanceId);
+    const newlyChargePulsed = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Skysplitter").map((key) => state.board.get(key)!.instanceId);
     // flipDisruptionTargets/flipBoostTargets don't themselves care whether a target
     // is face-up (the real scoring math doesn't either -- e.g. Earthshaker hits
     // every card in its row/col, Pretender's own penalty applies from a hidden
@@ -498,6 +507,7 @@ export function BoardGrid({
       flash(newlyHeraldRisen, setHeraldRiseIds, HERALD_RISE_MS),
       flash(newlySwordSwing, setSwordSwingIds, SWORD_SWING_MS),
       flash(newlyFlameFlashed, setFlameFlashIds, FLAME_FLASH_MS),
+      flash(newlyChargePulsed, setChargePulseIds, CHARGE_PULSE_MS),
       flash(newlyDisrupted, setDisruptedIds, DISRUPTION_FLASH_MS),
       flash(newlyEarthshaken, setEarthshakenIds, DISRUPTION_FLASH_MS),
       flash(newlyBoosted, setBoostedIds, DISRUPTION_FLASH_MS),
@@ -769,8 +779,15 @@ export function BoardGrid({
               !adjacentPositions(pos, state.config.boardBounds).some(
                 (p) => !isOwnerlessPosition(p, state.config.boardBounds) && !state.board.has(posKey(p))
               );
+            // Zeus-Born (Skysplitter) only -- +1 per round elapsed at scoring, with
+            // no cap of its own, but the game itself can never run past
+            // state.config.roundCap (a real, fully public, deterministic ceiling --
+            // see shouldEndGame in game.ts), so once the round counter reaches it,
+            // this card has already banked the largest bonus it's ever going to get.
+            const isZeusBornMaxed = card.cardId === "Skysplitter" && state.round >= state.config.roundCap;
             const activatedColorClass = isLictorActive || isNoctuleActive ? "text-amber-500 dark:text-amber-400" : "";
             const penalizedColorClass = isUsurperThreatened || isBearBoxedIn ? "text-red-600 dark:text-red-500" : "";
+            const maxedColorClass = isZeusBornMaxed ? "text-yellow-400 dark:text-yellow-300" : "";
             // Hovering a known card (revealed, or your own even if still face-down)
             // shows its short effect text -- same summary as the hand/catalog, not the
             // full rules text, so a mid-game hover stays a quick glance rather than a
@@ -827,6 +844,9 @@ export function BoardGrid({
             // Inquisitor (Truthseeker) only -- see FLAME_FLASH_MS near flippingIds
             // for why this only applies at the settled call site.
             const flameFlashClass = flameFlashIds.has(card.instanceId) ? "card-icon-flame-full-flash" : "";
+            // Skysplitter (Zeus-Born) only -- see CHARGE_PULSE_MS near flippingIds
+            // for why this only applies at the settled call site.
+            const chargePulseClass = chargePulseIds.has(card.instanceId) ? "card-icon-charge-pulse" : "";
             const midFlipIconClass = MID_FLIP_ICON_CLASS[card.cardId] ?? "";
             // A function, not a precomputed value, so the two call sites below (the
             // plain face-up render and the mid-flip 3D reveal -- see flippingIds
@@ -855,7 +875,7 @@ export function BoardGrid({
                 ) : (
                   <CardArt
                     cardId={card.cardId}
-                    className={`h-1/2 w-1/2 shrink-0 ${faded ? "text-zinc-400 dark:text-zinc-500" : `${activatedColorClass} ${penalizedColorClass}`} ${iconExtraClass}`}
+                    className={`h-1/2 w-1/2 shrink-0 ${faded ? "text-zinc-400 dark:text-zinc-500" : `${activatedColorClass} ${penalizedColorClass} ${maxedColorClass}`} ${iconExtraClass}`}
                   />
                 )}
                 <span className={`text-[length:clamp(9px,26cqw,15px)] leading-none font-bold ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}>
@@ -950,7 +970,7 @@ export function BoardGrid({
                     </div>
                   ) : displayFaceUp ? (
                     renderFaceUpContent(
-                      `${iconSpinClass} ${slideClass} ${flickerClass} ${chargeClass} ${coinFlipClass} ${swordSwingClass} ${noctuleFlyInClass} ${flameFlashClass}`,
+                      `${iconSpinClass} ${slideClass} ${flickerClass} ${chargeClass} ${coinFlipClass} ${swordSwingClass} ${noctuleFlyInClass} ${flameFlashClass} ${chargePulseClass}`,
                       pawDropIds.has(card.instanceId) || slamIds.has(card.instanceId) || igniteIds.has(card.instanceId) || crumbleIds.has(card.instanceId)
                     )
                   ) : (

@@ -734,39 +734,27 @@ describe("chooseGreedyAiAction — placement heuristics correct for what a one-p
     if (action.type === "place") expect(action.position.y).toBe(4);
   });
 
-  it("prefers a cell that hits both neighbors for Skysplitter, not just whichever helps against the current leader", () => {
-    const board: Board = new Map();
-    // Same untouchable-leader trick as the Earthshaker test above, but sealed by
-    // *column* instead of row -- Skysplitter only ever checks directly above/below
-    // (same column), so a fully-packed column (not row) is what makes p2 unreachable
-    // here. (A packed row would leak: every row-1 cell would sit directly below a p2
-    // card and become a legitimately better "hit the real leader" option, which is
-    // exactly what happened before this was column-sealed instead.)
-    for (let y = 0; y < 7; y++) {
-      board.set(posKey({ x: 6, y }), card("Giant", "p2", true));
-    }
-    // A "sandwich" at column 2 -- both above and below the empty middle cell are p3's.
-    board.set(posKey({ x: 2, y: 1 }), card("Footman", "p3"));
-    board.set(posKey({ x: 2, y: 3 }), card("Footman", "p3"));
-    // A lone p3 card elsewhere with nothing below it -- only a single hit available there.
-    board.set(posKey({ x: 4, y: 1 }), card("Footman", "p3"));
-
+  it("values Zeus-Born at the expected end-of-game round instead of the current (early) round", () => {
+    // Naive (round-1) values: Zeus-Born = base(2)+1=3. A lone Footman (no line of
+    // 3+ to complete) is a flat base = 5 -- Footman wins on Zeus-Born's deflated
+    // early snapshot. The expected-final-round correction credits Zeus-Born up
+    // instead: 2 + expectedFinalRound(4.5) = 6.5, which now beats Footman.
     const skysplitter = card("Skysplitter", "p1");
+    const footman = card("Footman", "p1");
     const state = makeState({
-      board,
       round: 1,
       players: [
-        { id: "p1", hand: [skysplitter], isAI: true },
+        { id: "p1", hand: [skysplitter, footman], isAI: true },
         { id: "p2", hand: [], isAI: true },
-        { id: "p3", hand: [], isAI: true },
       ],
     });
 
     const action = chooseGreedyAiAction(state, "p1", deterministicRng(1));
-    expect(action).toEqual({ type: "place", playerId: "p1", instanceId: skysplitter.instanceId, position: { x: 2, y: 2 } });
+    expect(action.type).toBe("place");
+    if (action.type === "place") expect(action.instanceId).toBe(skysplitter.instanceId);
   });
 
-  it("prefers hurting a non-leader opponent over an equally-scoring placement that hurts no one, for any card -- not just Earthshaker/Skysplitter", () => {
+  it("prefers hurting a non-leader opponent over an equally-scoring placement that hurts no one, for any card -- not just Earthshaker", () => {
     // This is the generic nonLeaderDisruptionBonus mechanism, not a per-card special
     // case -- proven here with Suppressor, which isn't in placementHeuristicAdjustment's
     // switch at all. Suppressor has no self-scoring effect of its own, so the *real*
