@@ -20,7 +20,8 @@ function requireCurrentPlayer(state: GameState, playerId: string): void {
 /**
  * Whether flipping is allowed on this round. Normally any round from
  * `flipUnlockRound` on (2p delays this to round 3 -- see configForPlayerCount). A
- * center effect can override via `flipGate` (unused by any current effect).
+ * center effect can override via `flipGate` -- The Pit of Erebus (shadowlands)
+ * delays it a further round on top of that.
  */
 export function isFlipUnlocked(round: number, config: GameConfig): boolean {
   const flipGate = CENTER_EFFECTS[config.centerEffect].flipGate;

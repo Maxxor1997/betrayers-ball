@@ -161,6 +161,24 @@ describe("redrawOffer", () => {
     expect(remaining).toHaveLength(0);
   });
 
+  it("never offers two cards of the same type, even when the pool holds multiple copies", () => {
+    const deck = deckOf("Footman", "Footman", "Footman", "Exile", "Warlord");
+    const { hand, deck: remaining } = redrawOffer(deck, [], "p1", rng);
+    expect(hand).toHaveLength(3);
+    expect(new Set(hand.map((c) => c.cardId)).size).toBe(3);
+    // Every duplicate Footman that got skipped over goes back into the deck untouched,
+    // not discarded -- the pool's total count is still conserved.
+    expect(remaining).toHaveLength(2);
+  });
+
+  it("draws fewer than 3 once the pool has fewer than 3 DISTINCT card types left, even with copies to spare", () => {
+    const deck = deckOf("Footman", "Footman", "Footman", "Exile", "Exile");
+    const { hand, deck: remaining } = redrawOffer(deck, [], "p1", rng);
+    expect(hand).toHaveLength(2);
+    expect(new Set(hand.map((c) => c.cardId))).toEqual(new Set(["Footman", "Exile"]));
+    expect(remaining).toHaveLength(3);
+  });
+
   it("returns an empty hand when the pool is completely exhausted", () => {
     const { hand, deck } = redrawOffer([], [], "p1", rng);
     expect(hand).toEqual([]);

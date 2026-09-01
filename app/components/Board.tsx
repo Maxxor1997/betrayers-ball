@@ -6,12 +6,14 @@ import { FixedTooltip } from "@/app/components/CardCatalog";
 import { BOLD_LOCATION_ART_IDS, LocationArt } from "@/app/components/LocationArt";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, KINGSLAYER_BASE_VALUE, KINGSLAYER_INSTANCE_ID } from "@/lib/content/centerEffects";
-import { adjacentPositions, getAdjacentCards, inBounds, isOwnerlessPosition, parsePosKey } from "@/lib/engine/board";
+import { adjacentPositions, getAdjacentCards, inBounds, isOwnerlessPosition, isPositionFaceUp, parsePosKey } from "@/lib/engine/board";
 import { PLAYER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 import { flipBoostTargets, flipDisruptionTargets, ResolvedCard } from "@/lib/engine/resolution";
+import { isFlipUnlocked } from "@/lib/engine/turns";
 import { CardId, CardInstance, GameState, Position, posKey } from "@/lib/engine/types";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useAssetExists } from "@/app/hooks/useAssetExists";
+import { useHallOfFortunesReveal } from "@/app/hooks/useHallOfFortunesReveal";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { BreakdownPopup } from "./scoreBreakdown";
 
@@ -25,6 +27,13 @@ function ownerColorClass(state: GameState, ownerId: string): string {
 function ownerTextColorClass(state: GameState, ownerId: string): string {
   const idx = state.players.findIndex((p) => p.id === ownerId);
   return PLAYER_TEXT_COLOR_CLASSES[idx] ?? "text-zinc-400";
+}
+
+/** Inclusive integer range [start, end] -- empty if start > end (e.g. a 0-width quadrant on a tiny board). */
+function range(start: number, end: number): number[] {
+  const out: number[] = [];
+  for (let i = start; i <= end; i++) out.push(i);
+  return out;
 }
 
 /**
@@ -308,12 +317,70 @@ export function BoardGrid({
   // than the pulse racing the reveal itself. Slower than the original mid-flip
   // version too (was 0.5s), now that it's not competing with the flip's own 500ms.
   const CHARGE_PULSE_MS = FLIP_ANIMATION_MS + 1000;
+  // Mirror Pool only -- a one-shot celebratory glow on the Pool's own ownerless
+  // tiles when a mirrored pair is newly revealed as a matching type (not a
+  // continuous status indicator -- an earlier version stayed lit for as long as
+  // the match remained face-up, which in practice meant forever once revealed,
+  // since cards don't flip back down). Powers off after this, regardless of
+  // whether the match is technically still on the board.
+  const POOL_GLOW_MS = 3000;
+  // Contested Lands (frontier) only -- same one-shot "flash then power off"
+  // treatment as Mirror Pool's own glow above, triggered by a newly PLACED card
+  // (any face state) landing adjacent to an opposing player's card, matching the
+  // location's own "+1 per distinct opposing neighbor" rule.
+  const RUIN_GLOW_MS = 3000;
   // Slightly longer than the flip itself and starting from the same moment -- reads as
   // "the flip caused this," not a separate, disconnected blink, while still giving a
   // beat after the card settles for the affected cells to actually register.
   const DISRUPTION_FLASH_MS = 800;
   const hasMountedRef = useRef(false);
   const prevFaceUpRef = useRef<Map<string, boolean>>(new Map());
+  // See the comment near where these are used, below -- poolGlowIds/ruinGlowIds
+  // manage their own timers independently of the shared `flash` helper's
+  // cleanups array, since that cleanup would otherwise cancel their pending
+  // removal whenever anything else on the board changes in the meantime.
+  const poolGlowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ruinGlowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The Frontier (borderlands) only -- its single Outpost tile glows every time a
+  // card lands on the board's edge (occupancy is always public, so this doesn't
+  // care about face state), same one-shot flash-then-power-off treatment as Ruin's
+  // own glow. Once every edge cell is finally occupied, the Outpost has nothing
+  // left to watch: instead of glowing forever it crumbles (reusing the same
+  // real-icon-copy .card-icon-crumble-piece-1..4 technique as Facestealer/
+  // Infiltrator's own crumble) and stays permanently empty after -- a one-time,
+  // one-way transition, not a Set/epoch since it can only ever happen once per
+  // game (occupied cells never become vacant again).
+  const OUTPOST_GLOW_MS = 3000;
+  const outpostGlowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const outpostCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevEdgeFullRef = useRef(false);
+  const prevEdgeOccupiedCountRef = useRef(0);
+  const [outpostGlowEpoch, setOutpostGlowEpoch] = useState(0);
+  const [outpostCrumbling, setOutpostCrumbling] = useState(false);
+  const [outpostCollapsed, setOutpostCollapsed] = useState(false);
+  // No Man's Land (Trench) only -- each of its 4 corner tiles gets a one-shot
+  // rotateY spin (reusing .card-icon-multi-spin, same rotation Usurper/Pretender's
+  // own icon-spin uses) the moment every real cell in that corner's own quadrant
+  // (split by the center row/column, same cross the location's own -2 debuff
+  // runs along) is filled. Purely positional/occupancy-based, so no hidden-info
+  // concern. Keyed by a fixed per-corner id ("tl"/"tr"/"bl"/"br"), add-only -- a
+  // quadrant can only ever transition from not-full to full once per game, so
+  // unlike the per-card Sets above this never needs its entries removed again.
+  const [trenchSpinCorners, setTrenchSpinCorners] = useState<Set<string>>(new Set());
+  const prevQuadrantFullRef = useRef<Record<string, boolean>>({ tl: false, tr: false, bl: false, br: false });
+  // No Man's Land (Trench) -- every Trench tile flashes together whenever a card
+  // lands on the center's row/column, same one-shot flash-then-power-off shape as
+  // Contested Lands'/the Outpost's own glows.
+  const trenchGlowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [trenchGlowEpoch, setTrenchGlowEpoch] = useState(0);
+  // Hall of Fortunes (reckoning) -- the 3 real Pillar tiles themselves (not a
+  // separate overlay elsewhere on the page) spin and morph into the viewer's own
+  // freshly-drawn 3-card offer, hold briefly, then revert back to plain Pillars.
+  // See useHallOfFortunesReveal's own doc comment -- the page-level Hand call
+  // site calls the SAME hook to delay showing/allowing the new offer until this
+  // finishes, so the cards never look "already available" while the Pillars are
+  // still pretending to draw them.
+  const { phase: hofPhase, displayCards: hofDisplayCards } = useHallOfFortunesReveal(state, viewerId);
   const [flippingIds, setFlippingIds] = useState<Set<string>>(new Set());
   const [risingIds, setRisingIds] = useState<Set<string>>(new Set());
   const [pawDropIds, setPawDropIds] = useState<Set<string>>(new Set());
@@ -332,6 +399,19 @@ export function BoardGrid({
   const [swordSwingIds, setSwordSwingIds] = useState<Set<string>>(new Set());
   const [flameFlashIds, setFlameFlashIds] = useState<Set<string>>(new Set());
   const [chargePulseIds, setChargePulseIds] = useState<Set<string>>(new Set());
+  // Not per-instance like the others -- there's only ever one Pool, so this is
+  // just a boolean flash (via the same `flash` helper below, using a single
+  // sentinel id) rather than a Set keyed by card instanceId.
+  // A monotonically increasing "epoch" rather than a boolean/Set -- used as a React
+  // `key` on the glow overlay below, so retriggering while a previous glow is still
+  // playing forces a fresh DOM node (and therefore a genuinely restarted CSS
+  // animation) instead of silently reusing the same element with the same
+  // className string, which React (and the browser) would treat as no change at
+  // all and never replay.
+  const [poolGlowEpoch, setPoolGlowEpoch] = useState(0);
+  // Same "epoch, not boolean" reasoning as poolGlowEpoch above -- Contested Lands
+  // has multiple Ruin tiles, but they all flash together as one location-wide event.
+  const [ruinGlowEpoch, setRuinGlowEpoch] = useState(0);
   // Neighbor/row/col cells a just-flipped card (Earthshaker, Chronicler/Doomherald,
   // Suppressor/Lictor, Truthseeker/Inquisitor, PlagueBearer, PlagueRat, ...) actually
   // hits -- see flipDisruptionTargets. Flashed with a red pulse (.card-disrupted in
@@ -354,16 +434,22 @@ export function BoardGrid({
     // two different animations (see FLIP_ANIMATION_MS/RISE_ANIMATION_MS above).
     const newlyFlipped: string[] = [];
     const newlyRisen: string[] = [];
+    // Any card whose instanceId wasn't tracked at all last render -- i.e. it was
+    // just placed this render, face-up or face-down (unlike newlyRisen above,
+    // which only counts a forceFaceUp card's first sighting). Drives Contested
+    // Lands' own Ruin glow below, which cares about placement adjacency, not flips.
+    const newlyPlaced: string[] = [];
     for (const [key, card] of state.board.entries()) {
       const prevValue = prev.get(card.instanceId);
       if (card.faceUp && prevValue === false) newlyFlipped.push(key);
       else if (card.faceUp && hasMountedRef.current && prevValue === undefined) newlyRisen.push(key);
+      if (hasMountedRef.current && prevValue === undefined) newlyPlaced.push(key);
       next.set(card.instanceId, card.faceUp);
     }
     prevFaceUpRef.current = next;
     hasMountedRef.current = true;
     const justRevealed = [...newlyFlipped, ...newlyRisen];
-    if (justRevealed.length === 0) return;
+    if (justRevealed.length === 0 && newlyPlaced.length === 0) return;
 
     // One-shot flash: adds `ids` to whichever set `setter` manages, then removes
     // exactly those ids again after `ms` -- shared by the flip/rise/disruption/boost
@@ -411,6 +497,71 @@ export function BoardGrid({
       .map((key) => state.board.get(key)!.instanceId);
     const newlyFlameFlashed = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Truthseeker").map((key) => state.board.get(key)!.instanceId);
     const newlyChargePulsed = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Skysplitter").map((key) => state.board.get(key)!.instanceId);
+    // Mirror Pool only -- did any card that just became face-up (flip or rise)
+    // complete a matching mirrored pair? Both sides must be face-up, same
+    // hidden-info reasoning as hasMirrorTypeMatch's own per-card badge below --
+    // a still-hidden mirror's identity shouldn't drive this either. Only ever
+    // needs to check `justRevealed` cards as the trigger (a match can't newly
+    // appear without one side of it just having flipped).
+    const newlyRevealedPoolMatch =
+      state.config.centerEffect === "mirrorPool" &&
+      justRevealed.some((key) => {
+        const c = state.board.get(key)!;
+        if (!c.faceUp) return false;
+        const p = parsePosKey(key);
+        const mirrorP = { x: p.x, y: 2 * state.config.boardBounds.center.y - p.y };
+        if (mirrorP.y === p.y) return false;
+        const mirrorC = state.board.get(posKey(mirrorP));
+        return !!mirrorC && mirrorC.faceUp && mirrorC.cardId === c.cardId;
+      })
+        ? ["pool"]
+        : [];
+    // Contested Lands (frontier) only -- did any card just placed this render end
+    // up adjacent to an opposing player's card? Ownership (unlike identity) is
+    // always public regardless of face state, so this checks every newly placed
+    // card's neighbors regardless of whether either side is face-up -- no
+    // hidden-info concern, matching the location's own "+1 per distinct opposing
+    // neighbor" rule, which also doesn't care about face state.
+    const newlyContestedGlow =
+      state.config.centerEffect === "frontier" &&
+      newlyPlaced.some((key) => {
+        const c = state.board.get(key)!;
+        return getAdjacentCards(state.board, state.config.boardBounds, parsePosKey(key)).some((n) => n.ownerId !== c.ownerId);
+      })
+        ? ["ruin"]
+        : [];
+    // No Man's Land (Trench) only -- spin each corner's own cannon once its own
+    // quadrant (split by the center row/column) is completely filled. Same
+    // "compare against the ref's last answer, only on a genuine placement" shape
+    // as the Outpost above, just once per corner instead of once total.
+    if (state.config.centerEffect === "noMansLand" && newlyPlaced.length > 0) {
+      const { width: bw, height: bh, center } = state.config.boardBounds;
+      // Each quadrant is bordered BY the cross (so it stops one short of
+      // center.x/center.y, exclusive) but otherwise runs all the way out to the
+      // board's own edge, INCLUSIVE -- the corner tile itself is the only cell
+      // excluded (it's the ownerless Trench tile, never a real board cell, so
+      // including it in the fullness check would make quadrantFull permanently
+      // false). An earlier version also excluded the whole edge row/column
+      // bordering that corner (starting the loop at xRange[0]+1/yRange[0]+1),
+      // which checked only the quadrant's own inner half -- triggering the spin
+      // once that smaller sub-area filled, well before the real quadrant was.
+      const corners: { id: string; xs: number[]; ys: number[]; corner: Position }[] = [
+        { id: "tl", xs: range(0, center.x - 1), ys: range(0, center.y - 1), corner: { x: 0, y: 0 } },
+        { id: "tr", xs: range(center.x + 1, bw - 1), ys: range(0, center.y - 1), corner: { x: bw - 1, y: 0 } },
+        { id: "bl", xs: range(0, center.x - 1), ys: range(center.y + 1, bh - 1), corner: { x: 0, y: bh - 1 } },
+        { id: "br", xs: range(center.x + 1, bw - 1), ys: range(center.y + 1, bh - 1), corner: { x: bw - 1, y: bh - 1 } },
+      ];
+      const newlyToSpin: string[] = [];
+      for (const { id, xs, ys, corner } of corners) {
+        if (prevQuadrantFullRef.current[id]) continue;
+        const quadrantCells: Position[] = [];
+        for (const x of xs) for (const y of ys) if (x !== corner.x || y !== corner.y) quadrantCells.push({ x, y });
+        const quadrantFull = quadrantCells.length > 0 && quadrantCells.every((p) => state.board.has(posKey(p)));
+        if (quadrantFull) newlyToSpin.push(id);
+        prevQuadrantFullRef.current[id] = quadrantFull;
+      }
+      if (newlyToSpin.length > 0) setTrenchSpinCorners((current) => new Set([...current, ...newlyToSpin]));
+    }
     // flipDisruptionTargets/flipBoostTargets don't themselves care whether a target
     // is face-up (the real scoring math doesn't either -- e.g. Earthshaker hits
     // every card in its row/col, Pretender's own penalty applies from a hidden
@@ -512,10 +663,128 @@ export function BoardGrid({
       flash(newlyEarthshaken, setEarthshakenIds, DISRUPTION_FLASH_MS),
       flash(newlyBoosted, setBoostedIds, DISRUPTION_FLASH_MS),
     ];
+    // poolGlowEpoch/ruinGlowEpoch deliberately do NOT go through the shared
+    // `flash` helper/cleanups array above, for two separate reasons found the
+    // hard way:
+    // 1. That cleanup cancels EVERY pending timer whenever this whole effect
+    //    re-runs for ANY reason (any other card flipping/placing elsewhere on
+    //    the board), not just the specific flash that scheduled it. Harmless for
+    //    the many per-instanceId sets above (a stray cancelled removal just
+    //    leaves one already-animated-out card's id orphaned in its own set, with
+    //    no visible effect since the CSS animation's own `forwards` fill already
+    //    holds its settled/off state regardless) -- but a single shared sentinel
+    //    id ("pool"/"ruin") getting permanently orphaned blocks every future
+    //    glow from ever being added again, since the id is already "in" the set
+    //    and React sees no change.
+    // 2. Even with dedicated timers (fixing #1), retriggering *while a previous
+    //    glow is still visually playing* produced an identical className string
+    //    both before and after ("pool-glow" -> "pool-glow"), which neither React
+    //    nor the browser treats as a change -- the DOM class attribute never
+    //    actually gets touched, so the CSS animation just keeps playing its
+    //    original cycle instead of restarting. An incrementing epoch used as a
+    //    React `key` (see the glow overlay below) forces a fresh DOM node on
+    //    every genuine trigger, which reliably restarts the animation regardless
+    //    of timing overlap with a previous one.
+    if (newlyRevealedPoolMatch.length > 0) {
+      if (poolGlowTimerRef.current) clearTimeout(poolGlowTimerRef.current);
+      setPoolGlowEpoch((e) => e + 1);
+      poolGlowTimerRef.current = setTimeout(() => setPoolGlowEpoch(0), POOL_GLOW_MS);
+    }
+    if (newlyContestedGlow.length > 0) {
+      if (ruinGlowTimerRef.current) clearTimeout(ruinGlowTimerRef.current);
+      setRuinGlowEpoch((e) => e + 1);
+      ruinGlowTimerRef.current = setTimeout(() => setRuinGlowEpoch(0), RUIN_GLOW_MS);
+    }
     return () => {
       for (const cleanup of cleanups) cleanup?.();
     };
   }, [state.board, state.config.boardBounds, state.round]);
+
+  // Genuine unmount-only cleanup for poolGlowTimerRef/ruinGlowTimerRef (see
+  // above) -- separate from the main effect since those timers deliberately
+  // outlive any single run of it.
+  useEffect(() => {
+    return () => {
+      if (poolGlowTimerRef.current) clearTimeout(poolGlowTimerRef.current);
+      if (ruinGlowTimerRef.current) clearTimeout(ruinGlowTimerRef.current);
+      if (outpostGlowTimerRef.current) clearTimeout(outpostGlowTimerRef.current);
+      if (outpostCollapseTimerRef.current) clearTimeout(outpostCollapseTimerRef.current);
+    };
+  }, []);
+
+  // The Frontier (borderlands)'s Outpost -- its own effect, deliberately NOT folded
+  // into the main flip/place-detection effect above: that one only ever runs its
+  // body past an early-return guard requiring a genuine flip or placement
+  // (justRevealed/newlyPlaced), so a pure removal (sandbox's remove-a-card mode)
+  // never reached this logic at all -- the Outpost would stay permanently
+  // collapsed even after the edge that completed it was broken back open, with no
+  // way to re-test the crumble without starting a whole new game. Recomputing
+  // "is the edge full" fresh on every board change (add OR remove) instead makes
+  // this naturally reversible: removing an edge card immediately pops the Outpost
+  // back (no reverse animation, it just wasn't there a moment ago either), and
+  // refilling the edge again re-triggers the same crumble.
+  useEffect(() => {
+    if (state.config.centerEffect !== "borderlands") return;
+    const { width: bw, height: bh } = state.config.boardBounds;
+    const onEdge = (p: Position) => p.x === 0 || p.y === 0 || p.x === bw - 1 || p.y === bh - 1;
+    const edgePositions: Position[] = [];
+    for (let x = 0; x < bw; x++)
+      for (let y = 0; y < bh; y++) if (onEdge({ x, y })) edgePositions.push({ x, y });
+    const occupiedCount = edgePositions.filter((p) => state.board.has(posKey(p))).length;
+    const edgeFullNow = occupiedCount === edgePositions.length;
+    const prevOccupiedCount = prevEdgeOccupiedCountRef.current;
+    prevEdgeOccupiedCountRef.current = occupiedCount;
+
+    if (edgeFullNow && !prevEdgeFullRef.current) {
+      if (outpostGlowTimerRef.current) clearTimeout(outpostGlowTimerRef.current);
+      setOutpostGlowEpoch(0);
+      setOutpostCrumbling(true);
+      if (outpostCollapseTimerRef.current) clearTimeout(outpostCollapseTimerRef.current);
+      outpostCollapseTimerRef.current = setTimeout(() => {
+        setOutpostCrumbling(false);
+        setOutpostCollapsed(true);
+      }, CRUMBLE_MS);
+    } else if (!edgeFullNow) {
+      if (outpostCollapsed || outpostCrumbling) {
+        if (outpostCollapseTimerRef.current) clearTimeout(outpostCollapseTimerRef.current);
+        setOutpostCrumbling(false);
+        setOutpostCollapsed(false);
+      }
+      if (occupiedCount > prevOccupiedCount) {
+        if (outpostGlowTimerRef.current) clearTimeout(outpostGlowTimerRef.current);
+        setOutpostGlowEpoch((e) => e + 1);
+        outpostGlowTimerRef.current = setTimeout(() => setOutpostGlowEpoch(0), OUTPOST_GLOW_MS);
+      }
+    }
+    prevEdgeFullRef.current = edgeFullNow;
+  }, [state.board, state.config.boardBounds, state.config.centerEffect, outpostCollapsed, outpostCrumbling]);
+
+  // No Man's Land (Trench) -- same reasoning as the Outpost's own dedicated effect
+  // above: glow every Trench tile whenever a card lands on the center's row/column
+  // (the "cross" -- see noMansLand's valueModifiers), on its own so a removal
+  // doesn't matter here either (nothing to revert -- this is a plain one-shot
+  // flash, not a permanent collapse).
+  const prevCrossOccupiedCountRef = useRef(0);
+  useEffect(() => {
+    if (state.config.centerEffect !== "noMansLand") return;
+    const { center } = state.config.boardBounds;
+    const onCross = (p: Position) => p.x === center.x || p.y === center.y;
+    let occupiedCount = 0;
+    for (const key of state.board.keys()) if (onCross(parsePosKey(key))) occupiedCount++;
+    const prevOccupiedCount = prevCrossOccupiedCountRef.current;
+    prevCrossOccupiedCountRef.current = occupiedCount;
+    if (occupiedCount > prevOccupiedCount) {
+      if (trenchGlowTimerRef.current) clearTimeout(trenchGlowTimerRef.current);
+      setTrenchGlowEpoch((e) => e + 1);
+      trenchGlowTimerRef.current = setTimeout(() => setTrenchGlowEpoch(0), OUTPOST_GLOW_MS);
+    }
+  }, [state.board, state.config.boardBounds, state.config.centerEffect]);
+
+  useEffect(() => {
+    return () => {
+      if (trenchGlowTimerRef.current) clearTimeout(trenchGlowTimerRef.current);
+    };
+  }, []);
 
   // Cells are sized to fill their grid column (aspect-square, no fixed px) rather than
   // a fixed h-20 w-20 -- with wider/taller boards (7-8p can be 11+ columns or rows) a
@@ -603,7 +872,7 @@ export function BoardGrid({
           const effectHighlightClass = inNoMansLandCross
             ? "shadow-[inset_0_0_0_9999px_rgba(113,113,122,0.1)]"
             : inWyrmHeadZone
-              ? "shadow-[inset_0_0_0_9999px_rgba(192,38,211,0.15)]"
+              ? "shadow-[inset_0_0_0_9999px_rgba(192,38,211,0.06)]"
               : onFrontierCorner
                 ? "shadow-[inset_0_0_0_9999px_rgba(56,145,197,0.28)]"
                 : onFrontierEdge
@@ -622,7 +891,79 @@ export function BoardGrid({
               (sideOfCenter === "left" && hasLeftLocationArt) || (sideOfCenter === "right" && hasRightLocationArt)
                 ? sideOfCenter
                 : undefined;
-            const hasArtForThisTile = artVariant !== undefined || hasLocationArt;
+            // The Frontier (borderlands) only -- once the board's edge is completely
+            // full the Outpost has permanently crumbled (see outpostCollapsed's own
+            // doc comment above) -- the tile shows nothing at all from then on,
+            // overriding hasArtForThisTile entirely rather than falling back to the
+            // plain solid-square fallback every other art-less location gets.
+            const isOutpostCollapsed = state.config.centerEffect === "borderlands" && outpostCollapsed;
+            // Hides the real icon for the whole crumble, not just once it's fully
+            // collapsed -- otherwise the real icon sits there fully visible
+            // underneath the falling pieces (which only fade out from full opacity
+            // themselves) for the whole ~650ms, reading as "the icon never actually
+            // left." Same "hide the real icon outright, don't just dim it" idea as
+            // Facestealer/Infiltrator's own card crumble.
+            const hideOutpostIcon = state.config.centerEffect === "borderlands" && (outpostCrumbling || outpostCollapsed);
+            const hasArtForThisTile = !hideOutpostIcon && (artVariant !== undefined || hasLocationArt);
+            // No Man's Land (Trench) only -- which corner (if any) this specific
+            // ownerless tile is, matching the same 4 positions ownerlessPositions
+            // itself returns -- drives trenchSpinCorners' one-shot rotateY spin
+            // below.
+            const trenchCornerId =
+              state.config.centerEffect === "noMansLand"
+                ? pos.x === 0 && pos.y === 0
+                  ? "tl"
+                  : pos.x === state.config.boardBounds.width - 1 && pos.y === 0
+                    ? "tr"
+                    : pos.x === 0 && pos.y === state.config.boardBounds.height - 1
+                      ? "bl"
+                      : pos.x === state.config.boardBounds.width - 1 && pos.y === state.config.boardBounds.height - 1
+                        ? "br"
+                        : undefined
+                : undefined;
+            const trenchSpinClass = trenchCornerId && trenchSpinCorners.has(trenchCornerId) ? "trench-cannon-flip" : "";
+            // Hall of Fortunes (reckoning) only -- which of this player's 3
+            // offered cards (if any) THIS specific Pillar tile is currently
+            // standing in for, purely by x position relative to center (matching
+            // reckoning's own ownerlessPositions: x-2/x/x+2 -- left-to-right is
+            // slot 0/1/2). Only set while hofPhase is active, so a Pillar tile
+            // renders completely normally the rest of the time.
+            const hofSlot =
+              state.config.centerEffect === "reckoning" && hofPhase !== "idle"
+                ? pos.x < state.config.boardBounds.center.x
+                  ? 0
+                  : pos.x > state.config.boardBounds.center.x
+                    ? 2
+                    : 1
+                : -1;
+            const hofCard = hofSlot >= 0 ? hofDisplayCards[hofSlot] : undefined;
+            const hofDef = hofCard ? CARD_DEFS[hofCard.cardId] : undefined;
+            // The Pit of Erebus (shadowlands) only -- its own moon icon turns red
+            // once flips actually unlock (they're delayed an extra round here, see
+            // flipGate in centerEffects.ts), as a visual cue that the location's
+            // own hold has lifted. Live/per-render off isFlipUnlocked, the same
+            // shared check turns.ts uses to decide real flip legality, not a
+            // hand-rolled copy of its round math. (An earlier version used a CSS
+            // `invert` filter instead -- on this location's own indigo theme
+            // color, that inverted to a yellow-green rather than anything
+            // meaningful, so this sets the color directly instead.)
+            const isErebusFlipUnlocked = state.config.centerEffect === "shadowlands" && isFlipUnlocked(state.round, state.config);
+            // Corpse of the Great Wyrm (threeHeadedDragon) only -- turns THIS
+            // specific head a pale bone-grey once every one of its own orthogonal neighbors is
+            // occupied (a real card, or another ownerless tile -- same "boxed in"
+            // definition Giant Bear's own tile-color check below uses), not just
+            // whenever any head anywhere is surrounded. Purely positional/occupancy
+            // -- never depends on a neighbor's hidden identity, so no leak concern.
+            const isHeadSurrounded =
+              state.config.centerEffect === "threeHeadedDragon" &&
+              !adjacentPositions(pos, state.config.boardBounds).some(
+                (p) => !isOwnerlessPosition(p, state.config.boardBounds) && !state.board.has(posKey(p))
+              );
+            const locationThemeColorClass = isHeadSurrounded
+              ? "text-stone-300 dark:text-stone-400"
+              : isErebusFlipUnlocked
+                ? "text-red-600 dark:text-red-500"
+                : effect.themeColorClass;
             // Always the flat base value, never the live computed one -- some of its
             // adjacency modifiers (Bannerman's, notably) don't require face-up, so
             // showing the true live value would leak a face-down card's identity
@@ -680,26 +1021,103 @@ export function BoardGrid({
                     labels, cutting them off; 70px pushes 8p back into the plain
                     fallback while a 4p board's much bigger cells stay comfortably
                     in text mode. */}
-                <div
-                  className={`hidden aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400 @[70px]:flex ${effectHighlightClass}`}
-                >
-                  {hasArtForThisTile && (
+                {!isOutpostCollapsed && !hofCard && (
+                  <div
+                    className={`hidden aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400 @[70px]:flex ${effectHighlightClass}`}
+                  >
+                    {hasArtForThisTile && (
+                      <LocationArt
+                        id={state.config.centerEffect}
+                        variant={artVariant}
+                        className={`${BOLD_LOCATION_ART_IDS.has(state.config.centerEffect) ? "h-3/4 w-3/4" : "h-1/2 w-1/2"} shrink-0 ${locationThemeColorClass} ${trenchSpinClass}`}
+                      />
+                    )}
+                    <span className="truncate">{displayLabel}</span>
+                  </div>
+                )}
+                {!isOutpostCollapsed &&
+                  !hofCard &&
+                  (hasArtForThisTile ? (
                     <LocationArt
                       id={state.config.centerEffect}
                       variant={artVariant}
-                      className={`${BOLD_LOCATION_ART_IDS.has(state.config.centerEffect) ? "h-3/4 w-3/4" : "h-1/2 w-1/2"} shrink-0 ${effect.themeColorClass}`}
+                      className={`aspect-square w-full rounded-md ${BOLD_LOCATION_ART_IDS.has(state.config.centerEffect) ? "" : "opacity-60"} @[70px]:hidden ${locationThemeColorClass} ${effectHighlightClass} ${trenchSpinClass}`}
                     />
-                  )}
-                  <span className="truncate">{displayLabel}</span>
-                </div>
-                {hasArtForThisTile ? (
-                  <LocationArt
-                    id={state.config.centerEffect}
-                    variant={artVariant}
-                    className={`aspect-square w-full rounded-md ${BOLD_LOCATION_ART_IDS.has(state.config.centerEffect) ? "" : "opacity-60"} @[70px]:hidden ${effect.themeColorClass} ${effectHighlightClass}`}
-                  />
-                ) : (
-                  <div className={`aspect-square w-full rounded-md opacity-60 @[70px]:hidden ${effect.themeColorClass} bg-current ${effectHighlightClass}`} />
+                  ) : (
+                    <div className={`aspect-square w-full rounded-md opacity-60 @[70px]:hidden ${locationThemeColorClass} bg-current ${effectHighlightClass}`} />
+                  ))}
+                {hofCard && hofDef && (
+                  // Hall of Fortunes only -- this specific Pillar tile is
+                  // standing in for one of the viewer's own 3 freshly-offered
+                  // cards (see hofSlot above): it spins in place through
+                  // hofPhase's own "spinning" window, then the Pillar face
+                  // fades out while the real card's icon/name/value fades in
+                  // underneath it at the same time (same cross-fade shape as
+                  // Outpost's crumble-then-empty transition, just revealing
+                  // instead of emptying), holds briefly, then hofPhase returns
+                  // to "idle" and this whole block stops rendering, letting the
+                  // tile fall back to its plain Pillar art above.
+                  <div className="@container absolute inset-0 z-20 aspect-square w-full overflow-hidden rounded-md border-2 border-dashed border-zinc-400 bg-white/85 p-1 dark:bg-zinc-950/85">
+                    <div
+                      className={`absolute inset-0 flex flex-col items-center justify-center gap-0.5 p-1 ${CENTER_EFFECTS.reckoning.themeColorClass} ${
+                        hofPhase === "revealed" ? "hof-reveal-fade-out" : "hof-pillar-spin"
+                      }`}
+                    >
+                      <LocationArt id="reckoning" className="h-3/4 w-3/4 shrink-0" />
+                    </div>
+                    <div
+                      className={`absolute inset-0 flex flex-col items-center justify-center gap-0.5 p-1 text-center opacity-0 ${
+                        hofPhase === "revealed" ? "hof-reveal-fade-in" : ""
+                      }`}
+                    >
+                      <span className="hidden w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight font-semibold @[48px]:block">
+                        {hofDef.name}
+                      </span>
+                      <CardArt cardId={hofCard.cardId} className="h-1/2 w-1/2 shrink-0" />
+                      <span className="text-[length:clamp(9px,26cqw,15px)] leading-none font-bold">{hofDef.base}</span>
+                    </div>
+                  </div>
+                )}
+                {outpostCrumbling && (
+                  // The Frontier (borderlands) only -- the Outpost's own icon
+                  // cracks into four falling quadrant pieces (same real-
+                  // LocationArt-copy technique as Facestealer/Infiltrator's own
+                  // card-icon crumble) the instant the board's edge is completely
+                  // filled, then the tile stays permanently empty (see
+                  // isOutpostCollapsed above) once outpostCollapsed flips true.
+                  <div className="pointer-events-none absolute inset-0 z-20">
+                    <LocationArt id={state.config.centerEffect} variant={artVariant} className={`absolute inset-0 card-icon-crumble-piece-1 ${locationThemeColorClass}`} />
+                    <LocationArt id={state.config.centerEffect} variant={artVariant} className={`absolute inset-0 card-icon-crumble-piece-2 ${locationThemeColorClass}`} />
+                    <LocationArt id={state.config.centerEffect} variant={artVariant} className={`absolute inset-0 card-icon-crumble-piece-3 ${locationThemeColorClass}`} />
+                    <LocationArt id={state.config.centerEffect} variant={artVariant} className={`absolute inset-0 card-icon-crumble-piece-4 ${locationThemeColorClass}`} />
+                  </div>
+                )}
+                {poolGlowEpoch > 0 && (
+                  // Mirror Pool only -- keyed by the epoch (see poolGlowEpoch's
+                  // own doc comment above) so retriggering while a previous glow
+                  // is still visible forces a genuinely fresh DOM node instead of
+                  // reusing one whose className string hasn't changed, which
+                  // would otherwise silently fail to restart the animation. A
+                  // separate overlay sibling (not a class on the tile boxes
+                  // above) specifically so it CAN be freely remounted without
+                  // affecting the tile's own icon/label content.
+                  <div key={poolGlowEpoch} className="pool-glow pointer-events-none absolute inset-0 rounded-md" />
+                )}
+                {ruinGlowEpoch > 0 && (
+                  // Contested Lands only -- same remount-to-restart reasoning as
+                  // Mirror Pool's own glow overlay above.
+                  <div key={ruinGlowEpoch} className="ruin-glow pointer-events-none absolute inset-0 rounded-md" />
+                )}
+                {outpostGlowEpoch > 0 && (
+                  // The Frontier (borderlands) only -- same remount-to-restart
+                  // reasoning as Mirror Pool/Contested Lands' own glow overlays
+                  // above.
+                  <div key={outpostGlowEpoch} className="outpost-glow pointer-events-none absolute inset-0 rounded-md" />
+                )}
+                {trenchGlowEpoch > 0 && (
+                  // No Man's Land only -- every Trench tile flashes together, same
+                  // remount-to-restart reasoning as the other glow overlays above.
+                  <div key={trenchGlowEpoch} className="trench-glow pointer-events-none absolute inset-0 rounded-md" />
                 )}
                 {activeTooltipId === tooltipId && activeRect && (
                   <FixedTooltip rect={activeRect}>
@@ -779,15 +1197,76 @@ export function BoardGrid({
               !adjacentPositions(pos, state.config.boardBounds).some(
                 (p) => !isOwnerlessPosition(p, state.config.boardBounds) && !state.board.has(posKey(p))
               );
+            // Mirror Pool only -- a small badge in the card's own top-right corner
+            // once its mirror position (same column, opposite side of the center
+            // row -- see mirrorPool's valueModifiers) holds a card of the exact same
+            // type, currently earning the location's own doubled "+2 each" bonus
+            // instead of the plain "+1 each" any occupied mirror gets. Requires BOTH
+            // this card and its mirror to be face-up -- a still-hidden card's
+            // identity (whether it happens to match) is exactly the kind of thing
+            // that shouldn't leak through a live badge before it's revealed, for
+            // either side of the match.
+            const mirrorPos = { x: pos.x, y: 2 * state.config.boardBounds.center.y - pos.y };
+            const mirrorCard = state.board.get(posKey(mirrorPos));
+            const hasMirrorTypeMatch =
+              state.config.centerEffect === "mirrorPool" &&
+              card.faceUp &&
+              mirrorPos.y !== pos.y &&
+              !!mirrorCard &&
+              mirrorCard.faceUp &&
+              mirrorCard.cardId === card.cardId;
             // Zeus-Born (Skysplitter) only -- +1 per round elapsed at scoring, with
             // no cap of its own, but the game itself can never run past
             // state.config.roundCap (a real, fully public, deterministic ceiling --
             // see shouldEndGame in game.ts), so once the round counter reaches it,
             // this card has already banked the largest bonus it's ever going to get.
             const isZeusBornMaxed = card.cardId === "Skysplitter" && state.round >= state.config.roundCap;
-            const activatedColorClass = isLictorActive || isNoctuleActive ? "text-amber-500 dark:text-amber-400" : "";
-            const penalizedColorClass = isUsurperThreatened || isBearBoxedIn ? "text-red-600 dark:text-red-500" : "";
+            // Dying God only -- same roundCap reasoning as Zeus-Born above, but for
+            // its own -1-per-round-elapsed penalty: once the round counter can't go
+            // any higher, its penalty has already hit the worst it's ever going to get.
+            const isDyingGodMaxed = card.cardId === "DyingGod" && state.round >= state.config.roundCap;
+            // Hipparch/Nightjar/Hydra/Conciliator only -- each has its own hard cap on
+            // how big its bonus can possibly get, and turns green once the live bonus
+            // has actually reached it. Hipparch/Nightjar's caps are just the physical
+            // 4-neighbor limit; Hydra/Conciliator's are additionally capped by the
+            // number of OTHER players actually in the game (can't have more unique
+            // enemy owners than that). Hipparch's and Hydra's own underlying
+            // conditions depend on a neighbor's/board-mate's IDENTITY, so (same
+            // reasoning as isUsurperThreatened/isNoctuleActive above) those two only
+            // ever count already-face-up cards, to avoid a hidden card's identity
+            // leaking through a "maxed out" hint it can't yet honestly earn.
+            // Nightjar's condition depends only on face STATE (always public) and
+            // Conciliator's only on OWNERSHIP (also always public), so neither needs
+            // that filtering.
+            const isHipparchMaxed =
+              card.cardId === "Commander" &&
+              getAdjacentCards(state.board, state.config.boardBounds, pos).filter((n) => n.faceUp && n.cardId === "Footman").length >= 4;
+            const isNightjarMaxed =
+              card.cardId === "Beacon" &&
+              adjacentPositions(pos, state.config.boardBounds).filter((p) => {
+                const occupied = isOwnerlessPosition(p, state.config.boardBounds) || state.board.has(posKey(p));
+                return occupied && isPositionFaceUp(state.board, state.config.boardBounds, p) === card.faceUp;
+              }).length >= 4;
+            const isHydraMaxed =
+              card.cardId === "Berserker" &&
+              new Set(
+                [...state.board.values()]
+                  .filter((c) => c.faceUp && c.cardId === "Berserker" && c.ownerId !== card.ownerId)
+                  .map((c) => c.ownerId)
+              ).size >=
+                state.players.length - 1;
+            const isConciliatorMaxed =
+              card.cardId === "Mercenary" &&
+              new Set(
+                getAdjacentCards(state.board, state.config.boardBounds, pos)
+                  .filter((n) => n.ownerId !== card.ownerId)
+                  .map((n) => n.ownerId)
+              ).size >= Math.min(4, state.players.length - 1);
+            const activatedColorClass = isLictorActive || isNoctuleActive ? "text-blue-500 dark:text-blue-400" : "";
+            const penalizedColorClass = isUsurperThreatened || isBearBoxedIn || isDyingGodMaxed ? "text-red-600 dark:text-red-500" : "";
             const maxedColorClass = isZeusBornMaxed ? "text-yellow-400 dark:text-yellow-300" : "";
+            const bonusMaxedColorClass =
+              isHipparchMaxed || isNightjarMaxed || isHydraMaxed || isConciliatorMaxed ? "text-green-600 dark:text-green-400" : "";
             // Hovering a known card (revealed, or your own even if still face-down)
             // shows its short effect text -- same summary as the hand/catalog, not the
             // full rules text, so a mid-game hover stays a quick glance rather than a
@@ -875,7 +1354,7 @@ export function BoardGrid({
                 ) : (
                   <CardArt
                     cardId={card.cardId}
-                    className={`h-1/2 w-1/2 shrink-0 ${faded ? "text-zinc-400 dark:text-zinc-500" : `${activatedColorClass} ${penalizedColorClass} ${maxedColorClass}`} ${iconExtraClass}`}
+                    className={`h-1/2 w-1/2 shrink-0 ${faded ? "text-zinc-400 dark:text-zinc-500" : `${activatedColorClass} ${penalizedColorClass} ${maxedColorClass} ${bonusMaxedColorClass}`} ${iconExtraClass}`}
                   />
                 )}
                 <span className={`text-[length:clamp(9px,26cqw,15px)] leading-none font-bold ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}>
@@ -891,6 +1370,30 @@ export function BoardGrid({
             // Only once the game has ended does a score breakdown exist -- see Game()'s
             // `resolvedCards`, computed once and shared with EndScreen's summary table.
             const resolvedCard = resolvedCards?.get(card.instanceId);
+            // Lazaret (championOfTheWeak) only -- a small green "buffed" cross in
+            // the card's top-right corner once the game has ended and this
+            // specific card was the one doubled (each player's own single lowest
+            // card). Keyed off the breakdown's own label rather than re-deriving
+            // "am I the lowest" here, so it can never drift out of sync with
+            // championOfTheWeak's real postResolution logic.
+            const wasLazaretBuffed =
+              state.config.centerEffect === "championOfTheWeak" &&
+              !!resolvedCard?.breakdown.some((d) => d.label.includes(CENTER_EFFECTS.championOfTheWeak.label));
+            // Dragon Gate (summit) only -- a small gate badge once the game has
+            // ended and this specific card was the one doubled (each player's own
+            // single highest face-up card). Same "keyed off the real breakdown
+            // label" reasoning as Lazaret's own badge above.
+            const wasSummitDoubled =
+              state.config.centerEffect === "summit" &&
+              !!resolvedCard?.breakdown.some((d) => d.label.includes(CENTER_EFFECTS.summit.label));
+            // Kingslayer's Court only -- a small sword badge (reusing the location's
+            // own kingslayer.svg icon, same "no dedicated badge asset needed" treatment
+            // as Mirror Pool's own badge) once the game has ended and this specific
+            // card was one of the ones Kingslayer's post-resolution hit. Read directly
+            // off the real `kingslayerHit` list (not re-derived from the breakdown
+            // label like Lazaret's/Dragon Gate's own badges above) since that list is
+            // exactly, and only, the instanceIds postResolution actually hit.
+            const wasKingslayerHit = state.config.centerEffect === "kingslayer" && (kingslayerHit?.includes(card.instanceId) ?? false);
             const tooltipId = `board:${key}`;
             return (
               <div
@@ -1136,6 +1639,49 @@ export function BoardGrid({
                   // like Giant Bear/Warlord -- the icon just raises in place, so a
                   // plain ring sibling is enough.
                   <div className="card-horn-pulse pointer-events-none absolute inset-[20%] z-10 rounded-full" />
+                )}
+                {hasMirrorTypeMatch && (
+                  // Mirror Pool only -- a small badge of the location's own icon in
+                  // the card's top-right corner while its mirror position holds a
+                  // face-up card of the exact same type (the location's own doubled
+                  // "+2 each" case, not just the plain "+1 each" any occupied mirror
+                  // gets). A sibling of the button, not a descendant, so the
+                  // button's own overflow-hidden never clips it.
+                  <LocationArt
+                    id="mirrorPool"
+                    className={`pointer-events-none absolute top-0.5 right-1.5 z-10 h-1/4 w-1/4 drop-shadow ${CENTER_EFFECTS.mirrorPool.themeColorClass}`}
+                  />
+                )}
+                {wasLazaretBuffed && (
+                  // Lazaret only -- a small green "+" (like a health-buff cross)
+                  // in the card's top-right corner, post-game only (see
+                  // resolvedCard above). No dedicated SVG asset needed for a plain
+                  // plus shape, unlike Mirror Pool's/Dragon Gate's own location
+                  // icons.
+                  <span className="pointer-events-none absolute top-0 right-1 z-10 text-[length:clamp(10px,30cqw,18px)] leading-none font-bold text-green-500 drop-shadow-sm dark:text-green-400">
+                    +
+                  </span>
+                )}
+                {wasSummitDoubled && (
+                  // Dragon Gate only -- a small, simplified version of the
+                  // location's own gate icon (see LocationArt's "badge" variant)
+                  // in the card's top-right corner, post-game only (see
+                  // resolvedCard above), same badge treatment as Mirror Pool's own.
+                  <LocationArt
+                    id="summit"
+                    variant="badge"
+                    className={`pointer-events-none absolute top-0.5 right-1.5 z-10 h-1/4 w-1/4 drop-shadow ${CENTER_EFFECTS.summit.themeColorClass}`}
+                  />
+                )}
+                {wasKingslayerHit && (
+                  // Kingslayer's Court only -- same top-right badge treatment as
+                  // Mirror Pool's own (no dedicated badge asset, just the
+                  // location's real icon at a small size), marking every card
+                  // Kingslayer's post-resolution hit for -kingslayerValue.
+                  <LocationArt
+                    id="kingslayer"
+                    className={`pointer-events-none absolute top-0.5 right-1.5 z-10 h-1/4 w-1/4 drop-shadow ${CENTER_EFFECTS.kingslayer.themeColorClass}`}
+                  />
                 )}
                 {activeTooltipId === tooltipId && activeRect && (
                   <FixedTooltip rect={activeRect}>

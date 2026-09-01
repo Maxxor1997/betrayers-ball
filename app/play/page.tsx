@@ -27,6 +27,7 @@ import { TurnActionChecklist } from "@/app/components/TurnActionChecklist";
 import { EndScreen } from "@/app/components/EndScreen";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
+import { useHallOfFortunesReveal } from "@/app/hooks/useHallOfFortunesReveal";
 import {
   loadHumanCardStats,
   loadHumanPlacementStats,
@@ -238,6 +239,12 @@ function Game() {
       initialSetup?.centerEffect === "random" ? pickRandomCenterEffect(playerCount) : (initialSetup?.centerEffect ?? "none");
     return newGameState(playerCount, centerEffect, initialSetup?.aiDifficulty ?? DEFAULT_AI_DIFFICULTY);
   });
+  // See useHallOfFortunesReveal's own doc comment -- called here too (not just
+  // inside Board.tsx) so Hand can hold off showing/allowing a freshly-drawn
+  // Hall of Fortunes offer until the Pillar tiles' own spin/reveal finishes
+  // playing, instead of the cards looking already available while the board is
+  // still mid-animation "drawing" them.
+  const hofReveal = useHallOfFortunesReveal(state, HUMAN);
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [pendingFlip, setPendingFlip] = useState<PendingFlip | null>(null);
@@ -597,7 +604,7 @@ function Game() {
       {(state.phase === "playing" || state.phase === "voting") && (
         <div className="flex w-full flex-col items-center gap-3">
           <Hand
-            cards={offeredCardsFor(state, HUMAN)}
+            cards={hofReveal.phase === "idle" ? offeredCardsFor(state, HUMAN) : []}
             selectedInstanceId={selectedInstanceId}
             onCardClick={handleHandCardClick}
             onCardDragStart={handleHandDragStart}

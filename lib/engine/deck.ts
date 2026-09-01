@@ -79,9 +79,15 @@ export function dealNewGame(
  * pool and reshuffled in first, so nothing is created or destroyed: the same cards
  * that exist across the whole deck at game start are exactly what circulates through
  * every player's offers all game, and an unplaced card can resurface later (to the
- * same player or an opponent). Draws fewer than 3 only once the combined pool itself
- * has fewer than 3 cards left (very late game) -- never silently capped by how many
- * *distinct* types remain, unlike a plain hand-limited sample would be.
+ * same player or an opponent).
+ *
+ * The 3 offered cards are always distinct BY CARD TYPE (see reckoning's own
+ * "3 random, unique cards" description) -- walks the shuffled pool in order, taking
+ * the first card of each new cardId it hasn't already picked and returning every
+ * skipped-over duplicate to the deck untouched, rather than a plain slice(0, 3) of
+ * the shuffled pool (which could easily hand back e.g. two Footmen at once, since the
+ * pool holds every remaining COPY, not just distinct types). Draws fewer than 3 only
+ * once the pool has fewer than 3 *distinct types* left (very late game).
  */
 export function redrawOffer(
   deck: DeckCard[],
@@ -91,9 +97,19 @@ export function redrawOffer(
 ): { hand: CardInstance[]; deck: DeckCard[] } {
   const returned: DeckCard[] = previousHand.map((c) => ({ instanceId: c.instanceId, cardId: c.cardId }));
   const pool = shuffle([...deck, ...returned], rng);
-  const count = Math.min(3, pool.length);
+  const seenCardIds = new Set<CardId>();
+  const offer: DeckCard[] = [];
+  const rest: DeckCard[] = [];
+  for (const c of pool) {
+    if (offer.length < 3 && !seenCardIds.has(c.cardId)) {
+      seenCardIds.add(c.cardId);
+      offer.push(c);
+    } else {
+      rest.push(c);
+    }
+  }
   return {
-    hand: pool.slice(0, count).map((c) => ({ ...c, ownerId, faceUp: false })),
-    deck: pool.slice(count),
+    hand: offer.map((c) => ({ ...c, ownerId, faceUp: false })),
+    deck: rest,
   };
 }

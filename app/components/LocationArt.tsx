@@ -36,9 +36,11 @@ export const BOLD_LOCATION_ART_IDS = new Set<CenterEffectId>(["noMansLand", "fre
  * resulting content-box instead -- contain then fits within that smaller box, with
  * zero risk of overflow or of the wrong axis winning out.
  *
- * A map (not a flat set) since the right margin isn't one-size-fits-all -- kingslayer/
- * borderlands/threeHeadedDragon only needed a touch of clearance, while
- * noMansLand/reckoning's own art sits closer to their edges and wanted more.
+ * A map (not a flat set) since the right margin isn't one-size-fits-all --
+ * kingslayer/borderlands/threeHeadedDragon only needed a touch of clearance,
+ * noMansLand/reckoning's own art sits closer to their edges and wanted more, and
+ * summit's own entry is asymmetric (top-only, plain CSS `padding` shorthand) --
+ * not a corner-clipping fix at all, just extra breathing room above the icon.
  */
 export const SHRINK_LOCATION_ART_PADDING: Partial<Record<CenterEffectId, string>> = {
   freeCities: "10%",
@@ -47,6 +49,7 @@ export const SHRINK_LOCATION_ART_PADDING: Partial<Record<CenterEffectId, string>
   noMansLand: "10%",
   threeHeadedDragon: "6%",
   reckoning: "10%",
+  summit: "8% 0 0 0",
 };
 
 /**
@@ -66,8 +69,8 @@ export function LocationArt({
   className = "",
 }: {
   id: CenterEffectId;
-  /** Renders public/location-art/<id>-left.svg or -right.svg instead of the plain <id>.svg -- e.g. Dragon Gate's own left/right half-gate art, one half per ownerless tile. */
-  variant?: "left" | "right";
+  /** Renders public/location-art/<id>-left.svg, -right.svg, or -badge.svg instead of the plain <id>.svg -- left/right are e.g. Dragon Gate's own left/right half-gate art, one half per ownerless tile; badge is a simplified/cropped version meant to read clearly at a small size (e.g. Dragon Gate's own small top-right card badge, see Board.tsx's wasSummitDoubled), separate from the main tile's own full art. */
+  variant?: "left" | "right" | "badge";
   className?: string;
 }) {
   const url = `/location-art/${id}${variant ? `-${variant}` : ""}.svg`;

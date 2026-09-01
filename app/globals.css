@@ -78,6 +78,177 @@ html {
   }
 }
 
+/* Mirror Pool's own ownerless tiles -- a one-shot celebratory blue glow (cyan,
+   distinct from .turn-glow's emerald) right when a mirrored pair is newly
+   revealed as a matching type (see Board.tsx's poolGlowIds/POOL_GLOW_MS) --
+   flares up, holds briefly, then genuinely powers off by fading to nothing,
+   rather than pulsing forever for as long as the match happens to still be
+   face-up (which in practice meant forever, since cards don't flip back down).
+   Duration matches POOL_GLOW_MS exactly so the fade-to-off lands right as the
+   class itself gets removed, instead of an abrupt cutoff mid-glow. */
+@keyframes pool-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
+  }
+  10% {
+    box-shadow:
+      0 0 0 2px rgba(34, 211, 238, 0.85),
+      0 0 30px 9px rgba(34, 211, 238, 0.6);
+  }
+  40% {
+    box-shadow:
+      0 0 0 2px rgba(34, 211, 238, 0.6),
+      0 0 22px 6px rgba(34, 211, 238, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
+  }
+}
+
+.pool-glow {
+  animation: pool-glow 3s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pool-glow {
+    /* A one-shot flash, not a persistent state -- skip it outright rather than
+       leaving a static glow on indefinitely (it's removed via a timer, not a
+       transition, so there'd be no reduced-motion-safe way to fade it off). */
+    animation: none;
+    box-shadow: none;
+  }
+}
+
+/* Contested Lands' own Ruin tiles -- same one-shot flash-then-power-off shape as
+   Mirror Pool's own glow above, orange instead of cyan, triggered by a newly
+   placed card (any face state) landing adjacent to an opposing player's card
+   (see Board.tsx's ruinGlowIds/RUIN_GLOW_MS). */
+@keyframes ruin-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
+  }
+  10% {
+    box-shadow:
+      0 0 0 2px rgba(249, 115, 22, 0.85),
+      0 0 30px 9px rgba(249, 115, 22, 0.6);
+  }
+  40% {
+    box-shadow:
+      0 0 0 2px rgba(249, 115, 22, 0.6),
+      0 0 22px 6px rgba(249, 115, 22, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
+  }
+}
+
+.ruin-glow {
+  animation: ruin-glow 3s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ruin-glow {
+    animation: none;
+    box-shadow: none;
+  }
+}
+
+/* The Frontier's own Outpost tile -- same one-shot flash-then-power-off shape as
+   Mirror Pool's/Contested Lands' own glows above, stone-colored to match the
+   location's own theme, triggered by any card landing on the board's edge (see
+   Board.tsx's outpostGlowEpoch/OUTPOST_GLOW_MS). Stops appearing for good once
+   the edge is completely full -- see outpostCrumbling/outpostCollapsed instead. */
+@keyframes outpost-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(120, 113, 108, 0);
+  }
+  10% {
+    box-shadow:
+      0 0 0 2px rgba(120, 113, 108, 0.85),
+      0 0 30px 9px rgba(120, 113, 108, 0.6);
+  }
+  40% {
+    box-shadow:
+      0 0 0 2px rgba(120, 113, 108, 0.6),
+      0 0 22px 6px rgba(120, 113, 108, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(120, 113, 108, 0);
+  }
+}
+
+.outpost-glow {
+  animation: outpost-glow 3s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .outpost-glow {
+    animation: none;
+    box-shadow: none;
+  }
+}
+
+/* No Man's Land's own Trench tiles -- same one-shot flash-then-power-off shape as
+   the other locations' glows above, neutral-grey to match the location's own
+   theme, triggered by any card landing on the center's row/column (the "cross" --
+   see noMansLand's valueModifiers). All 4 Trench tiles flash together as one
+   location-wide event, same as Contested Lands' multiple Ruin tiles. */
+@keyframes trench-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(115, 115, 115, 0);
+  }
+  10% {
+    box-shadow:
+      0 0 0 2px rgba(115, 115, 115, 0.85),
+      0 0 30px 9px rgba(115, 115, 115, 0.6);
+  }
+  40% {
+    box-shadow:
+      0 0 0 2px rgba(115, 115, 115, 0.6),
+      0 0 22px 6px rgba(115, 115, 115, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(115, 115, 115, 0);
+  }
+}
+
+.trench-glow {
+  animation: trench-glow 3s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trench-glow {
+    animation: none;
+    box-shadow: none;
+  }
+}
+
+/* No Man's Land's own cannons -- a single one-shot rotateY flip (NOT a spin that
+   returns to its starting look, unlike Usurper's own card-icon-multi-spin) the
+   moment a corner's own quadrant is completely filled -- ends at 180deg and
+   STAYS there via `forwards`, reading as "this cannon has now turned to face the
+   other way" rather than a coin-spin flourish that settles back to normal. */
+@keyframes trench-cannon-flip {
+  0% {
+    transform: perspective(400px) rotateY(0deg);
+  }
+  100% {
+    transform: perspective(400px) rotateY(180deg);
+  }
+}
+
+.trench-cannon-flip {
+  animation: trench-cannon-flip 0.6s ease-in-out forwards;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trench-cannon-flip {
+    animation: none;
+    transform: perspective(400px) rotateY(180deg);
+  }
+}
+
 /* A board card's face-down-to-face-up reveal -- see Board.tsx's flippingIds, which
    mounts this markup only for the ~500ms the animation plays, then settles back into
    the plain single-face render every other card uses. Classic two-face 3D flip: the
@@ -1072,5 +1243,68 @@ html {
 @media (prefers-reduced-motion: reduce) {
   .card-boosted {
     animation: none;
+  }
+}
+
+/* Hall of Fortunes' own pillar-draw flourish (see HallOfFortunesReveal.tsx) -- each
+   pillar spins in place (same rotateY dimension as Usurper's own icon-spin) for the
+   whole "spinning" phase, then the pillar face fades out while the real card face
+   fades in underneath it at the same time, so the swap reads as one continuous
+   reveal rather than two separately-timed pieces. */
+@keyframes hof-pillar-spin {
+  0% {
+    transform: perspective(400px) rotateY(0deg);
+  }
+  100% {
+    transform: perspective(400px) rotateY(720deg);
+  }
+}
+
+.hof-pillar-spin {
+  animation: hof-pillar-spin 1.1s cubic-bezier(0.3, 0.1, 0.3, 1) forwards;
+  transform-origin: center;
+}
+
+@keyframes hof-reveal-fade-out {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+.hof-reveal-fade-out {
+  animation: hof-reveal-fade-out 0.35s ease-in forwards;
+}
+
+@keyframes hof-reveal-fade-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.hof-reveal-fade-in {
+  animation: hof-reveal-fade-in 0.35s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hof-pillar-spin,
+  .hof-reveal-fade-out,
+  .hof-reveal-fade-in {
+    animation: none;
+  }
+  .hof-reveal-fade-out {
+    opacity: 0;
+  }
+  .hof-reveal-fade-in {
+    opacity: 1;
   }
 }
