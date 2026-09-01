@@ -118,6 +118,70 @@ html {
   }
 }
 
+/* Usurper (Pretender) only -- just its icon spinning around its own vertical center
+   axis in place (same rotateY dimension the card's own flip uses -- like a baton
+   twirling, not a flat pinwheel spin -- but never swapping to a second "back" face
+   the way the card's own two-face flip does; `perspective()` chained directly into
+   the transform is what gives a single flat icon that real spinning-coin depth
+   instead of just squashing its width), an extra full turn or two before settling
+   back at its normal upright orientation. Each turn's own keyframe step covers a
+   bigger share of the total time than the last (360deg over 35% of the duration,
+   then a final 65% -- ending at 720deg, a clean multiple of 360, so it settles at
+   the exact same upright angle it started at) -- unlike a single easing curve
+   applied to one spin, this keyframe-level deceleration is what actually reads as
+   "losing momentum" across MULTIPLE spins, like a coin settling flat instead of just
+   one slower turn. Runs independently of (and outlasts) the card's own flip -- see
+   Board.tsx's pretenderSpinIds/PRETENDER_SPIN_MS -- so it keeps spinning
+   uninterrupted as the card itself finishes flipping and settles face-up
+   underneath it. */
+.card-icon-multi-spin {
+  animation: card-icon-multi-spin 2.4s cubic-bezier(0.2, 0.6, 0.3, 1) forwards;
+  transform-origin: center;
+}
+
+@keyframes card-icon-multi-spin {
+  0% {
+    transform: perspective(400px) rotateY(0deg);
+  }
+  35% {
+    transform: perspective(400px) rotateY(360deg);
+  }
+  100% {
+    transform: perspective(400px) rotateY(720deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-multi-spin {
+    animation: none;
+  }
+}
+
+/* Dying God only -- its hourglass icon (public/card-art/DyingGod.svg) starts upside
+   down (as if it'd been sitting inverted while face-down) and rights itself over the
+   same span as the card's own 3D flip (see Board.tsx's FLIP_ANIMATION_MS/
+   renderFaceUpContent) -- the sand starts running the moment it's turned over, for
+   "-1 per round elapsed". */
+@keyframes card-hourglass-flip {
+  from {
+    transform: rotate(180deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+.card-hourglass-flip {
+  animation: card-hourglass-flip 0.5s ease-in-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-hourglass-flip {
+    animation: none;
+    transform: rotate(0deg);
+  }
+}
+
 /* A forceFaceUp card (Cyclops) has no face-down state to flip away from -- it's
    revealed the instant it's placed, not flipped later -- so instead of .card-flip-*
    above, the real card underneath stays completely normal (no transform on it at
@@ -151,6 +215,669 @@ html {
   .card-rise-overlay {
     animation: none;
     display: none;
+  }
+}
+
+/* Doomherald/Chronicler -- same idea as Cyclops's rise above, just bigger and a
+   touch slower/longer-lived to give the extra size room to read clearly (see
+   Board.tsx's HERALD_RISE_MS/heraldRiseIds) -- a doom-herald's reveal ought to
+   loom larger than a cyclops's. */
+@keyframes card-herald-rise-overlay-pop {
+  0% {
+    transform: scale(0.5) translateY(0);
+    opacity: 1;
+  }
+  35% {
+    transform: scale(2.4) translateY(-35%);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(3.6) translateY(-85%);
+    opacity: 0;
+  }
+}
+
+.card-herald-rise-overlay {
+  animation: card-herald-rise-overlay-pop 0.9s cubic-bezier(0.25, 0.8, 0.3, 1) forwards;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-herald-rise-overlay {
+    animation: none;
+    display: none;
+  }
+}
+
+/* Giant Bear (Exile) only -- the reverse of .card-rise-overlay above: rather than an
+   already-visible icon popping up and fading away, the real card is left with an
+   empty icon slot (see Board.tsx's renderFaceUpContent/hideIcon) while this overlay's
+   copy starts large, high, and invisible, then drops down and settles into its normal
+   resting size/position, overshooting slightly on landing and settling back -- like a
+   paw stomping down. A sibling of the button, not a descendant, so the button's own
+   `overflow-hidden` never clips it. */
+@keyframes card-paw-drop {
+  0% {
+    transform: scale(2.6) translateY(-90%);
+    opacity: 0;
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+.card-paw-drop {
+  /* A single overshoot-and-settle curve, not separate keyframes fighting each other
+     over direction (scale up, then down, then up again reads as jittery) -- the
+     bezier's own y > 1 control point already gives one clean, confident overshoot
+     past the resting size on landing before easing back to it. */
+  animation: card-paw-drop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-paw-drop {
+    animation: none;
+  }
+}
+
+/* Warlord only -- same idea as .card-paw-drop above (icon starts big/high/invisible,
+   drops into its normal resting spot), but faster and harder, ending in a sharp
+   landing instead of a floaty overshoot-and-settle -- a slam, not a gentle drop. */
+@keyframes card-slam-drop {
+  0% {
+    transform: scale(2.2) translateY(-80%);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08) translateY(2%);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+.card-slam-drop {
+  animation: card-slam-drop 0.45s cubic-bezier(0.55, 0, 0.85, 0.85) forwards;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-slam-drop {
+    animation: none;
+  }
+}
+
+/* Warlord's own one-shot shockwave -- a ring that stays invisible through the first
+   half of the slam (while the icon is still falling), then expands out and fades
+   right as .card-slam-drop above actually lands, reading as the impact itself
+   rather than a separate, disconnected effect. Same 0.45s duration as the drop so
+   they always finish together. */
+@keyframes card-slam-shockwave {
+  0%,
+  55% {
+    transform: scale(0.3);
+    opacity: 0;
+    border-width: 3px;
+  }
+  70% {
+    transform: scale(1);
+    opacity: 0.85;
+    border-width: 3px;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+    border-width: 1px;
+  }
+}
+
+.card-slam-shockwave {
+  animation: card-slam-shockwave 0.45s ease-out forwards;
+  border: 3px solid rgb(180 83 9); /* amber-700 -- a bronze/war-banner tone, distinct from every other card's own effect color */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-slam-shockwave {
+    animation: none;
+    display: none;
+  }
+}
+
+/* The rest of this section is one small, one-shot icon flourish per Engine card,
+   all playing only during the card's own mid-flip reveal (see Board.tsx's
+   MID_FLIP_ICON_CLASS) -- unlike Pretender's spin or Giant Bear's/Warlord's drops
+   above, none of these need to outlast the flip or swap in a separate overlay, so
+   they're each just a class applied straight to the real icon for the reveal. */
+
+/* Footman/Hoplite -- slides in slowly from the left once the card has settled into
+   its plain (non-3D) face-up render -- see Board.tsx's slideIds/hideIcon for why
+   this plays AFTER the flip instead of nested inside it: a translateX composed with
+   an ancestor mid-rotateY (the 3D flip) reads as warped/juddery, not a clean slide,
+   so the icon stays blank through the flip itself and only starts moving once
+   there's no rotated ancestor left to compound with. */
+@keyframes card-icon-slide-in {
+  0% {
+    transform: translateX(-170%);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.card-icon-slide-in {
+  animation: card-icon-slide-in 0.75s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-slide-in {
+    animation: none;
+  }
+}
+
+/* Berserker/Hydra -- briefly splits into two ghost heads before merging back into
+   one, instead of just appearing -- cut one off, two more show up. Two real,
+   separately positioned CardArt copies (see Board.tsx's hydraIds), not a
+   `filter: drop-shadow` on the one real icon -- drop-shadow combined with
+   CardArt's own `mask-image` rendered as no visible effect at all in testing (an
+   unreliable filter/mask pairing), so this slides two actual extra elements out
+   and fades them instead. Plays on a separate overlay outside the card's own
+   overflow-hidden button -- the ghosts slide out past the icon's own small
+   bounding box, which the button would otherwise clip. Percentage-based
+   translateX (relative to the ghost's own size, not a fixed pixel offset) so it
+   reads the same regardless of how large or small the board's cells are. */
+@keyframes card-icon-hydra-ghost-left {
+  0% {
+    opacity: 0.85;
+    transform: translateX(-85%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-10%);
+  }
+}
+
+@keyframes card-icon-hydra-ghost-right {
+  0% {
+    opacity: 0.85;
+    transform: translateX(85%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(10%);
+  }
+}
+
+.card-icon-hydra-ghost-left {
+  animation: card-icon-hydra-ghost-left 0.5s ease-out forwards;
+}
+
+.card-icon-hydra-ghost-right {
+  animation: card-icon-hydra-ghost-right 0.5s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-hydra-ghost-left,
+  .card-icon-hydra-ghost-right {
+    animation: none;
+    display: none;
+  }
+}
+
+/* Plague Rat -- five extra ghost copies (same "real CardArt element, not
+   filter/mask" reasoning as Hydra's ghosts above) scurry outward in different
+   directions and fade away, like a plague of rats scattering off the card,
+   instead of converging back into one. Percentage-based translate (relative to
+   each ghost's own size) so it scales with the board's own cell size, same as
+   Hydra's ghosts. A slight rotate on each so they read as scurrying, not just
+   sliding in a straight line. */
+@keyframes card-icon-scatter-1 {
+  0% {
+    opacity: 0.9;
+    transform: translate(0%, 0%) rotate(0deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-130%, -110%) rotate(-25deg) scale(0.6);
+  }
+}
+
+@keyframes card-icon-scatter-2 {
+  0% {
+    opacity: 0.9;
+    transform: translate(0%, 0%) rotate(0deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(0%, -160%) rotate(8deg) scale(0.6);
+  }
+}
+
+@keyframes card-icon-scatter-3 {
+  0% {
+    opacity: 0.9;
+    transform: translate(0%, 0%) rotate(0deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(130%, -110%) rotate(25deg) scale(0.6);
+  }
+}
+
+@keyframes card-icon-scatter-4 {
+  0% {
+    opacity: 0.9;
+    transform: translate(0%, 0%) rotate(0deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-120%, 100%) rotate(-18deg) scale(0.6);
+  }
+}
+
+@keyframes card-icon-scatter-5 {
+  0% {
+    opacity: 0.9;
+    transform: translate(0%, 0%) rotate(0deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(120%, 100%) rotate(18deg) scale(0.6);
+  }
+}
+
+.card-icon-scatter-1 {
+  animation: card-icon-scatter-1 0.55s ease-in forwards;
+}
+.card-icon-scatter-2 {
+  animation: card-icon-scatter-2 0.55s ease-in forwards;
+}
+.card-icon-scatter-3 {
+  animation: card-icon-scatter-3 0.55s ease-in forwards;
+}
+.card-icon-scatter-4 {
+  animation: card-icon-scatter-4 0.55s ease-in forwards;
+}
+.card-icon-scatter-5 {
+  animation: card-icon-scatter-5 0.55s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-scatter-1,
+  .card-icon-scatter-2,
+  .card-icon-scatter-3,
+  .card-icon-scatter-4,
+  .card-icon-scatter-5 {
+    animation: none;
+    display: none;
+  }
+}
+
+/* Facestealer/Infiltrator -- the four quadrant pieces of the borrowed face (see
+   Board.tsx's crumbleIds overlay), each `clip-path`-cropped to its own quarter of
+   the icon (same real-CardArt-copy technique as Hydra's/Plague Rat's ghosts, not a
+   filter trick), crack apart and fall away with a bit of a tumble, staggered
+   slightly so they don't all break off in perfect unison. Gravity-style easing
+   (ease-in, accelerating) rather than the floaty ease-out the other ghost effects
+   use -- these are falling, not drifting. */
+@keyframes card-icon-crumble-piece-1 {
+  0% {
+    opacity: 0.9;
+    transform: translate(0%, 0%) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-30%, 95%) rotate(-35deg);
+  }
+}
+
+@keyframes card-icon-crumble-piece-2 {
+  0% {
+    opacity: 0.9;
+    transform: translate(0%, 0%) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(30%, 100%) rotate(28deg);
+  }
+}
+
+@keyframes card-icon-crumble-piece-3 {
+  0% {
+    opacity: 0.9;
+    transform: translate(0%, 0%) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-45%, 80%) rotate(-22deg);
+  }
+}
+
+@keyframes card-icon-crumble-piece-4 {
+  0% {
+    opacity: 0.9;
+    transform: translate(0%, 0%) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(45%, 85%) rotate(20deg);
+  }
+}
+
+.card-icon-crumble-piece-1 {
+  clip-path: inset(0 50% 50% 0);
+  animation: card-icon-crumble-piece-1 0.5s ease-in 0s forwards;
+}
+.card-icon-crumble-piece-2 {
+  clip-path: inset(0 0 50% 50%);
+  animation: card-icon-crumble-piece-2 0.5s ease-in 0.05s forwards;
+}
+.card-icon-crumble-piece-3 {
+  clip-path: inset(50% 50% 0 0);
+  animation: card-icon-crumble-piece-3 0.5s ease-in 0.1s forwards;
+}
+.card-icon-crumble-piece-4 {
+  clip-path: inset(50% 0 0 50%);
+  animation: card-icon-crumble-piece-4 0.5s ease-in 0.15s forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-crumble-piece-1,
+  .card-icon-crumble-piece-2,
+  .card-icon-crumble-piece-3,
+  .card-icon-crumble-piece-4 {
+    animation: none;
+    display: none;
+  }
+}
+
+/* Noctule/PlagueBearer -- flies in diagonally from the bottom-right corner and
+   settles into the box, like a bat swooping in to roost. Plays after the card has
+   settled into its plain (non-3D) face-up render -- same reason as Footman's
+   slide/Commander's charge: a translate nested inside the parent's own
+   simultaneous rotateY flip reads as a warped judder. A single overshoot-and-settle
+   curve (same technique as Giant Bear's paw-drop landing) instead of separate
+   reversal keyframes, so the settle reads as one smooth swoop, not a shaky flicker. */
+@keyframes card-icon-noctule-fly-in {
+  0% {
+    transform: translate(160%, 160%) scale(0.8);
+  }
+  100% {
+    transform: translate(0%, 0%) scale(1);
+  }
+}
+
+.card-icon-noctule-fly-in {
+  animation: card-icon-noctule-fly-in 0.65s cubic-bezier(0.3, 0.9, 0.34, 1.15) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-noctule-fly-in {
+    animation: none;
+  }
+}
+
+/* Commander/Hipparch -- charges in from the side like cavalry, harder than
+   Footman's own slide-in so the two never read as the same effect. Plays after
+   the card has settled into its plain (non-3D) face-up render -- see Board.tsx's
+   chargeIds/hideIcon -- same reason as Footman's slide: a translateX composed
+   with an ancestor mid-rotateY (the 3D flip) reads as a warped flicker, not a
+   clean charge, so the icon stays blank through the flip itself. A single
+   overshoot-and-settle curve (no separate reversal keyframes) so the landing
+   reads as one smooth skid, not a shaky flicker. */
+@keyframes card-icon-charge-in {
+  0% {
+    transform: translateX(-220%) scale(0.85);
+  }
+  100% {
+    transform: translateX(0) scale(1);
+  }
+}
+
+.card-icon-charge-in {
+  animation: card-icon-charge-in 0.55s cubic-bezier(0.34, 1.4, 0.64, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-charge-in {
+    animation: none;
+  }
+}
+
+/* Gloryseeker/Pyre-Bird -- the card starts blank (see Board.tsx's igniteIds/
+   hideIcon, same "hide the real icon, overlay a copy" trick as Giant Bear's paw
+   drop/Warlord's slam below), then a bright fire-colored version of the icon
+   materializes out of nothing, then chars down through black before settling to
+   the icon's own normal color (`inherit`) right at the very end -- so the
+   handoff to the real icon underneath is seamless in both light and dark mode.
+   Pure opacity/color/scale, no rotation of any kind. */
+@keyframes card-ignite-materialize {
+  0% {
+    opacity: 0;
+    color: rgb(24 24 27);
+    transform: scale(0.88);
+  }
+  40% {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+  62% {
+    opacity: 1;
+    color: rgb(249 115 22);
+    transform: scale(1);
+  }
+  80% {
+    color: rgb(249 115 22);
+  }
+  94% {
+    color: rgb(24 24 27);
+  }
+  100% {
+    opacity: 1;
+    color: inherit;
+    transform: scale(1);
+  }
+}
+
+.card-ignite-materialize {
+  animation: card-ignite-materialize 1.3s ease-in-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-ignite-materialize {
+    animation: none;
+  }
+}
+
+/* Bannerman/Hornblower -- raises up mid-call rather than just appearing, paired
+   with .card-horn-pulse below (a rally-call ring, not an impact -- see Board.tsx's
+   flippingIds-gated sibling overlay) timed to peak at the same moment. */
+@keyframes card-icon-raise-call {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  35% {
+    transform: translateY(-18%) scale(1.08);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+.card-icon-raise-call {
+  animation: card-icon-raise-call 0.5s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-raise-call {
+    animation: none;
+  }
+}
+
+@keyframes card-horn-pulse {
+  0%,
+  25% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  45% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+.card-horn-pulse {
+  animation: card-horn-pulse 0.5s ease-out forwards;
+  border: 3px solid rgb(202 138 4); /* yellow-600 -- a rallying-gold tone, distinct from Warlord's bronze shockwave */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-horn-pulse {
+    animation: none;
+    display: none;
+  }
+}
+
+/* Truthseeker/Inquisitor -- the whole icon flashes red, held for a beat, then
+   settles back to normal. Applied straight to the real icon (see Board.tsx's
+   flameFlashClass, continuous across both call sites like iconSpinClass/
+   flickerClass) rather than a clip-path-cropped overlay -- simpler, and avoids
+   the earlier version's own timing bug (a cropped copy needing to wait for the
+   real icon to actually be visible before it could line up with it). */
+@keyframes card-icon-flame-full-flash {
+  0% {
+    color: inherit;
+  }
+  25% {
+    color: rgb(239 68 68);
+  }
+  70% {
+    color: rgb(239 68 68);
+  }
+  100% {
+    color: inherit;
+  }
+}
+
+.card-icon-flame-full-flash {
+  animation: card-icon-flame-full-flash 0.9s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-flame-full-flash {
+    animation: none;
+  }
+}
+
+/* Suppressor/Lictor -- swings like a blade on reveal, but only when its own
+   ability is actually active (3+ adjacent occupied cells, see Board.tsx's
+   newlySwordSwing) -- an inert Lictor with too few neighbors doesn't swing at
+   all. Plays after the card has settled into its plain (non-3D) face-up render
+   -- same reasoning as Footman's slide/Commander's charge: a rotation nested
+   inside the parent's own simultaneous rotateY flip reads as a warped judder, not
+   a clean swing. Pivots near the bottom (transform-origin), like a blade swung
+   from a hilt, winding back before swinging through and settling. */
+@keyframes card-icon-sword-swing {
+  0% {
+    transform: rotate(-62deg);
+  }
+  55% {
+    transform: rotate(34deg);
+  }
+  80% {
+    transform: rotate(-10deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.card-icon-sword-swing {
+  animation: card-icon-sword-swing 0.6s cubic-bezier(0.3, 0.6, 0.3, 1) forwards;
+  transform-origin: 50% 85%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-sword-swing {
+    animation: none;
+  }
+}
+
+/* Mercenary/Conciliator -- a quick coin-flip spin (same rotateY dimension as
+   Pretender's own spin, but just once) ending in a noncommittal little tilt-wobble
+   instead of a clean settle -- works for whoever's paying, never fully committed. */
+/* Plays after the card has settled into its plain (non-3D) face-up render -- see
+   Board.tsx's coinFlipIds/hideIcon -- same reason as Footman/Commander above: this
+   icon does its own perspective+rotateY 3D spin, and nesting that inside the
+   parent's own simultaneous rotateY flip (.card-flip-face-back) compounds into a
+   visible flicker rather than a clean coin flip. A single overshoot-and-settle
+   shake (one keyframe, eased) instead of multiple alternating reversals, so the
+   ending reads as one definite jewel shake, not a flicker. */
+@keyframes card-icon-coin-flip {
+  0% {
+    transform: perspective(400px) rotateY(0deg) rotate(0deg);
+  }
+  50% {
+    transform: perspective(400px) rotateY(360deg) rotate(0deg);
+  }
+  72% {
+    transform: perspective(400px) rotateY(360deg) rotate(14deg);
+  }
+  100% {
+    transform: perspective(400px) rotateY(360deg) rotate(0deg);
+  }
+}
+
+.card-icon-coin-flip {
+  animation: card-icon-coin-flip 0.55s ease-out forwards;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-coin-flip {
+    animation: none;
+  }
+}
+
+/* Beacon/Nightjar -- fades in and out a few slow, gentle times like a blinking
+   signal (or camouflage breaking) before settling steady, instead of just
+   appearing solid. Slow enough now (see Board.tsx's flickerIds/FLICKER_MS) that
+   it plays applied continuously across the mid-flip and settled renders, same
+   as Pretender's own spin, rather than being confined to a single
+   MID_FLIP_ICON_CLASS pass. */
+@keyframes card-icon-flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  22% {
+    opacity: 0.08;
+  }
+  45% {
+    opacity: 1;
+  }
+  68% {
+    opacity: 0.08;
+  }
+}
+
+.card-icon-flicker {
+  animation: card-icon-flicker 1.8s ease-in-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-flicker {
+    animation: none;
   }
 }
 
@@ -191,6 +918,69 @@ html {
 
 @media (prefers-reduced-motion: reduce) {
   .card-disrupted {
+    animation: none;
+  }
+}
+
+/* Earthshaker only -- a self-contained combination of .card-disrupted's own red
+   flash PLUS a side-to-side ground-shake rotation, since a literal earthquake
+   ought to visibly rattle what it hits, not just flash red like every other
+   disruptor. This can't just be .card-disrupted plus a second class adding its own
+   `animation: rotate(...)` -- two classes each setting the `animation` shorthand
+   on the same element don't compose; the one that wins the cascade replaces the
+   whole property, silently dropping the other's box-shadow entirely (which is
+   exactly what happened on the first attempt at this -- the red flash vanished).
+   So instead this is one keyframe animating both box-shadow AND transform
+   together, mirroring .card-disrupted-flash's own box-shadow schedule with a
+   rotation folded into the same transform (decaying oscillation via non-uniform
+   keyframe spacing -- same "reads as losing momentum" technique as Usurper's own
+   spin) -- see Board.tsx's earthshakenIds, which renders this INSTEAD of
+   .card-disrupted for Earthshaker's own targets, not in addition to it. */
+@keyframes card-earthshake-wobble-anim {
+  0% {
+    box-shadow:
+      0 0 0 2px rgba(239, 68, 68, 0.95),
+      0 0 16px 4px rgba(239, 68, 68, 0.7);
+    transform: rotate(0deg) scale(1);
+  }
+  10% {
+    transform: rotate(-6deg) scale(0.95);
+  }
+  15% {
+    box-shadow:
+      0 0 0 4px rgba(239, 68, 68, 1),
+      0 0 24px 8px rgba(239, 68, 68, 0.9);
+  }
+  20% {
+    transform: rotate(5deg) scale(0.94);
+  }
+  32% {
+    transform: rotate(-4deg) scale(0.97);
+  }
+  40% {
+    box-shadow:
+      0 0 0 3px rgba(239, 68, 68, 0.8),
+      0 0 18px 6px rgba(239, 68, 68, 0.6);
+    transform: rotate(3deg) scale(1.04);
+  }
+  60% {
+    transform: rotate(-2deg) scale(1.02);
+  }
+  78% {
+    transform: rotate(1deg) scale(1.01);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+.card-earthshake-wobble {
+  animation: card-earthshake-wobble-anim 0.8s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-earthshake-wobble {
     animation: none;
   }
 }
