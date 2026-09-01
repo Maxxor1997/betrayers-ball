@@ -334,6 +334,7 @@ function Sandbox() {
           dragOverKey={dragOverKey}
           revealAll={showScoring}
           resolvedCards={showScoring ? resolvedCardsMap : undefined}
+          kingslayerHit={showScoring ? resolved.kingslayerHit : undefined}
           forceAllClickable
           onCellClick={handleCellClick}
           onCellDragOver={handleCellDragOver}

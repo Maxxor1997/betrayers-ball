@@ -54,6 +54,8 @@ export interface BoardGridProps {
   revealAll: boolean;
   /** Scoring breakdown per instanceId, once the game has ended -- see EndScreen. */
   resolvedCards?: Map<string, ResolvedCard>;
+  /** Kingslayer only -- instanceIds of the card(s) it hit, once the game has ended -- see EndScreen's own "Kingslayer hit: ..." line, which this mirrors on the tile's own hover instead of a separate summary. */
+  kingslayerHit?: string[];
   onCellClick: (pos: Position) => void;
   onCellDragOver: (e: React.DragEvent, key: string) => void;
   onCellDragLeave: () => void;
@@ -99,6 +101,7 @@ export function BoardGrid({
   dragOverKey,
   revealAll,
   resolvedCards,
+  kingslayerHit,
   forceAllClickable,
   onCellClick,
   onCellDragOver,
@@ -394,32 +397,18 @@ export function BoardGrid({
       .map((key) => state.board.get(key)!.instanceId);
     const newlyFlameFlashed = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Truthseeker").map((key) => state.board.get(key)!.instanceId);
     // flipDisruptionTargets/flipBoostTargets don't themselves care whether a target
-    // is face-up (the real scoring math doesn't either -- e.g. Pretender's own
-    // penalty applies from a hidden neighbor just as much as a visible one), but for
-    // some disruptors (Noctule/PlagueBearer notably -- it only steals from neighbors
-    // that happen to MATCH another neighbor's type) which specific neighbors get hit
-    // depends on hidden identity, so flashing red/green on a still-face-down target
-    // would leak that it matches/qualifies before it's ever flipped. Filtering every
-    // target list down to currently-face-up cards closes that off uniformly, rather
-    // than trying to special-case only the disruptors whose targeting is
-    // identity-dependent -- a face-down card never gets a visual flash of any kind,
-    // full stop.
-    const isFaceUpInstance = (instanceId: string) => {
-      for (const c of state.board.values()) {
-        if (c.instanceId === instanceId) return c.faceUp;
-      }
-      return false;
-    };
-    // PlagueBearer (Noctule) only -- filtering the target list down to face-up
-    // cards (below) isn't enough on its own: if it has one face-up and one
-    // face-down neighbor of the same type, the real board genuinely has a 2+
-    // match, so the face-up neighbor would still get flagged and flash red even
-    // though its OWN visible neighborhood doesn't show a second match -- a lone
-    // visible neighbor flashing only makes sense if there's a second (hidden) match
-    // somewhere, which gives away that the hidden neighbor shares its type. So its
-    // targets get recomputed using only currently-visible neighbors (same idea as
-    // isSelfBoostVisible above, just for the target side instead of the self side)
-    // rather than trusting flipDisruptionTargets' real-board answer directly.
+    // is face-up (the real scoring math doesn't either -- e.g. Earthshaker hits
+    // every card in its row/col, Pretender's own penalty applies from a hidden
+    // neighbor just as much as a visible one). Most disruptors are "blanket": which
+    // cells get hit is determined purely by POSITION (row/col, adjacency), so
+    // flashing red on a hidden target reveals nothing about its identity that
+    // wasn't already obvious from the board layout alone -- Earthshaker's targets in
+    // particular should flash (wobble included) even face-down, since every card in
+    // its row/col genuinely gets hit and hiding that would just look like a bug.
+    // PlagueBearer/Noctule is the one exception: which specific neighbors get hit
+    // depends on hidden IDENTITY (do two neighbors happen to match types), so its
+    // targets get their own special-cased, visible-only recomputation below instead
+    // of trusting flipDisruptionTargets' real-board answer directly.
     const visiblePlagueBearerTargets = (pos: Position): string[] => {
       const groups = new Map<CardId, string[]>();
       for (const n of getAdjacentCards(state.board, state.config.boardBounds, pos)) {
@@ -430,28 +419,25 @@ export function BoardGrid({
       }
       return [...groups.values()].filter((group) => group.length >= 2).flat();
     };
-    const newlyDisrupted = justRevealed
-      .flatMap((key) => {
-        const card = state.board.get(key)!;
-        const pos = parsePosKey(key);
-        return card.cardId === "PlagueBearer"
-          ? visiblePlagueBearerTargets(pos)
-          : flipDisruptionTargets(state.board, state.config.boardBounds, state.round, pos, card);
-      })
-      .filter(isFaceUpInstance);
+    const newlyDisrupted = justRevealed.flatMap((key) => {
+      const card = state.board.get(key)!;
+      const pos = parsePosKey(key);
+      return card.cardId === "PlagueBearer"
+        ? visiblePlagueBearerTargets(pos)
+        : flipDisruptionTargets(state.board, state.config.boardBounds, state.round, pos, card);
+    });
     // Earthshaker only -- its own disruption targets get the red flash PLUS a
     // wobble (see .card-earthshake-wobble in globals.css, rendered INSTEAD of the
     // plain .card-disrupted every other disruptor's targets get -- two classes
     // each setting their own `animation` shorthand on one element don't compose),
     // since a literal earthquake should shake the ground it hits harder than a
-    // generic debuff.
+    // generic debuff. Every card in its row/col, hidden or not.
     const newlyEarthshaken = justRevealed
       .filter((key) => state.board.get(key)!.cardId === "Earthshaker")
       .flatMap((key) => {
         const card = state.board.get(key)!;
         return flipDisruptionTargets(state.board, state.config.boardBounds, state.round, parsePosKey(key), card);
-      })
-      .filter(isFaceUpInstance);
+      });
     // flipBoostTargets deliberately includes a card's own self-boost (see its own
     // doc comment), unlike flipDisruptionTargets which excludes self entirely --
     // for most self-boosters that's harmless (Footman's line bonus depends only on
@@ -481,14 +467,12 @@ export function BoardGrid({
       }
       return true;
     };
-    const newlyBoosted = justRevealed
-      .flatMap((key) => {
-        const card = state.board.get(key)!;
-        const pos = parsePosKey(key);
-        const targets = flipBoostTargets(state.board, state.config.boardBounds, state.round, pos, card);
-        return isSelfBoostVisible(card, pos) ? targets : targets.filter((id) => id !== card.instanceId);
-      })
-      .filter(isFaceUpInstance);
+    const newlyBoosted = justRevealed.flatMap((key) => {
+      const card = state.board.get(key)!;
+      const pos = parsePosKey(key);
+      const targets = flipBoostTargets(state.board, state.config.boardBounds, state.round, pos, card);
+      return isSelfBoostVisible(card, pos) ? targets : targets.filter((id) => id !== card.instanceId);
+    });
 
     const cleanups = [
       flash(newlyFlippedIds, setFlippingIds, FLIP_ANIMATION_MS),
@@ -697,7 +681,24 @@ export function BoardGrid({
                 )}
                 {activeTooltipId === tooltipId && activeRect && (
                   <FixedTooltip rect={activeRect}>
-                    {displayLabel} — {detail}
+                    {/* The location's own full name (e.g. "Lazaret"), not the tile's
+                        own short ownerlessLabel (e.g. "Ward") that's shown ON the
+                        tile itself -- the tile stays a compact positional label, but
+                        the hover is explaining the whole location's rule, so it
+                        should read by the location's actual name. */}
+                    {effect.label} — {detail}
+                    {kingslayerHit && kingslayerHit.length > 0 && (
+                      <div className="mt-1">
+                        Hit:{" "}
+                        {kingslayerHit
+                          .map((id) => {
+                            const hitCard = resolvedCards?.get(id);
+                            return hitCard ? `${CARD_DEFS[hitCard.cardId].name} (${nameFor(hitCard.ownerId)})` : null;
+                          })
+                          .filter(Boolean)
+                          .join(", ")}
+                      </div>
+                    )}
                     {kingslayerCard && (
                       <div className="mt-1 border-t border-white/20 pt-1 dark:border-black/20">
                         <BreakdownPopup breakdown={kingslayerCard.breakdown} finalValue={kingslayerCard.finalValue} />

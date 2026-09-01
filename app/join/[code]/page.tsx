@@ -646,6 +646,7 @@ function GameView({
         dragOverKey={dragOverKey}
         revealAll={state.phase === "ended"}
         resolvedCards={resolvedCards}
+        kingslayerHit={endResult?.kingslayerHit}
         onCellClick={handleBoardCellClick}
         onCellDragOver={handleCellDragOver}
         onCellDragLeave={() => setDragOverKey(null)}
