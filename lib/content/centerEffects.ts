@@ -158,7 +158,7 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     themeColorClass: "text-orange-700 dark:text-orange-500",
     titleHighlight: "Contested",
     description: "Every card gains +1 for each distinct opposing player with a card adjacent to it.",
-    ownerlessLabel: "Watchtower",
+    ownerlessLabel: "Ruin",
     // The 4 diagonal corners of the 3x3 block surrounding center, not out at the
     // edges -- right where round-1's forced placement pushes everyone first, so
     // there are fewer real neighbor slots to go around in the exact area where
@@ -241,10 +241,9 @@ export const CENTER_EFFECTS: Record<CenterEffectId, CenterEffectDef> = {
     description:
       "At the end of the game, each player's single highest-valued face-up card is worth double (a tie is broken by whichever was placed last).",
     ownerlessLabel: "Gate",
-    ownerlessPositions: (bounds) => {
-      const { x, y } = bounds.center;
-      return [{ x: x - 1, y }, { x: x + 1, y }].filter((p) => inBounds(p, bounds));
-    },
+    // No ownerlessPositions override -- a single gate sits on the default center
+    // tile, same as most other locations, rather than two flanking tiles either
+    // side of a real, placeable center.
     postResolution: ({ cards, totalsByOwner }) => {
       const byOwner = new Map<string, ResolvedCard[]>();
       for (const c of cards) {

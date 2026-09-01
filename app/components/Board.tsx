@@ -589,9 +589,9 @@ export function BoardGrid({
             : inWyrmHeadZone
               ? "shadow-[inset_0_0_0_9999px_rgba(192,38,211,0.15)]"
               : onFrontierCorner
-                ? "shadow-[inset_0_0_0_9999px_rgba(245,158,11,0.28)]"
+                ? "shadow-[inset_0_0_0_9999px_rgba(56,145,197,0.28)]"
                 : onFrontierEdge
-                  ? "shadow-[inset_0_0_0_9999px_rgba(245,158,11,0.14)]"
+                  ? "shadow-[inset_0_0_0_9999px_rgba(56,145,197,0.14)]"
                   : "";
 
           if (isOwnerless) {
