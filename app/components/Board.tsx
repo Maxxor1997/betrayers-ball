@@ -7,7 +7,7 @@ import { BOLD_LOCATION_ART_IDS, LocationArt } from "@/app/components/LocationArt
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, KINGSLAYER_BASE_VALUE, KINGSLAYER_INSTANCE_ID } from "@/lib/content/centerEffects";
 import { adjacentPositions, getAdjacentCards, inBounds, isOwnerlessPosition, parsePosKey } from "@/lib/engine/board";
-import { PLAYER_COLOR_CLASSES } from "@/lib/config/players";
+import { PLAYER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 import { flipBoostTargets, flipDisruptionTargets, ResolvedCard } from "@/lib/engine/resolution";
 import { CardId, CardInstance, GameState, Position, posKey } from "@/lib/engine/types";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
@@ -19,6 +19,12 @@ import { BreakdownPopup } from "./scoreBreakdown";
 function ownerColorClass(state: GameState, ownerId: string): string {
   const idx = state.players.findIndex((p) => p.id === ownerId);
   return PLAYER_COLOR_CLASSES[idx] ?? "border-zinc-400";
+}
+
+/** Same idea as ownerColorClass, but a plain `text-*` color -- for the card-back diamond (see card-back-pattern), which reads its color via `bg-current` rather than the button's own border/background classes. */
+function ownerTextColorClass(state: GameState, ownerId: string): string {
+  const idx = state.players.findIndex((p) => p.id === ownerId);
+  return PLAYER_TEXT_COLOR_CLASSES[idx] ?? "text-zinc-400";
 }
 
 /**
@@ -925,7 +931,7 @@ export function BoardGrid({
                     // into the plain single-branch render below, same as always.
                     <div className="card-flip-inner">
                       <div className="card-flip-face flex items-center justify-center">
-                        <span className="text-[length:clamp(12px,40cqw,20px)]">🂠</span>
+                        <div className={`card-back-pattern h-full w-full opacity-40 ${ownerTextColorClass(state, card.ownerId)}`} />
                       </div>
                       <div className="card-flip-face card-flip-face-back flex flex-col items-center justify-center gap-0.5">
                         {renderFaceUpContent(
@@ -948,7 +954,7 @@ export function BoardGrid({
                       pawDropIds.has(card.instanceId) || slamIds.has(card.instanceId) || igniteIds.has(card.instanceId) || crumbleIds.has(card.instanceId)
                     )
                   ) : (
-                    <span className="text-[length:clamp(12px,40cqw,20px)]">🂠</span>
+                    <div className={`card-back-pattern h-full w-full opacity-40 ${ownerTextColorClass(state, card.ownerId)}`} />
                   )}
                 </button>
                 {risingIds.has(card.instanceId) && (

@@ -111,6 +111,31 @@ html {
   transform: rotateY(180deg);
 }
 
+/* Face-down card back -- a single centered diamond instead of a flat generic
+   glyph, same "solid currentColor shape via CSS mask" technique as CardArt/
+   LocationArt (a data URI here instead of a public/ file, since it's one small
+   inline shape rather than real per-card art). `mask-size: contain` (not a fixed
+   tile) so it scales cleanly with the card instead of tiling -- a repeating
+   pattern (diamond lattice, then a dot grid) was tried first and didn't read
+   well at card scale, so this is just the one shape, sized via the element's
+   own className at each call site (same h-1/2-style sizing as a real card's
+   icon). */
+.card-back-pattern {
+  background-color: currentColor;
+  /* A real SVG (public/card-back.svg), same technique as CardArt/LocationArt,
+     instead of a hand-coded data-URI polygon -- several rounds of hand-picked
+     coordinates (a plain diamond, then nested/star/frame variants) never quite
+     looked right without being able to preview them directly. */
+  -webkit-mask-image: url("/card-back.svg");
+  mask-image: url("/card-back.svg");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card-flip-inner {
     animation: none;

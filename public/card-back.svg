@@ -1,0 +1,103 @@
+<?xml version="1.0" standalone="no"?>
+<svg version="1.0" xmlns="http://www.w3.org/2000/svg"
+ width="1280.000000pt" height="1280.000000pt" viewBox="0 0 1280.000000 1280.000000"
+ preserveAspectRatio="xMidYMid meet">
+<!-- Original art only had visible content in its own top left corner, confirmed by
+     the user after seeing it rendered full bleed. This repeats that same corner
+     motif's full path data four separate times, once per quadrant, rather than a
+     single copy referenced via defs plus use; an earlier attempt using that
+     referencing approach rendered as totally blank, most likely because a same
+     document fragment reference does not resolve reliably once this file is loaded
+     as a CSS mask image resource instead of displayed directly. Each quadrant is
+     wrapped in its own 640 by 640 nested svg element (one quadrant equals one
+     quarter of the total area), which clips to its own viewBox by default, with an
+     outer rotate around the full canvas's own center point (640, 640) followed by a
+     translate remapping that quadrant's outer canvas coordinates back into the
+     nested svg's own local 0 to 640 window. Net effect: the same top left ornament,
+     rotated 90, 180, and 270 degrees to face each remaining corner, each confined to
+     its own quadrant. -->
+<svg x="0" y="0" width="640" height="640" viewBox="0 0 640 640" overflow="hidden">
+<g transform="scale(0.9)">
+<g transform="translate(0.000000,1280.000000) scale(0.100000,-0.100000)"
+fill="#000000" stroke="none">
+<path d="M0 11645 l0 -1155 1155 0 1155 0 0 1155 0 1155 -1155 0 -1155 0 0
+-1155z m1820 0 l0 -665 -665 0 -665 0 0 665 0 665 665 0 665 0 0 -665z"/>
+<path d="M2738 11433 l-3 -1368 -1367 -3 -1368 -2 0 -5030 0 -5030 245 0 245
+0 0 2735 0 2735 440 0 440 0 0 -1595 0 -1595 930 0 930 0 -2 243 -3 242 -682
+3 -683 2 0 1350 0 1350 683 2 682 3 0 1610 0 1610 -927 3 -928 2 0 -930 0
+-930 245 0 245 0 0 685 0 685 438 -2 437 -3 3 -1122 2 -1123 -1125 0 -1125 0
+0 1805 0 1805 1368 2 1367 3 3 1368 2 1367 1805 0 1805 0 0 -440 0 -440 -1370
+0 -1370 0 3 -927 2 -928 1610 0 1610 0 3 683 2 682 1350 0 1350 0 2 -682 3
+-683 243 -3 242 -2 0 930 0 930 -1595 0 -1595 0 0 440 0 440 2735 0 2735 0 0
+245 0 245 -5030 0 -5030 0 -2 -1367z m4102 -933 l0 -440 -1122 2 -1123 3 -3
+438 -2 437 1125 0 1125 0 0 -440z"/>
+<path d="M4106 8691 c-3 -5 -5 -526 -3 -1157 l2 -1149 1155 0 1155 0 0 1155 0
+1155 -1152 2 c-667 2 -1154 -1 -1157 -6z m1824 -1151 l0 -670 -670 0 -670 0 0
+670 0 670 670 0 670 0 0 -670z"/>
+</g>
+</g>
+</svg>
+<svg x="640" y="0" width="640" height="640" viewBox="0 0 640 640" overflow="hidden">
+<g transform="translate(640,0) scale(0.9) translate(-640,0)">
+<g transform="translate(-640,0) rotate(90,640,640) translate(0.000000,1280.000000) scale(0.100000,-0.100000)"
+fill="#000000" stroke="none">
+<path d="M0 11645 l0 -1155 1155 0 1155 0 0 1155 0 1155 -1155 0 -1155 0 0
+-1155z m1820 0 l0 -665 -665 0 -665 0 0 665 0 665 665 0 665 0 0 -665z"/>
+<path d="M2738 11433 l-3 -1368 -1367 -3 -1368 -2 0 -5030 0 -5030 245 0 245
+0 0 2735 0 2735 440 0 440 0 0 -1595 0 -1595 930 0 930 0 -2 243 -3 242 -682
+3 -683 2 0 1350 0 1350 683 2 682 3 0 1610 0 1610 -927 3 -928 2 0 -930 0
+-930 245 0 245 0 0 685 0 685 438 -2 437 -3 3 -1122 2 -1123 -1125 0 -1125 0
+0 1805 0 1805 1368 2 1367 3 3 1368 2 1367 1805 0 1805 0 0 -440 0 -440 -1370
+0 -1370 0 3 -927 2 -928 1610 0 1610 0 3 683 2 682 1350 0 1350 0 2 -682 3
+-683 243 -3 242 -2 0 930 0 930 -1595 0 -1595 0 0 440 0 440 2735 0 2735 0 0
+245 0 245 -5030 0 -5030 0 -2 -1367z m4102 -933 l0 -440 -1122 2 -1123 3 -3
+438 -2 437 1125 0 1125 0 0 -440z"/>
+<path d="M4106 8691 c-3 -5 -5 -526 -3 -1157 l2 -1149 1155 0 1155 0 0 1155 0
+1155 -1152 2 c-667 2 -1154 -1 -1157 -6z m1824 -1151 l0 -670 -670 0 -670 0 0
+670 0 670 670 0 670 0 0 -670z"/>
+</g>
+</g>
+</svg>
+<svg x="640" y="640" width="640" height="640" viewBox="0 0 640 640" overflow="hidden">
+<g transform="translate(640,640) scale(0.9) translate(-640,-640)">
+<g transform="translate(-640,-640) rotate(180,640,640) translate(0.000000,1280.000000) scale(0.100000,-0.100000)"
+fill="#000000" stroke="none">
+<path d="M0 11645 l0 -1155 1155 0 1155 0 0 1155 0 1155 -1155 0 -1155 0 0
+-1155z m1820 0 l0 -665 -665 0 -665 0 0 665 0 665 665 0 665 0 0 -665z"/>
+<path d="M2738 11433 l-3 -1368 -1367 -3 -1368 -2 0 -5030 0 -5030 245 0 245
+0 0 2735 0 2735 440 0 440 0 0 -1595 0 -1595 930 0 930 0 -2 243 -3 242 -682
+3 -683 2 0 1350 0 1350 683 2 682 3 0 1610 0 1610 -927 3 -928 2 0 -930 0
+-930 245 0 245 0 0 685 0 685 438 -2 437 -3 3 -1122 2 -1123 -1125 0 -1125 0
+0 1805 0 1805 1368 2 1367 3 3 1368 2 1367 1805 0 1805 0 0 -440 0 -440 -1370
+0 -1370 0 3 -927 2 -928 1610 0 1610 0 3 683 2 682 1350 0 1350 0 2 -682 3
+-683 243 -3 242 -2 0 930 0 930 -1595 0 -1595 0 0 440 0 440 2735 0 2735 0 0
+245 0 245 -5030 0 -5030 0 -2 -1367z m4102 -933 l0 -440 -1122 2 -1123 3 -3
+438 -2 437 1125 0 1125 0 0 -440z"/>
+<path d="M4106 8691 c-3 -5 -5 -526 -3 -1157 l2 -1149 1155 0 1155 0 0 1155 0
+1155 -1152 2 c-667 2 -1154 -1 -1157 -6z m1824 -1151 l0 -670 -670 0 -670 0 0
+670 0 670 670 0 670 0 0 -670z"/>
+</g>
+</g>
+</svg>
+<svg x="0" y="640" width="640" height="640" viewBox="0 0 640 640" overflow="hidden">
+<g transform="translate(0,640) scale(0.9) translate(0,-640)">
+<g transform="translate(0,-640) rotate(270,640,640) translate(0.000000,1280.000000) scale(0.100000,-0.100000)"
+fill="#000000" stroke="none">
+<path d="M0 11645 l0 -1155 1155 0 1155 0 0 1155 0 1155 -1155 0 -1155 0 0
+-1155z m1820 0 l0 -665 -665 0 -665 0 0 665 0 665 665 0 665 0 0 -665z"/>
+<path d="M2738 11433 l-3 -1368 -1367 -3 -1368 -2 0 -5030 0 -5030 245 0 245
+0 0 2735 0 2735 440 0 440 0 0 -1595 0 -1595 930 0 930 0 -2 243 -3 242 -682
+3 -683 2 0 1350 0 1350 683 2 682 3 0 1610 0 1610 -927 3 -928 2 0 -930 0
+-930 245 0 245 0 0 685 0 685 438 -2 437 -3 3 -1122 2 -1123 -1125 0 -1125 0
+0 1805 0 1805 1368 2 1367 3 3 1368 2 1367 1805 0 1805 0 0 -440 0 -440 -1370
+0 -1370 0 3 -927 2 -928 1610 0 1610 0 3 683 2 682 1350 0 1350 0 2 -682 3
+-683 243 -3 242 -2 0 930 0 930 -1595 0 -1595 0 0 440 0 440 2735 0 2735 0 0
+245 0 245 -5030 0 -5030 0 -2 -1367z m4102 -933 l0 -440 -1122 2 -1123 3 -3
+438 -2 437 1125 0 1125 0 0 -440z"/>
+<path d="M4106 8691 c-3 -5 -5 -526 -3 -1157 l2 -1149 1155 0 1155 0 0 1155 0
+1155 -1152 2 c-667 2 -1154 -1 -1157 -6z m1824 -1151 l0 -670 -670 0 -670 0 0
+670 0 670 670 0 670 0 0 -670z"/>
+</g>
+</g>
+</svg>
+</svg>
