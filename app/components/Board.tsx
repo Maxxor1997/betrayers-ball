@@ -657,9 +657,15 @@ export function BoardGrid({
                     @container cutoff, just a different fallback since this tile has
                     no icon to fall back to -- unless the location has one (see
                     hasLocationArt above), in which case both size variants below show
-                    that icon instead of their plain fallback. */}
+                    that icon instead of their plain fallback. 70px (not the card
+                    name's own 72px, close but tuned separately) -- an 8p board's
+                    cells landed just above a lower 52px threshold, wide enough to
+                    switch into text mode but still too cramped for most location
+                    labels, cutting them off; 70px pushes 8p back into the plain
+                    fallback while a 4p board's much bigger cells stay comfortably
+                    in text mode. */}
                 <div
-                  className={`hidden aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400 @[52px]:flex ${effectHighlightClass}`}
+                  className={`hidden aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400 @[70px]:flex ${effectHighlightClass}`}
                 >
                   {hasArtForThisTile && (
                     <LocationArt
@@ -674,10 +680,10 @@ export function BoardGrid({
                   <LocationArt
                     id={state.config.centerEffect}
                     variant={artVariant}
-                    className={`aspect-square w-full rounded-md ${BOLD_LOCATION_ART_IDS.has(state.config.centerEffect) ? "" : "opacity-60"} @[52px]:hidden ${effect.themeColorClass} ${effectHighlightClass}`}
+                    className={`aspect-square w-full rounded-md ${BOLD_LOCATION_ART_IDS.has(state.config.centerEffect) ? "" : "opacity-60"} @[70px]:hidden ${effect.themeColorClass} ${effectHighlightClass}`}
                   />
                 ) : (
-                  <div className={`aspect-square w-full rounded-md opacity-60 @[52px]:hidden ${effect.themeColorClass} bg-current ${effectHighlightClass}`} />
+                  <div className={`aspect-square w-full rounded-md opacity-60 @[70px]:hidden ${effect.themeColorClass} bg-current ${effectHighlightClass}`} />
                 )}
                 {activeTooltipId === tooltipId && activeRect && (
                   <FixedTooltip rect={activeRect}>
