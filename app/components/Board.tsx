@@ -1398,7 +1398,17 @@ export function BoardGrid({
             return (
               <div
                 key={key}
-                className="relative"
+                // @container so the location badges below (Mirror Pool/Dragon Gate/
+                // Kingslayer/Lazaret) can size themselves off THIS card's own
+                // rendered box via cqw -- they're siblings of the button below, not
+                // descendants, so the button's own @container doesn't cover them.
+                // Without an @container here, cqw units fall back to some other
+                // ancestor's width (or the viewport), which is why these badges
+                // read as a roughly fixed size regardless of how small the card
+                // itself renders (e.g. an 8-player mobile board's tiny cells) --
+                // clearly oversized and non-proportional there, rather than
+                // shrinking down along with everything else on the card.
+                className="relative @container"
                 // Hover-capable devices get real hover; touch devices get an explicit
                 // tap-to-toggle instead -- never both (see useHasHover's doc comment
                 // for why mixing them needs two taps on touch to ever show anything).
@@ -1649,7 +1659,7 @@ export function BoardGrid({
                   // button's own overflow-hidden never clips it.
                   <LocationArt
                     id="mirrorPool"
-                    className={`pointer-events-none absolute top-0.5 right-1.5 z-10 h-1/4 w-1/4 drop-shadow ${CENTER_EFFECTS.mirrorPool.themeColorClass}`}
+                    className={`pointer-events-none absolute top-[clamp(1px,4cqw,4px)] right-[clamp(1px,4cqw,4px)] z-10 h-[clamp(8px,24cqw,18px)] w-[clamp(8px,24cqw,18px)] drop-shadow ${CENTER_EFFECTS.mirrorPool.themeColorClass}`}
                   />
                 )}
                 {wasLazaretBuffed && (
@@ -1670,7 +1680,7 @@ export function BoardGrid({
                   <LocationArt
                     id="summit"
                     variant="badge"
-                    className={`pointer-events-none absolute top-0.5 right-1.5 z-10 h-1/4 w-1/4 drop-shadow ${CENTER_EFFECTS.summit.themeColorClass}`}
+                    className={`pointer-events-none absolute top-[clamp(1px,4cqw,4px)] right-[clamp(1px,4cqw,4px)] z-10 h-[clamp(8px,24cqw,18px)] w-[clamp(8px,24cqw,18px)] drop-shadow ${CENTER_EFFECTS.summit.themeColorClass}`}
                   />
                 )}
                 {wasKingslayerHit && (
@@ -1680,7 +1690,7 @@ export function BoardGrid({
                   // Kingslayer's post-resolution hit for -kingslayerValue.
                   <LocationArt
                     id="kingslayer"
-                    className={`pointer-events-none absolute top-0.5 right-1.5 z-10 h-1/4 w-1/4 drop-shadow ${CENTER_EFFECTS.kingslayer.themeColorClass}`}
+                    className={`pointer-events-none absolute top-[clamp(1px,4cqw,4px)] right-[clamp(1px,4cqw,4px)] z-10 h-[clamp(8px,24cqw,18px)] w-[clamp(8px,24cqw,18px)] drop-shadow ${CENTER_EFFECTS.kingslayer.themeColorClass}`}
                   />
                 )}
                 {activeTooltipId === tooltipId && activeRect && (

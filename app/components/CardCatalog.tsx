@@ -3,15 +3,11 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CardArt } from "@/app/components/CardArt";
-import { BOLD_LOCATION_ART_IDS, LocationArt } from "@/app/components/LocationArt";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
-import { useAssetExists } from "@/app/hooks/useAssetExists";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/cards";
-import { CENTER_EFFECTS, centerEffectDescription, isAvailableAtPlayerCount } from "@/lib/content/centerEffects";
 import { SELECTABLE_LOBBY_SIZES } from "@/lib/config/players";
-import { configForPlayerCount } from "@/lib/engine/game";
-import { CardBucket, CardId, CenterEffectId } from "@/lib/engine/types";
+import { CardBucket, CardId } from "@/lib/engine/types";
 
 /**
  * A tooltip rendered into document.body via a portal, positioned with `fixed` from
@@ -76,44 +72,11 @@ export function FixedTooltip({
 
 const BUCKET_ORDER: CardBucket[] = ["Slam", "Engine", "Control"];
 
-/** Locations sidebar order, simplest rule to understand first -- not alphabetical or insertion order. Exported so other location listings (e.g. the playtest heatmap's "by location" columns) can match it. */
-export const LOCATION_COMPLEXITY_ORDER: CenterEffectId[] = [
-  "none",
-  "twoTowers",
-  "threeHeadedDragon",
-  "freeCities",
-  "borderlands",
-  "reckoning",
-  "shadowlands",
-  "frontier",
-  "noMansLand",
-  "mirrorPool",
-  "championOfTheWeak",
-  "summit",
-  "kingslayer",
-];
-
 const BUCKET_DESCRIPTIONS: Record<CardBucket, string> = {
   Slam: "High base value cards with a built-in downside or condition that can cut it back down.",
   Engine: "Low base value cards that grow from board state or synergy with other cards.",
   Control: "Cards that manipulate the values of other cards or bend the normal rules.",
 };
-
-const LOCATIONS_DESCRIPTION =
-  "A location is a game-wide rule this match is being played with -- it changes what the center tile does or bends a normal rule for everyone. Exactly one is active per game.";
-
-/**
- * A location's own icon in the catalog row, if it has one -- a real component (not a
- * bare hook call) since useAssetExists can't be called directly inside the
- * LOCATION_COMPLEXITY_ORDER.map() below; each row needs its own hook instance, which
- * only works if each row is its own component. Renders nothing (not a placeholder) for
- * the many locations that don't have art yet, same as CardArt's own convention.
- */
-function LocationIcon({ id, className }: { id: CenterEffectId; className: string }) {
-  const exists = useAssetExists(`/location-art/${id}.svg`);
-  if (!exists) return null;
-  return <LocationArt id={id} className={className} />;
-}
 
 /**
  * Reference sidebar listing every card in the game, grouped by bucket, with its copy
@@ -121,7 +84,7 @@ function LocationIcon({ id, className }: { id: CenterEffectId; className: string
  * pool up front instead of only discovering cards as they're drawn. Shows every card
  * regardless of count (a card disabled or absent at this player count still appears,
  * just annotated "x0 in deck"). Also used standalone (no active game) on the home
- * screen, via the myCardIds/opponentVisibleBoardCardIds/currentCenterEffect defaults.
+ * screen, via the myCardIds/opponentVisibleBoardCardIds defaults.
  *
  * Collapse state is fully controlled by the caller (`collapsed`/`onCollapsedChange`,
  * typically backed by useDefaultCollapsed) rather than owned internally -- the actual
@@ -136,7 +99,6 @@ export function CardCatalog({
   playerCount,
   myCardIds = new Set(),
   opponentVisibleBoardCardIds = new Set(),
-  currentCenterEffect = "none",
   // Defaults match single-player's fixed HUMAN-is-always-index-0 board color -- the
   // standalone home-screen catalog (no active game, myCardIds always empty) never
   // actually renders anything in this color, so the default only matters for callers
@@ -150,7 +112,6 @@ export function CardCatalog({
   playerCount: number;
   myCardIds?: Set<CardId>;
   opponentVisibleBoardCardIds?: Set<CardId>;
-  currentCenterEffect?: CenterEffectId;
   /** The viewer's own board accent (see lib/config/players.ts's playerAccentClass) -- "My Cards" is highlighted in this color instead of a hardcoded blue, so it matches whatever color that same player's cards actually show as on the board (which depends on seat order, not fixed to any one player in multiplayer). */
   myAccentClass?: string;
   myDotColorClass?: string;
@@ -166,7 +127,6 @@ export function CardCatalog({
   const activeTooltipId = useActiveTooltipId();
   const [activeRect, setActiveRect] = useState<DOMRect | null>(null);
   const [collapsedBuckets, setCollapsedBuckets] = useState<Set<CardBucket>>(new Set());
-  const [locationsCollapsed, setLocationsCollapsed] = useState(false);
 
   function toggleBucket(bucket: CardBucket) {
     setCollapsedBuckets((prev) => {
@@ -351,91 +311,6 @@ export function CardCatalog({
             </div>
           );
         })}
-        <div className="relative">
-          <button
-            onClick={() => setLocationsCollapsed((prev) => !prev)}
-            onMouseEnter={
-              hasHover
-                ? (e) => {
-                    setActiveRect(e.currentTarget.getBoundingClientRect());
-                    setActiveTooltip("catalog:locations");
-                  }
-                : undefined
-            }
-            onMouseLeave={hasHover ? () => clearActiveTooltip("catalog:locations") : undefined}
-            className="flex w-full items-center gap-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-          >
-            <span className="inline-block w-3 shrink-0">{locationsCollapsed ? "▶" : "▼"}</span>
-            Locations
-            <span
-              className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-400 text-[9px] normal-case text-zinc-400 dark:border-zinc-500 dark:text-zinc-500"
-              onClick={
-                hasHover
-                  ? undefined
-                  : (e) => {
-                      e.stopPropagation();
-                      setActiveRect(e.currentTarget.getBoundingClientRect());
-                      toggleActiveTooltip("catalog:locations");
-                    }
-              }
-            >
-              i
-            </span>
-          </button>
-          {activeTooltipId === "catalog:locations" && activeRect && <FixedTooltip rect={activeRect}>{LOCATIONS_DESCRIPTION}</FixedTooltip>}
-          {!locationsCollapsed && (
-            <div className="mt-1.5 flex flex-col gap-2">
-              {LOCATION_COMPLEXITY_ORDER
-                // A location `disabled` outright isn't currently in the game at all
-                // (as opposed to merely restricted to some player counts, which still
-                // shows grayed out with its "Np+ only" restriction below), so it's
-                // hidden rather than sorted to the bottom.
-                .filter((id) => !CENTER_EFFECTS[id].disabled)
-                .map((id) => {
-                  const def = CENTER_EFFECTS[id];
-                  const available = isAvailableAtPlayerCount(id, playerCount);
-                  const isCurrent = id === currentCenterEffect;
-                  const config = configForPlayerCount(playerCount, id);
-                  const restriction =
-                    def.minPlayerCount && def.maxPlayerCount
-                      ? `${def.minPlayerCount}-${def.maxPlayerCount}p only`
-                      : def.minPlayerCount
-                        ? `${def.minPlayerCount}p+ only`
-                        : def.maxPlayerCount
-                          ? `up to ${def.maxPlayerCount}p only`
-                          : null;
-                  const description = centerEffectDescription(id, config);
-                  // Same swatch-box + text-block row shape every real card above uses
-                  // (h-16 w-16 box with its own icon, then a flex-1 text column) --
-                  // "Current"/availability read the same way a card's own
-                  // owned/on-opponent-board tone does, via the box's border/background.
-                  const boxToneClass = isCurrent
-                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
-                    : available
-                      ? "border-zinc-300 dark:border-zinc-700"
-                      : "border-zinc-200 opacity-50 dark:border-zinc-800";
-                  return (
-                    <div key={id} className="relative flex min-w-0 items-center gap-2">
-                      <div
-                        className={`relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 text-center ${boxToneClass}`}
-                      >
-                        <span className="text-[8px] font-semibold leading-tight break-words">{def.label}</span>
-                        <LocationIcon
-                          id={id}
-                          className={`${BOLD_LOCATION_ART_IDS.has(id) ? "h-7 w-7" : "h-5 w-5"} shrink-0 ${def.themeColorClass}`}
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs font-medium">{def.label}</div>
-                        <div className="line-clamp-2 text-[10px] text-zinc-500 dark:text-zinc-400">{description}</div>
-                        {restriction && <div className="mt-0.5 text-[9px] text-zinc-400 dark:text-zinc-500">{restriction}</div>}
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-          )}
-        </div>
       </div>
     </aside>
   );

@@ -14,6 +14,7 @@ import { EndScreen } from "@/app/components/EndScreen";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { HomeIcon } from "@/app/components/HomeIcon";
 import { CardCatalog } from "@/app/components/CardCatalog";
+import { LocationCatalog } from "@/app/components/LocationCatalog";
 import { InstructionsModal } from "@/app/components/InstructionsModal";
 import { LocationTitle } from "@/app/components/LocationTitle";
 import { NewGameModal, NewGameSetup } from "@/app/components/NewGameModal";
@@ -57,6 +58,20 @@ function Display() {
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => setIsMobile(isMobileViewport()), []);
   const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobile);
+  // Cards and Locations share the same sidebar slot and are mutually exclusive --
+  // see openCards/openLocations below, which each close the other whenever they
+  // open theirs, rather than the two ever trying to show side by side.
+  const [locationsCollapsed, setLocationsCollapsed] = useDefaultCollapsed(true);
+  function openCards() {
+    const next = !cardsCollapsed;
+    setCardsCollapsed(next);
+    if (!next) setLocationsCollapsed(true);
+  }
+  function openLocations() {
+    const next = !locationsCollapsed;
+    setLocationsCollapsed(next);
+    if (!next) setCardsCollapsed(true);
+  }
 
   const showGame = !session.roomClosed && session.connected && session.lobby?.started && session.gameState;
   const gameEnded = session.gameState?.phase === "ended";
@@ -82,10 +97,19 @@ function Display() {
         <div className="flex flex-wrap items-center gap-1.5">
           {showGame && (
             <button
-              onClick={() => setCardsCollapsed(!cardsCollapsed)}
+              onClick={openCards}
               className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
             >
               {cardsCollapsed ? "▶" : "◀"} Cards
+            </button>
+          )}
+          {showGame && (
+            <button
+              onClick={openLocations}
+              className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              {locationsCollapsed ? "▶" : "◀"} <span className="sm:hidden">Loc.</span>
+              <span className="hidden sm:inline">Locations</span>
             </button>
           )}
           <button
@@ -190,7 +214,15 @@ function Display() {
           lobby={session.lobby}
           rematch={session.rematch}
           cardsCollapsed={cardsCollapsed}
-          onCardsCollapsedChange={setCardsCollapsed}
+          onCardsCollapsedChange={(next) => {
+            setCardsCollapsed(next);
+            if (!next) setLocationsCollapsed(true);
+          }}
+          locationsCollapsed={locationsCollapsed}
+          onLocationsCollapsedChange={(next) => {
+            setLocationsCollapsed(next);
+            if (!next) setCardsCollapsed(true);
+          }}
         />
       </div>
     );
@@ -314,6 +346,8 @@ function DisplayGameView({
   rematch,
   cardsCollapsed,
   onCardsCollapsedChange,
+  locationsCollapsed,
+  onLocationsCollapsedChange,
   header,
 }: {
   /** Rendered as the first child of the middle column -- see join/[code]/page.tsx's
@@ -325,6 +359,8 @@ function DisplayGameView({
   rematch: (centerEffect: CenterEffectId, aiDifficulty: AiDifficulty, centerEffectMode?: CenterEffectId | "random") => void;
   cardsCollapsed: boolean;
   onCardsCollapsedChange: (collapsed: boolean) => void;
+  locationsCollapsed: boolean;
+  onLocationsCollapsedChange: (collapsed: boolean) => void;
 }) {
   const endResult: ResolutionResult | null =
     state.phase === "ended"
@@ -340,9 +376,14 @@ function DisplayGameView({
       <CardCatalog
         playerCount={lobby.playerCount}
         opponentVisibleBoardCardIds={opponentVisibleBoardCardIds}
-        currentCenterEffect={state.config.centerEffect}
         collapsed={cardsCollapsed}
         onCollapsedChange={onCardsCollapsedChange}
+      />
+      <LocationCatalog
+        playerCount={lobby.playerCount}
+        currentCenterEffect={state.config.centerEffect}
+        collapsed={locationsCollapsed}
+        onCollapsedChange={onLocationsCollapsedChange}
       />
 
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">

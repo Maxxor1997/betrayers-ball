@@ -17,6 +17,7 @@ import { EndScreen } from "@/app/components/EndScreen";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { HomeIcon } from "@/app/components/HomeIcon";
 import { CardCatalog } from "@/app/components/CardCatalog";
+import { LocationCatalog } from "@/app/components/LocationCatalog";
 import { InstructionsModal } from "@/app/components/InstructionsModal";
 import { LocationTitle } from "@/app/components/LocationTitle";
 import { NewGameModal, NewGameSetup } from "@/app/components/NewGameModal";
@@ -60,6 +61,20 @@ function Room() {
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => setIsMobile(isMobileViewport()), []);
   const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobile);
+  // Cards and Locations share the same sidebar slot and are mutually exclusive --
+  // see openCards/openLocations below, which each close the other whenever they
+  // open theirs, rather than the two ever trying to show side by side.
+  const [locationsCollapsed, setLocationsCollapsed] = useDefaultCollapsed(true);
+  function openCards() {
+    const next = !cardsCollapsed;
+    setCardsCollapsed(next);
+    if (!next) setLocationsCollapsed(true);
+  }
+  function openLocations() {
+    const next = !locationsCollapsed;
+    setLocationsCollapsed(next);
+    if (!next) setCardsCollapsed(true);
+  }
 
   // null = still checking (or the check failed) -- NameEntry shows the password field
   // by default in that case, since a false negative there (hiding a field a real
@@ -104,10 +119,19 @@ function Room() {
         <div className="flex flex-wrap items-center gap-1.5">
           {showGame && (
             <button
-              onClick={() => setCardsCollapsed(!cardsCollapsed)}
+              onClick={openCards}
               className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
             >
               {cardsCollapsed ? "▶" : "◀"} Cards
+            </button>
+          )}
+          {showGame && (
+            <button
+              onClick={openLocations}
+              className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              {locationsCollapsed ? "▶" : "◀"} <span className="sm:hidden">Loc.</span>
+              <span className="hidden sm:inline">Locations</span>
             </button>
           )}
           <button
@@ -218,7 +242,15 @@ function Room() {
           rematch={session.rematch}
           readyForRematch={session.readyForRematch}
           cardsCollapsed={cardsCollapsed}
-          onCardsCollapsedChange={setCardsCollapsed}
+          onCardsCollapsedChange={(next) => {
+            setCardsCollapsed(next);
+            if (!next) setLocationsCollapsed(true);
+          }}
+          locationsCollapsed={locationsCollapsed}
+          onLocationsCollapsedChange={(next) => {
+            setLocationsCollapsed(next);
+            if (!next) setCardsCollapsed(true);
+          }}
         />
       </div>
     );
@@ -450,6 +482,8 @@ function GameView({
   readyForRematch,
   cardsCollapsed,
   onCardsCollapsedChange,
+  locationsCollapsed,
+  onLocationsCollapsedChange,
   header,
 }: {
   /** Rendered as the first child of the middle column, alongside the board/hand -- not
@@ -466,6 +500,8 @@ function GameView({
   readyForRematch: () => void;
   cardsCollapsed: boolean;
   onCardsCollapsedChange: (collapsed: boolean) => void;
+  locationsCollapsed: boolean;
+  onLocationsCollapsedChange: (collapsed: boolean) => void;
 }) {
   // See useHallOfFortunesReveal's own doc comment -- called here too (not just
   // inside Board.tsx) so Hand can hold off showing/allowing a freshly-drawn
@@ -616,11 +652,16 @@ function GameView({
         playerCount={lobby.playerCount}
         myCardIds={myCardIds}
         opponentVisibleBoardCardIds={opponentVisibleBoardCardIds}
-        currentCenterEffect={state.config.centerEffect}
         myAccentClass={playerAccentClass(state.players, myPlayerId)}
         myDotColorClass={playerDotColorClass(state.players, myPlayerId)}
         collapsed={cardsCollapsed}
         onCollapsedChange={onCardsCollapsedChange}
+      />
+      <LocationCatalog
+        playerCount={lobby.playerCount}
+        currentCenterEffect={state.config.centerEffect}
+        collapsed={locationsCollapsed}
+        onCollapsedChange={onLocationsCollapsedChange}
       />
 
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">

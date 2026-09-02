@@ -15,7 +15,7 @@ import {
   resetHumanPlacementStats,
   restoreHumanStatsBackup,
 } from "@/lib/playtest/humanStats";
-import { LOCATION_COMPLEXITY_ORDER } from "./CardCatalog";
+import { LOCATION_COMPLEXITY_ORDER } from "./LocationCatalog";
 import { CardStatsTable, fmtSigned, SortTh, sortRows, useTableSort } from "./CardStatsTable";
 
 /** Markdown export of everything in the modal -- same "one paste" spirit as the playtest page's own copy button. */

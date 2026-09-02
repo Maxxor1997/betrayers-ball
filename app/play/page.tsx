@@ -15,6 +15,7 @@ import { NewGameSetup, PendingFlip } from "./types";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { HomeIcon } from "@/app/components/HomeIcon";
 import { CardCatalog } from "@/app/components/CardCatalog";
+import { LocationCatalog } from "@/app/components/LocationCatalog";
 import { InstructionsModal } from "@/app/components/InstructionsModal";
 import { LocationTitle } from "@/app/components/LocationTitle";
 import { MyStatsModal } from "@/app/components/MyStatsModal";
@@ -279,6 +280,20 @@ function Game() {
   const [showMyStats, setShowMyStats] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobileViewport());
+  // Cards and Locations share the same sidebar slot and are mutually exclusive --
+  // see openCards/openLocations below, which each close the other whenever they
+  // open theirs, rather than the two ever trying to show side by side.
+  const [locationsCollapsed, setLocationsCollapsed] = useDefaultCollapsed(true);
+  function openCards() {
+    const next = !cardsCollapsed;
+    setCardsCollapsed(next);
+    if (!next) setLocationsCollapsed(true);
+  }
+  function openLocations() {
+    const next = !locationsCollapsed;
+    setLocationsCollapsed(next);
+    if (!next) setCardsCollapsed(true);
+  }
   // Tally exactly once per game, the moment it reaches "ended" -- reset whenever a new
   // game starts (confirmNewGame/playAgain below), same pattern the playtest page's own
   // self-play tally uses (see PlaySelf.tsx's talliedRef).
@@ -494,11 +509,22 @@ function Game() {
         playerCount={state.config.playerCount}
         myCardIds={myCardIds}
         opponentVisibleBoardCardIds={opponentVisibleBoardCardIds}
-        currentCenterEffect={state.config.centerEffect}
         myAccentClass={playerAccentClass(state.players, HUMAN)}
         myDotColorClass={playerDotColorClass(state.players, HUMAN)}
         collapsed={cardsCollapsed}
-        onCollapsedChange={setCardsCollapsed}
+        onCollapsedChange={(next) => {
+          setCardsCollapsed(next);
+          if (!next) setLocationsCollapsed(true);
+        }}
+      />
+      <LocationCatalog
+        playerCount={state.config.playerCount}
+        currentCenterEffect={state.config.centerEffect}
+        collapsed={locationsCollapsed}
+        onCollapsedChange={(next) => {
+          setLocationsCollapsed(next);
+          if (!next) setCardsCollapsed(true);
+        }}
       />
       <div className="flex min-w-0 flex-1 flex-col items-center gap-6">
       <header className="flex w-full max-w-4xl flex-col gap-2">
@@ -523,10 +549,17 @@ function Game() {
         <div className="flex w-full flex-wrap items-center justify-between gap-1.5">
           <div className="flex flex-wrap items-center gap-1.5">
             <button
-              onClick={() => setCardsCollapsed(!cardsCollapsed)}
+              onClick={openCards}
               className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
             >
               {cardsCollapsed ? "▶" : "◀"} Cards
+            </button>
+            <button
+              onClick={openLocations}
+              className="rounded-full border border-zinc-300 px-2.5 py-0 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-0.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              {locationsCollapsed ? "▶" : "◀"} <span className="sm:hidden">Loc.</span>
+              <span className="hidden sm:inline">Locations</span>
             </button>
             <button
               onClick={() => setShowInstructions(true)}

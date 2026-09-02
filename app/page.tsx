@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { InstructionsModal } from "@/app/components/InstructionsModal";
 import { CardCatalog } from "@/app/components/CardCatalog";
+import { LocationCatalog } from "@/app/components/LocationCatalog";
 import { NewGameModal, NewGameSetup } from "@/app/components/NewGameModal";
 import { DEFAULT_AI_DIFFICULTY } from "@/lib/ai/difficulty";
 import { MultiplayerUnavailableBanner, MultiplayerUnavailableModal } from "@/app/components/MultiplayerUnavailableNotice";
@@ -312,6 +313,20 @@ export default function HomePage() {
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => setIsMobile(isMobileViewport()), []);
   const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobile);
+  // Cards and Locations share the same sidebar slot and are mutually exclusive --
+  // see openCards/openLocations below, which each close the other whenever they
+  // open theirs, rather than the two ever trying to show side by side.
+  const [locationsCollapsed, setLocationsCollapsed] = useDefaultCollapsed(true);
+  function openCards() {
+    const next = !cardsCollapsed;
+    setCardsCollapsed(next);
+    if (!next) setLocationsCollapsed(true);
+  }
+  function openLocations() {
+    const next = !locationsCollapsed;
+    setLocationsCollapsed(next);
+    if (!next) setCardsCollapsed(true);
+  }
   const [catalogPlayerCount, setCatalogPlayerCount] = useState(DEFAULT_CATALOG_PLAYER_COUNT);
 
   function openSoloSetup() {
@@ -397,7 +412,19 @@ export default function HomePage() {
         playerCount={catalogPlayerCount}
         onPlayerCountChange={setCatalogPlayerCount}
         collapsed={cardsCollapsed}
-        onCollapsedChange={setCardsCollapsed}
+        onCollapsedChange={(next) => {
+          setCardsCollapsed(next);
+          if (!next) setLocationsCollapsed(true);
+        }}
+      />
+      <LocationCatalog
+        playerCount={catalogPlayerCount}
+        onPlayerCountChange={setCatalogPlayerCount}
+        collapsed={locationsCollapsed}
+        onCollapsedChange={(next) => {
+          setLocationsCollapsed(next);
+          if (!next) setCardsCollapsed(true);
+        }}
       />
       <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-1 flex-col items-center gap-8">
         <header className="flex w-full flex-col gap-5">
@@ -410,10 +437,17 @@ export default function HomePage() {
           </div>
           <div className="flex w-full flex-wrap items-center gap-1.5">
             <button
-              onClick={() => setCardsCollapsed(!cardsCollapsed)}
+              onClick={openCards}
               className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
             >
               {cardsCollapsed ? "▶" : "◀"} Cards
+            </button>
+            <button
+              onClick={openLocations}
+              className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              {locationsCollapsed ? "▶" : "◀"} <span className="sm:hidden">Loc.</span>
+              <span className="hidden sm:inline">Locations</span>
             </button>
             <button
               onClick={() => setShowInstructions(true)}
