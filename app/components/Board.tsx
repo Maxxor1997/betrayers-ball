@@ -238,14 +238,15 @@ export function BoardGrid({
   // class it drives) gets cleared mid-slide, yanking the "forwards" fill and snapping
   // the icon instantly to its resting position.
   const SLIDE_MS = FLIP_ANIMATION_MS + 550;
-  // Beacon (Nightjar) only -- a translateY hop nested inside the parent's own 3D
-  // rotateY flip judders the same way Footman's translateX slide did, so this gets
-  // the same "blank through the flip, hop in once settled" treatment as Footman's
-  // slide above, rather than the old opacity-only flicker's "continuous across both
-  // call sites" approach. Same FLIP_ANIMATION_MS-plus-own-duration accounting as
-  // SLIDE_MS above, for the same reason (its own CSS animation doesn't start playing
-  // until the settled render mounts at FLIP_ANIMATION_MS).
-  const HOP_MS = FLIP_ANIMATION_MS + 1100;
+  // Beacon (Nightjar) only -- the icon itself stays visible through the flip (see
+  // renderFaceUpContent's hideIcon calls -- Beacon is deliberately left out of
+  // both), but a translateY hop nested inside the parent's own 3D rotateY flip
+  // judders the same way Footman's translateX slide did, so the hop animation
+  // itself still only starts once the card has settled. Same
+  // FLIP_ANIMATION_MS-plus-own-duration accounting as SLIDE_MS above, for the
+  // same reason (its own CSS animation doesn't start playing until the settled
+  // render mounts at FLIP_ANIMATION_MS).
+  const HOP_MS = FLIP_ANIMATION_MS + 1300;
   // Commander (Hipparch) only -- same reasoning/treatment as Footman's slide above
   // (a translateX nested inside the parent's simultaneous rotateY flip read as a
   // warped flicker, not a clean charge): icon stays blank through the 3D flip, then
@@ -301,25 +302,26 @@ export function BoardGrid({
   const SWORD_SWING_MS = FLIP_ANIMATION_MS + 600;
   // Earthshaker only -- its OWN reveal, not the ground-shake wobble it inflicts on
   // its targets (see earthshakenIds elsewhere) -- a trumpet-blast: a quick icon
-  // shake plus a longer-lived sibling ring reading as sound waves (see
-  // .card-icon-trumpet-shake/.card-trumpet-soundwave in globals.css). Same
-  // "icon-shake plus its own ring overlay" split as Bannerman's raise-call/
-  // horn-pulse pair, just settled-only (like Inquisitor's truth-gaze pulse below)
-  // rather than timed to the 500ms flip window, since the ring's own 1s duration
-  // wouldn't fit inside it.
-  const TRUMPET_MS = FLIP_ANIMATION_MS + 1000;
-  // Inquisitor (Truthseeker) only -- a violet "truth-gaze" pulse: the icon
-  // contracts and dilates like a pupil narrowing in on a lie, replacing an
-  // earlier version that just flashed the whole icon red (read as damage/an
-  // attack, which doesn't match Truthseeker's own flavor of scrutiny rather than
-  // harm). Applied ONLY at the settled call site, not the mid-flip one -- applying
-  // it at both (like iconSpinClass/hopClass) meant its 0.9s color animation had
-  // already reached its peak color well before the mid-flip's back face ever
-  // became visible (which only happens roughly halfway through the parent's own
-  // 500ms flip), so the icon read as violet from the very first moment it
-  // appeared instead of starting black. Settled-only means the viewer always
-  // sees the normal black icon first, then the pulse plays after.
-  const TRUTHGAZE_MS = FLIP_ANIMATION_MS + 900;
+  // shake plus a sibling ring reading as sound waves (see .card-icon-trumpet-
+  // shake/.card-trumpet-soundwave in globals.css). Starts at the same moment as
+  // the flip itself (t=0), same as earthshakenIds/DISRUPTION_FLASH_MS above, so
+  // it lines up with the moment its targets start visibly shaking rather than
+  // lagging behind until the card settles -- unlike Footman's slide/Commander's
+  // charge, a rotate+scale icon shake (not a translate) reads fine nested inside
+  // the parent's own rotateY flip, so it doesn't need their "blank through the
+  // flip" treatment.
+  const TRUMPET_MS = 1000;
+  // Inquisitor (Truthseeker) only -- a "truth-gaze" blink: the icon squashes
+  // vertically twice like an eye blinking to focus, no color change at all
+  // (two earlier versions -- a red flash, then a violet scale-pulse -- both
+  // read as gaudy/off). Applied ONLY at the settled call site, not the
+  // mid-flip one -- applying it at both (like iconSpinClass/hopClass) meant
+  // its 0.7s animation had already blinked once before the mid-flip's back
+  // face ever became visible (which only happens roughly halfway through the
+  // parent's own 500ms flip), so it'd read as already mid-motion the instant
+  // it appeared instead of starting settled. Settled-only means the viewer
+  // always sees the normal icon first, then the blink plays after.
+  const TRUTHGAZE_MS = FLIP_ANIMATION_MS + 700;
   // Skysplitter (Zeus-Born) only -- a bright pulse, flavor for "+1 per round
   // elapsed" (it only ever gets stronger from here). Applied ONLY at the settled
   // call site, same reasoning/timing as Inquisitor's flame flash above -- the
@@ -1400,9 +1402,9 @@ export function BoardGrid({
             // flippingIds for why this needed its own state instead of
             // MID_FLIP_ICON_CLASS).
             const slideClass = slideIds.has(card.instanceId) ? "card-icon-slide-in" : "";
-            // Beacon (Nightjar) only -- same "blank through the flip, animate only
-            // once settled" treatment as Footman's slide above (see hopIds/HOP_MS
-            // near flippingIds).
+            // Beacon (Nightjar) only -- unlike Footman's slide above, the icon
+            // itself stays visible through the flip; only the hop animation is
+            // deferred until settled (see hopIds/HOP_MS near flippingIds).
             const hopClass = hopIds.has(card.instanceId) ? "card-icon-hop" : "";
             // Commander/Mercenary only -- same "blank through the flip, animate only
             // once settled" treatment as Footman's slide above (see chargeIds/
@@ -1423,9 +1425,11 @@ export function BoardGrid({
             // Skysplitter (Zeus-Born) only -- see CHARGE_PULSE_MS near flippingIds
             // for why this only applies at the settled call site.
             const chargePulseClass = chargePulseIds.has(card.instanceId) ? "card-icon-charge-pulse" : "";
-            // Earthshaker only -- see TRUMPET_MS near flippingIds for why this only
-            // applies at the settled call site; the ring that goes with it is a
-            // separate sibling overlay (see trumpetIds below), not an icon class.
+            // Earthshaker only -- applied at both the mid-flip and settled call sites
+            // (see TRUMPET_MS near flippingIds for why this can start immediately,
+            // unlike Footman's slide/Commander's charge above); the ring that goes
+            // with it is a separate sibling overlay (see trumpetIds below), not an
+            // icon class.
             const trumpetShakeClass = trumpetIds.has(card.instanceId) ? "card-icon-trumpet-shake" : "";
             const midFlipIconClass = MID_FLIP_ICON_CLASS[card.cardId] ?? "";
             // A function, not a precomputed value, so the two call sites below (the
@@ -1604,12 +1608,11 @@ export function BoardGrid({
                       </div>
                       <div className="card-flip-face card-flip-face-back flex flex-col items-center justify-center gap-0.5">
                         {renderFaceUpContent(
-                          `${isDyingGod ? "card-hourglass-flip" : ""} ${iconSpinClass} ${midFlipIconClass}`,
+                          `${isDyingGod ? "card-hourglass-flip" : ""} ${iconSpinClass} ${trumpetShakeClass} ${midFlipIconClass}`,
                           pawDropIds.has(card.instanceId) ||
                             slamIds.has(card.instanceId) ||
                             igniteIds.has(card.instanceId) ||
                             slideIds.has(card.instanceId) ||
-                            hopIds.has(card.instanceId) ||
                             chargeIds.has(card.instanceId) ||
                             coinFlipIds.has(card.instanceId) ||
                             swordSwingIds.has(card.instanceId) ||
@@ -1787,11 +1790,13 @@ export function BoardGrid({
                   // plain ring sibling is enough.
                   <div className="card-horn-pulse pointer-events-none absolute inset-[20%] z-10 rounded-full" />
                 )}
-                {!flippingIds.has(card.instanceId) && trumpetIds.has(card.instanceId) && (
+                {trumpetIds.has(card.instanceId) && (
                   // Earthshaker only -- same "icon shake plus a ring sibling" idea as
-                  // Bannerman's raise-call/horn-pulse above, but settled-only (see
-                  // TRUMPET_MS near flippingIds) since the ring's own longer duration
-                  // wouldn't fit inside the 500ms flip window the way Bannerman's does.
+                  // Bannerman's raise-call/horn-pulse above, but starting at the same
+                  // moment as the flip itself (t=0, see TRUMPET_MS near flippingIds),
+                  // same as earthshakenIds' own ground-shake on its targets -- lines
+                  // up the trumpet blast with the moment the disrupted cells start
+                  // visibly rattling, instead of lagging behind until the card settles.
                   <div className="card-trumpet-soundwave pointer-events-none absolute inset-[20%] z-10 rounded-full" />
                 )}
                 {hasMirrorTypeMatch && (
