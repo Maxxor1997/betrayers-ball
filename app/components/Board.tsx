@@ -311,20 +311,22 @@ export function BoardGrid({
   // shake (not a translate) reads fine nested inside the parent's own rotateY
   // flip, so it doesn't need their "blank through the flip" treatment.
   const TRUMPET_MS = 700;
-  // Inquisitor (Truthseeker) only -- the torch icon starts already at the
-  // top-left (pops there the instant the class mounts, no lead-in from rest),
-  // then swings through two wide U-shaped arcs (top-left to top-right and back)
-  // before settling to rest, no color change at all (a red flash, a violet
-  // scale-pulse, a vertical blink, a full 360 spin, and a narrower straight
-  // left-right sweep were all tried first and none of them landed). Applied
-  // ONLY at the settled call site, not the mid-flip one -- applying it at both
-  // (like iconSpinClass/hopClass) meant it'd already be sitting at the top-left
-  // well before the mid-flip's back face ever became visible (which only
-  // happens roughly halfway through the parent's own 500ms flip), so it'd read
-  // as already off in the corner the instant it appeared instead of starting
-  // from rest. Settled-only means the viewer always sees the normal icon first,
-  // then the swing plays after.
-  const TRUTHGAZE_MS = FLIP_ANIMATION_MS + 1300;
+  // Inquisitor (Truthseeker) only -- same hideIcon+overlay swoop-in trick as
+  // Gloryseeker's own ignite above (see igniteIds/IGNITE_MS), including playing
+  // continuously across BOTH the mid-flip and settled call sites -- the real
+  // icon is hidden throughout while a copy swoops in from off the card's far
+  // left edge, out past the far right edge, then back to settle into place
+  // (see .card-icon-truthgaze-pulse in globals.css). No color change at all (a
+  // red flash, a violet scale-pulse, a vertical blink, a full 360 spin, and a
+  // couple of in-place pendulum-arc attempts were all tried first and none of
+  // them landed). An earlier version of this swoop only hid the icon/played the
+  // overlay at the settled call site (like Inquisitor's own even earlier
+  // versions), but that let the real icon show during the card's own flip
+  // reveal and THEN vanish and reappear off-card to start the swoop -- the
+  // torch showing up twice instead of once. Flat duration (not
+  // FLIP_ANIMATION_MS-plus-own-duration like Footman's slide) since this starts
+  // at the same moment as the flip itself, same as IGNITE_MS.
+  const TRUTHGAZE_MS = 1100;
   // Skysplitter (Zeus-Born) only -- a bright pulse, flavor for "+1 per round
   // elapsed" (it only ever gets stronger from here). Applied ONLY at the settled
   // call site, same reasoning/timing as Inquisitor's flame flash above -- the
@@ -1422,9 +1424,6 @@ export function BoardGrid({
             // only once settled" treatment as Footman's slide/Commander's charge
             // above (see noctuleFlyInIds/NOCTULE_FLY_IN_MS near flippingIds).
             const noctuleFlyInClass = noctuleFlyInIds.has(card.instanceId) ? "card-icon-noctule-fly-in" : "";
-            // Inquisitor (Truthseeker) only -- see TRUTHGAZE_MS near flippingIds
-            // for why this only applies at the settled call site.
-            const truthgazeClass = truthgazeIds.has(card.instanceId) ? "card-icon-truthgaze-pulse" : "";
             // Skysplitter (Zeus-Born) only -- see CHARGE_PULSE_MS near flippingIds
             // for why this only applies at the settled call site.
             const chargePulseClass = chargePulseIds.has(card.instanceId) ? "card-icon-charge-pulse" : "";
@@ -1620,14 +1619,19 @@ export function BoardGrid({
                             coinFlipIds.has(card.instanceId) ||
                             swordSwingIds.has(card.instanceId) ||
                             noctuleFlyInIds.has(card.instanceId) ||
-                            crumbleIds.has(card.instanceId)
+                            crumbleIds.has(card.instanceId) ||
+                            truthgazeIds.has(card.instanceId)
                         )}
                       </div>
                     </div>
                   ) : displayFaceUp ? (
                     renderFaceUpContent(
-                      `${iconSpinClass} ${slideClass} ${hopClass} ${chargeClass} ${coinFlipClass} ${swordSwingClass} ${noctuleFlyInClass} ${truthgazeClass} ${chargePulseClass} ${trumpetShakeClass}`,
-                      pawDropIds.has(card.instanceId) || slamIds.has(card.instanceId) || igniteIds.has(card.instanceId) || crumbleIds.has(card.instanceId)
+                      `${iconSpinClass} ${slideClass} ${hopClass} ${chargeClass} ${coinFlipClass} ${swordSwingClass} ${noctuleFlyInClass} ${chargePulseClass} ${trumpetShakeClass}`,
+                      pawDropIds.has(card.instanceId) ||
+                        slamIds.has(card.instanceId) ||
+                        igniteIds.has(card.instanceId) ||
+                        crumbleIds.has(card.instanceId) ||
+                        truthgazeIds.has(card.instanceId)
                     )
                   ) : (
                     <div className={`card-back-pattern h-full w-full opacity-40 ${ownerTextColorClass(state, card.ownerId)}`} />
@@ -1708,6 +1712,31 @@ export function BoardGrid({
                   // own flex-col layout exactly, same as the paw-drop/slam overlays
                   // above, so nothing visibly jumps at the handoff.
                   <div className="card-ignite-materialize @container pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-0.5 p-1 text-center">
+                    <span className="hidden w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight opacity-0 @[72px]:block">
+                      {def.name}
+                    </span>
+                    <CardArt cardId={card.cardId} className="h-1/2 w-1/2 shrink-0" />
+                    <span className="text-[length:clamp(9px,26cqw,15px)] leading-none font-bold opacity-0">{def.base}</span>
+                  </div>
+                )}
+                {truthgazeIds.has(card.instanceId) && (
+                  // Truthseeker (Inquisitor) only -- same hideIcon+overlay trick as
+                  // Gloryseeker's own swoop-in above, playing continuously across
+                  // BOTH the mid-flip and settled call sites the same way
+                  // Gloryseeker's ignite does (see TRUTHGAZE_MS near flippingIds) --
+                  // the real icon is hidden throughout so it's never visible until
+                  // the overlay's own swoop hands off to it. An earlier version
+                  // only hid the icon and rendered this overlay at the settled call
+                  // site, which meant the real icon was already visible during the
+                  // card's own flip reveal, THEN vanished and reappeared off-card
+                  // to start the swoop a moment later -- reading as the torch
+                  // showing up twice instead of once. Swoops in from the left and
+                  // overshoots past the box to the right before settling, instead
+                  // of Gloryseeker's char-to-black handoff (see
+                  // .card-icon-truthgaze-pulse in globals.css). Mirrors
+                  // renderFaceUpContent's own flex-col layout exactly, same as the
+                  // other overlays here, so nothing visibly jumps at the handoff.
+                  <div className="card-icon-truthgaze-pulse @container pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-0.5 p-1 text-center">
                     <span className="hidden w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight opacity-0 @[72px]:block">
                       {def.name}
                     </span>
