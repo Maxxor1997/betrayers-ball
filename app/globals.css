@@ -982,33 +982,46 @@ html {
   }
 }
 
-/* Truthseeker/Inquisitor -- the torch icon sweeps out past the card's right
-   edge, then swings back to its resting spot, like a wave/beckon rather than a
-   spin. No color change at all -- a straight red flash, a violet scale-pulse,
-   a vertical blink, and a full 360 spin were all tried first and none of them
-   landed, so this is a different motion again: a single out-and-back sweep.
-   One keyframe timeline with the reversal AT its natural peak (the far right,
-   where it's actually supposed to slow to a stop before swinging back) rather
-   than at an arbitrary waypoint mid-motion -- see .card-ignite-materialize's own
-   doc comment above for why an arbitrary mid-motion stop reads as a stutter,
-   which doesn't apply here since this reversal point is the real turnaround.
-   Applied straight to the real icon (see Board.tsx's truthgazeClass,
-   settled-call-site-only -- see its own doc comment near flippingIds for why)
-   rather than a clip-path-cropped overlay -- simpler, and avoids an even
-   earlier version's own timing bug (a cropped copy needing to wait for the
-   real icon to actually be visible before it could line up with it). */
+/* Truthseeker/Inquisitor -- the torch icon swings up to the top-left, arcs
+   (dipping through center, U-shaped) over to the top-right, then arcs back the
+   same way to the top-left, before finally settling back to its resting spot.
+   No color change at all -- a straight red flash, a violet scale-pulse, a
+   vertical blink, a full 360 spin, and a simple out-and-back horizontal sweep
+   were all tried first and none of them landed, so this is a different motion
+   again: a pendulum-like double arc instead of a straight line or a spin. Each
+   dip at an arc's midpoint is a real reversal in the vertical direction
+   (up-down-up), not an arbitrary waypoint on an otherwise-straight path, so it
+   doesn't read as a stutter the way .card-ignite-materialize's own doc comment
+   above warns against. Applied straight to the real icon (see Board.tsx's
+   truthgazeClass, settled-call-site-only -- see its own doc comment near
+   flippingIds for why) rather than a clip-path-cropped overlay -- simpler, and
+   avoids an even earlier version's own timing bug (a cropped copy needing to
+   wait for the real icon to actually be visible before it could line up with
+   it). */
 @keyframes card-icon-truthgaze-pulse {
   0%,
   100% {
-    transform: translateX(0);
+    transform: translate(0, 0);
   }
-  50% {
-    transform: translateX(160%);
+  14% {
+    transform: translate(-45%, -35%);
+  }
+  33% {
+    transform: translate(0%, 10%);
+  }
+  52% {
+    transform: translate(45%, -35%);
+  }
+  71% {
+    transform: translate(0%, 10%);
+  }
+  90% {
+    transform: translate(-45%, -35%);
   }
 }
 
 .card-icon-truthgaze-pulse {
-  animation: card-icon-truthgaze-pulse 0.9s ease-in-out forwards;
+  animation: card-icon-truthgaze-pulse 1.3s ease-in-out forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
