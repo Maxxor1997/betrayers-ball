@@ -568,7 +568,7 @@ html {
 }
 
 .card-icon-slide-in {
-  animation: card-icon-slide-in 0.75s ease-out forwards;
+  animation: card-icon-slide-in 0.55s ease-out forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -849,27 +849,32 @@ html {
 /* Gloryseeker/Pyre-Bird -- the card starts blank (see Board.tsx's igniteIds/
    hideIcon, same "hide the real icon, overlay a copy" trick as Giant Bear's paw
    drop/Warlord's slam below), then a bright fire-colored version of the icon
-   materializes out of nothing, then chars down through black before settling to
-   the icon's own normal color (`inherit`) right at the very end -- so the
-   handoff to the real icon underneath is seamless in both light and dark mode.
-   Pure opacity/color/scale, no rotation of any kind. */
+   swoops in from the top-right corner (ignites mid-flight, not at rest), settles
+   into place, then chars down through black before settling to the icon's own
+   normal color (`inherit`) right at the very end -- so the handoff to the real
+   icon underneath is seamless in both light and dark mode. The sibling overlay
+   this plays on isn't clipped by the card button's own overflow-hidden (same as
+   the paw-drop/slam overlays), so it's free to travel in from well outside the
+   card's own box without getting cut off mid-swoop. */
 @keyframes card-ignite-materialize {
   0% {
     opacity: 0;
     color: rgb(24 24 27);
-    transform: scale(0.88);
+    transform: translate(170%, -170%) scale(0.7) rotate(-22deg);
   }
-  40% {
-    opacity: 0;
-    transform: scale(0.88);
-  }
-  62% {
+  18% {
     opacity: 1;
     color: rgb(249 115 22);
-    transform: scale(1);
+    transform: translate(95%, -95%) scale(0.82) rotate(-12deg);
+  }
+  46% {
+    opacity: 1;
+    color: rgb(249 115 22);
+    transform: translate(0%, 0%) scale(1) rotate(0deg);
   }
   80% {
     color: rgb(249 115 22);
+    transform: translate(0%, 0%) scale(1) rotate(0deg);
   }
   94% {
     color: rgb(24 24 27);
@@ -877,7 +882,7 @@ html {
   100% {
     opacity: 1;
     color: inherit;
-    transform: scale(1);
+    transform: translate(0%, 0%) scale(1) rotate(0deg);
   }
 }
 
@@ -976,33 +981,49 @@ html {
   }
 }
 
-/* Truthseeker/Inquisitor -- the whole icon flashes red, held for a beat, then
-   settles back to normal. Applied straight to the real icon (see Board.tsx's
-   flameFlashClass, continuous across both call sites like iconSpinClass/
-   flickerClass) rather than a clip-path-cropped overlay -- simpler, and avoids
-   the earlier version's own timing bug (a cropped copy needing to wait for the
-   real icon to actually be visible before it could line up with it). */
-@keyframes card-icon-flame-full-flash {
+/* Truthseeker/Inquisitor -- the icon narrows and widens like a pupil dilating as
+   it fixes a gaze on something, tinted violet for the beat it holds that stare,
+   then settles back to normal. Replaces an earlier version that just flashed the
+   whole icon red -- that read as the card taking damage/an attack, which doesn't
+   match Truthseeker's own flavor of scrutiny/divination rather than harm.
+   Applied straight to the real icon (see Board.tsx's truthgazeClass, settled-call-
+   site-only -- see its own doc comment near flippingIds for why) rather than a
+   clip-path-cropped overlay -- simpler, and avoids an even earlier version's own
+   timing bug (a cropped copy needing to wait for the real icon to actually be
+   visible before it could line up with it). */
+@keyframes card-icon-truthgaze-pulse {
   0% {
     color: inherit;
+    transform: scale(1);
   }
-  25% {
-    color: rgb(239 68 68);
+  20% {
+    color: rgb(167 139 250);
+    transform: scale(0.86);
   }
-  70% {
-    color: rgb(239 68 68);
+  38% {
+    color: rgb(167 139 250);
+    transform: scale(1.14);
+  }
+  55% {
+    color: rgb(167 139 250);
+    transform: scale(0.93);
+  }
+  75% {
+    color: rgb(167 139 250);
+    transform: scale(1.05);
   }
   100% {
     color: inherit;
+    transform: scale(1);
   }
 }
 
-.card-icon-flame-full-flash {
-  animation: card-icon-flame-full-flash 0.9s ease-out forwards;
+.card-icon-truthgaze-pulse {
+  animation: card-icon-truthgaze-pulse 0.9s ease-in-out forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card-icon-flame-full-flash {
+  .card-icon-truthgaze-pulse {
     animation: none;
   }
 }
@@ -1077,34 +1098,47 @@ html {
   }
 }
 
-/* Beacon/Nightjar -- fades in and out a few slow, gentle times like a blinking
-   signal (or camouflage breaking) before settling steady, instead of just
-   appearing solid. Slow enough now (see Board.tsx's flickerIds/FLICKER_MS) that
-   it plays applied continuously across the mid-flip and settled renders, same
-   as Pretender's own spin, rather than being confined to a single
-   MID_FLIP_ICON_CLASS pass. */
-@keyframes card-icon-flicker {
+/* Beacon/Nightjar -- hops in place a few times, each bounce a bit lower than the
+   last, before settling flat -- like a bird landing, instead of just appearing
+   solid. A translateY nested inside the parent's own 3D rotateY flip judders the
+   same way Footman's/Commander's translateX ones did (see Board.tsx's hopIds/
+   HOP_MS), so unlike the old opacity-only flicker this can't play continuously
+   across the mid-flip render -- it's confined to the settled-only render, icon
+   staying blank through the flip itself (same treatment as Footman's slide). */
+@keyframes card-icon-hop {
   0%,
+  16%,
+  34%,
+  50%,
+  64%,
+  76%,
+  86%,
   100% {
-    opacity: 1;
+    transform: translateY(0);
   }
-  22% {
-    opacity: 0.08;
+  8% {
+    transform: translateY(-32%);
   }
-  45% {
-    opacity: 1;
+  25% {
+    transform: translateY(-20%);
   }
-  68% {
-    opacity: 0.08;
+  42% {
+    transform: translateY(-11%);
+  }
+  57% {
+    transform: translateY(-6%);
+  }
+  70% {
+    transform: translateY(-3%);
   }
 }
 
-.card-icon-flicker {
-  animation: card-icon-flicker 1.8s ease-in-out forwards;
+.card-icon-hop {
+  animation: card-icon-hop 1.1s ease-out forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card-icon-flicker {
+  .card-icon-hop {
     animation: none;
   }
 }
@@ -1210,6 +1244,96 @@ html {
 @media (prefers-reduced-motion: reduce) {
   .card-earthshake-wobble {
     animation: none;
+  }
+}
+
+/* Earthshaker only, again -- but on its OWN card this time, not its targets (see
+   .card-earthshake-wobble above for those). Ring on a sibling overlay (same
+   "not clipped by the card's own overflow-hidden" reasoning as Bannerman's own
+   .card-horn-pulse ring) reading as a trumpet blast: three expanding-and-fading
+   rings in one keyframe timeline (same "one keyframe, not several delayed
+   elements" approach as .card-icon-hop's decaying bounces below), rather than a
+   single pulse, so it reads as an actual sound wave radiating outward instead of
+   a one-off flash. Plays after the card has settled into its plain face-up
+   render (see Board.tsx's trumpetIds/TRUMPET_MS), same "icon-shake plus a
+   longer-lived ring" split as Bannerman's own raise-call/horn-pulse pair, just
+   timed to its own longer duration instead of piggybacking on the 500ms flip
+   window. */
+@keyframes card-icon-trumpet-shake {
+  0%,
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+  10% {
+    transform: rotate(-5deg) scale(1.05);
+  }
+  20% {
+    transform: rotate(4deg) scale(1.03);
+  }
+  30% {
+    transform: rotate(-3deg) scale(1.05);
+  }
+  42% {
+    transform: rotate(2deg) scale(1.02);
+  }
+  55% {
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+.card-icon-trumpet-shake {
+  animation: card-icon-trumpet-shake 0.6s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-icon-trumpet-shake {
+    animation: none;
+  }
+}
+
+@keyframes card-trumpet-soundwave {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  0% {
+    transform: scale(0.3);
+  }
+  10% {
+    opacity: 0.7;
+    transform: scale(0.55);
+  }
+  32% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+  40% {
+    opacity: 0.55;
+    transform: scale(0.55);
+  }
+  62% {
+    opacity: 0;
+    transform: scale(1.55);
+  }
+  70% {
+    opacity: 0.4;
+    transform: scale(0.55);
+  }
+  95% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+
+.card-trumpet-soundwave {
+  animation: card-trumpet-soundwave 1s ease-out forwards;
+  border: 2px solid rgb(56 189 248); /* sky-400 -- an audible/sonar tone, distinct from every other card's own ring color */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-trumpet-soundwave {
+    animation: none;
+    display: none;
   }
 }
 

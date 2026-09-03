@@ -42,14 +42,14 @@ function range(start: number, end: number): number[] {
  * doesn't involve its own translate/3D transform that would compound badly with the
  * parent's simultaneous rotateY flip, AND stays within its own icon's bounding box --
  * unlike Pretender's spin, Footman's slide, Commander's charge, Mercenary's
- * coin-flip, Beacon's flicker, Berserker's hydra-split, or Giant Bear's/Warlord's
+ * coin-flip, Beacon's hop, Berserker's hydra-split, or Giant Bear's/Warlord's
  * drops, which all need their own longer-lived state (and, for Berserker/Giant Bear/
  * Warlord/Gloryseeker, a separate sibling overlay outside the card's own
  * overflow-hidden button, since each of those spills visibly past the icon's own box)
  * -- see each one's own doc comment near flippingIds). See each class's own keyframe
  * in globals.css for the flavor behind it: Bannerman/Hornblower raises up mid-call.
  * Everyone else in the "Engine flourish" set is NOT here -- see
- * slideIds/chargeIds/coinFlipIds/igniteIds/flickerIds/hydraIds/chargePulseIds near
+ * slideIds/chargeIds/coinFlipIds/igniteIds/hopIds/hydraIds/chargePulseIds near
  * flippingIds instead.
  */
 const MID_FLIP_ICON_CLASS: Partial<Record<CardId, string>> = {
@@ -234,20 +234,18 @@ export function BoardGrid({
   // NOTE: this clock starts at the same moment as the flip itself (t=0), but the
   // slide's own CSS animation doesn't start PLAYING until the settled render mounts
   // at FLIP_ANIMATION_MS -- so this has to cover the flip's own duration plus the
-  // slide's full 0.75s animation, not just the animation alone, or slideIds (and the
+  // slide's full 0.55s animation, not just the animation alone, or slideIds (and the
   // class it drives) gets cleared mid-slide, yanking the "forwards" fill and snapping
   // the icon instantly to its resting position.
-  const SLIDE_MS = FLIP_ANIMATION_MS + 750;
-  // Beacon (Nightjar) only -- like Pretender's spin, the flicker now runs slower than
-  // FLIP_ANIMATION_MS, so instead of the icon staying blank and swapping to an overlay
-  // (Footman/Gloryseeker's approach), it's simplest to just apply the same class
-  // continuously across both the mid-flip and settled call sites (same as
-  // iconSpinClass) -- a plain opacity animation doesn't warp when nested inside the
-  // parent's rotateY like a translateX would, so it doesn't need Footman's
-  // hide-then-swap treatment. Same FLIP_ANIMATION_MS-plus-own-duration accounting as
+  const SLIDE_MS = FLIP_ANIMATION_MS + 550;
+  // Beacon (Nightjar) only -- a translateY hop nested inside the parent's own 3D
+  // rotateY flip judders the same way Footman's translateX slide did, so this gets
+  // the same "blank through the flip, hop in once settled" treatment as Footman's
+  // slide above, rather than the old opacity-only flicker's "continuous across both
+  // call sites" approach. Same FLIP_ANIMATION_MS-plus-own-duration accounting as
   // SLIDE_MS above, for the same reason (its own CSS animation doesn't start playing
   // until the settled render mounts at FLIP_ANIMATION_MS).
-  const FLICKER_MS = FLIP_ANIMATION_MS + 1800;
+  const HOP_MS = FLIP_ANIMATION_MS + 1100;
   // Commander (Hipparch) only -- same reasoning/treatment as Footman's slide above
   // (a translateX nested inside the parent's simultaneous rotateY flip read as a
   // warped flicker, not a clean charge): icon stays blank through the 3D flip, then
@@ -301,15 +299,27 @@ export function BoardGrid({
   // this uses the same treatment: icon stays blank through the 3D flip, then swings
   // once the card has settled into its plain, non-3D render.
   const SWORD_SWING_MS = FLIP_ANIMATION_MS + 600;
-  // Inquisitor (Truthseeker) only -- the whole icon flashes red then recovers.
-  // Applied ONLY at the settled call site, not the mid-flip one -- applying it at
-  // both (like iconSpinClass/flickerClass) meant its 0.9s color animation had
-  // already reached red well before the mid-flip's back face ever became visible
-  // (which only happens roughly halfway through the parent's own 500ms flip), so
-  // the icon read as red from the very first moment it appeared instead of
-  // starting black. Settled-only means the viewer always sees the normal black
-  // icon first, then the flash plays after.
-  const FLAME_FLASH_MS = FLIP_ANIMATION_MS + 900;
+  // Earthshaker only -- its OWN reveal, not the ground-shake wobble it inflicts on
+  // its targets (see earthshakenIds elsewhere) -- a trumpet-blast: a quick icon
+  // shake plus a longer-lived sibling ring reading as sound waves (see
+  // .card-icon-trumpet-shake/.card-trumpet-soundwave in globals.css). Same
+  // "icon-shake plus its own ring overlay" split as Bannerman's raise-call/
+  // horn-pulse pair, just settled-only (like Inquisitor's truth-gaze pulse below)
+  // rather than timed to the 500ms flip window, since the ring's own 1s duration
+  // wouldn't fit inside it.
+  const TRUMPET_MS = FLIP_ANIMATION_MS + 1000;
+  // Inquisitor (Truthseeker) only -- a violet "truth-gaze" pulse: the icon
+  // contracts and dilates like a pupil narrowing in on a lie, replacing an
+  // earlier version that just flashed the whole icon red (read as damage/an
+  // attack, which doesn't match Truthseeker's own flavor of scrutiny rather than
+  // harm). Applied ONLY at the settled call site, not the mid-flip one -- applying
+  // it at both (like iconSpinClass/hopClass) meant its 0.9s color animation had
+  // already reached its peak color well before the mid-flip's back face ever
+  // became visible (which only happens roughly halfway through the parent's own
+  // 500ms flip), so the icon read as violet from the very first moment it
+  // appeared instead of starting black. Settled-only means the viewer always
+  // sees the normal black icon first, then the pulse plays after.
+  const TRUTHGAZE_MS = FLIP_ANIMATION_MS + 900;
   // Skysplitter (Zeus-Born) only -- a bright pulse, flavor for "+1 per round
   // elapsed" (it only ever gets stronger from here). Applied ONLY at the settled
   // call site, same reasoning/timing as Inquisitor's flame flash above -- the
@@ -388,7 +398,7 @@ export function BoardGrid({
   const [slamIds, setSlamIds] = useState<Set<string>>(new Set());
   const [igniteIds, setIgniteIds] = useState<Set<string>>(new Set());
   const [slideIds, setSlideIds] = useState<Set<string>>(new Set());
-  const [flickerIds, setFlickerIds] = useState<Set<string>>(new Set());
+  const [hopIds, setHopIds] = useState<Set<string>>(new Set());
   const [chargeIds, setChargeIds] = useState<Set<string>>(new Set());
   const [coinFlipIds, setCoinFlipIds] = useState<Set<string>>(new Set());
   const [hydraIds, setHydraIds] = useState<Set<string>>(new Set());
@@ -397,7 +407,8 @@ export function BoardGrid({
   const [noctuleFlyInIds, setNoctuleFlyInIds] = useState<Set<string>>(new Set());
   const [heraldRiseIds, setHeraldRiseIds] = useState<Set<string>>(new Set());
   const [swordSwingIds, setSwordSwingIds] = useState<Set<string>>(new Set());
-  const [flameFlashIds, setFlameFlashIds] = useState<Set<string>>(new Set());
+  const [trumpetIds, setTrumpetIds] = useState<Set<string>>(new Set());
+  const [truthgazeIds, setTruthgazeIds] = useState<Set<string>>(new Set());
   const [chargePulseIds, setChargePulseIds] = useState<Set<string>>(new Set());
   // Not per-instance like the others -- there's only ever one Pool, so this is
   // just a boolean flash (via the same `flash` helper below, using a single
@@ -474,7 +485,7 @@ export function BoardGrid({
     const newlySlammed = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Warlord").map((key) => state.board.get(key)!.instanceId);
     const newlyIgnited = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Gloryseeker").map((key) => state.board.get(key)!.instanceId);
     const newlySlid = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Footman").map((key) => state.board.get(key)!.instanceId);
-    const newlyFlickered = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Beacon").map((key) => state.board.get(key)!.instanceId);
+    const newlyHopped = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Beacon").map((key) => state.board.get(key)!.instanceId);
     const newlyCharged = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Commander").map((key) => state.board.get(key)!.instanceId);
     const newlyCoinFlipped = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Mercenary").map((key) => state.board.get(key)!.instanceId);
     const newlyHydraSplit = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Berserker").map((key) => state.board.get(key)!.instanceId);
@@ -482,6 +493,7 @@ export function BoardGrid({
     const newlyCrumbled = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Infiltrator").map((key) => state.board.get(key)!.instanceId);
     const newlyNoctuleFlownIn = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "PlagueBearer").map((key) => state.board.get(key)!.instanceId);
     const newlyHeraldRisen = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Chronicler").map((key) => state.board.get(key)!.instanceId);
+    const newlyTrumpeted = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Earthshaker").map((key) => state.board.get(key)!.instanceId);
     // Lictor (Suppressor) only -- the sword swing only plays when its own ability is
     // actually active on reveal (3+ adjacent occupied cells, same condition as
     // negatesNeighborsIf/flipDisruptionTargets) -- an inert Lictor with too few
@@ -495,7 +507,7 @@ export function BoardGrid({
         );
       })
       .map((key) => state.board.get(key)!.instanceId);
-    const newlyFlameFlashed = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Truthseeker").map((key) => state.board.get(key)!.instanceId);
+    const newlyTruthgazed = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Truthseeker").map((key) => state.board.get(key)!.instanceId);
     const newlyChargePulsed = newlyFlipped.filter((key) => state.board.get(key)!.cardId === "Skysplitter").map((key) => state.board.get(key)!.instanceId);
     // Mirror Pool only -- did any card that just became face-up (flip or rise)
     // complete a matching mirrored pair? Both sides must be face-up, same
@@ -650,7 +662,7 @@ export function BoardGrid({
       flash(newlySlammed, setSlamIds, SLAM_MS),
       flash(newlyIgnited, setIgniteIds, IGNITE_MS),
       flash(newlySlid, setSlideIds, SLIDE_MS),
-      flash(newlyFlickered, setFlickerIds, FLICKER_MS),
+      flash(newlyHopped, setHopIds, HOP_MS),
       flash(newlyCharged, setChargeIds, CHARGE_MS),
       flash(newlyCoinFlipped, setCoinFlipIds, COIN_FLIP_MS),
       flash(newlyHydraSplit, setHydraIds, HYDRA_MS),
@@ -659,7 +671,8 @@ export function BoardGrid({
       flash(newlyNoctuleFlownIn, setNoctuleFlyInIds, NOCTULE_FLY_IN_MS),
       flash(newlyHeraldRisen, setHeraldRiseIds, HERALD_RISE_MS),
       flash(newlySwordSwing, setSwordSwingIds, SWORD_SWING_MS),
-      flash(newlyFlameFlashed, setFlameFlashIds, FLAME_FLASH_MS),
+      flash(newlyTruthgazed, setTruthgazeIds, TRUTHGAZE_MS),
+      flash(newlyTrumpeted, setTrumpetIds, TRUMPET_MS),
       flash(newlyChargePulsed, setChargePulseIds, CHARGE_PULSE_MS),
       flash(newlyDisrupted, setDisruptedIds, DISRUPTION_FLASH_MS),
       flash(newlyEarthshaken, setEarthshakenIds, DISRUPTION_FLASH_MS),
@@ -1387,10 +1400,10 @@ export function BoardGrid({
             // flippingIds for why this needed its own state instead of
             // MID_FLIP_ICON_CLASS).
             const slideClass = slideIds.has(card.instanceId) ? "card-icon-slide-in" : "";
-            // Beacon (Nightjar) only -- same "applied continuously across both call
-            // sites" idea as Pretender's spin (see flickerIds/FLICKER_MS near
-            // flippingIds).
-            const flickerClass = flickerIds.has(card.instanceId) ? "card-icon-flicker" : "";
+            // Beacon (Nightjar) only -- same "blank through the flip, animate only
+            // once settled" treatment as Footman's slide above (see hopIds/HOP_MS
+            // near flippingIds).
+            const hopClass = hopIds.has(card.instanceId) ? "card-icon-hop" : "";
             // Commander/Mercenary only -- same "blank through the flip, animate only
             // once settled" treatment as Footman's slide above (see chargeIds/
             // coinFlipIds near flippingIds).
@@ -1404,12 +1417,16 @@ export function BoardGrid({
             // only once settled" treatment as Footman's slide/Commander's charge
             // above (see noctuleFlyInIds/NOCTULE_FLY_IN_MS near flippingIds).
             const noctuleFlyInClass = noctuleFlyInIds.has(card.instanceId) ? "card-icon-noctule-fly-in" : "";
-            // Inquisitor (Truthseeker) only -- see FLAME_FLASH_MS near flippingIds
+            // Inquisitor (Truthseeker) only -- see TRUTHGAZE_MS near flippingIds
             // for why this only applies at the settled call site.
-            const flameFlashClass = flameFlashIds.has(card.instanceId) ? "card-icon-flame-full-flash" : "";
+            const truthgazeClass = truthgazeIds.has(card.instanceId) ? "card-icon-truthgaze-pulse" : "";
             // Skysplitter (Zeus-Born) only -- see CHARGE_PULSE_MS near flippingIds
             // for why this only applies at the settled call site.
             const chargePulseClass = chargePulseIds.has(card.instanceId) ? "card-icon-charge-pulse" : "";
+            // Earthshaker only -- see TRUMPET_MS near flippingIds for why this only
+            // applies at the settled call site; the ring that goes with it is a
+            // separate sibling overlay (see trumpetIds below), not an icon class.
+            const trumpetShakeClass = trumpetIds.has(card.instanceId) ? "card-icon-trumpet-shake" : "";
             const midFlipIconClass = MID_FLIP_ICON_CLASS[card.cardId] ?? "";
             // A function, not a precomputed value, so the two call sites below (the
             // plain face-up render and the mid-flip 3D reveal -- see flippingIds
@@ -1587,11 +1604,12 @@ export function BoardGrid({
                       </div>
                       <div className="card-flip-face card-flip-face-back flex flex-col items-center justify-center gap-0.5">
                         {renderFaceUpContent(
-                          `${isDyingGod ? "card-hourglass-flip" : ""} ${iconSpinClass} ${flickerClass} ${midFlipIconClass}`,
+                          `${isDyingGod ? "card-hourglass-flip" : ""} ${iconSpinClass} ${midFlipIconClass}`,
                           pawDropIds.has(card.instanceId) ||
                             slamIds.has(card.instanceId) ||
                             igniteIds.has(card.instanceId) ||
                             slideIds.has(card.instanceId) ||
+                            hopIds.has(card.instanceId) ||
                             chargeIds.has(card.instanceId) ||
                             coinFlipIds.has(card.instanceId) ||
                             swordSwingIds.has(card.instanceId) ||
@@ -1602,7 +1620,7 @@ export function BoardGrid({
                     </div>
                   ) : displayFaceUp ? (
                     renderFaceUpContent(
-                      `${iconSpinClass} ${slideClass} ${flickerClass} ${chargeClass} ${coinFlipClass} ${swordSwingClass} ${noctuleFlyInClass} ${flameFlashClass} ${chargePulseClass}`,
+                      `${iconSpinClass} ${slideClass} ${hopClass} ${chargeClass} ${coinFlipClass} ${swordSwingClass} ${noctuleFlyInClass} ${truthgazeClass} ${chargePulseClass} ${trumpetShakeClass}`,
                       pawDropIds.has(card.instanceId) || slamIds.has(card.instanceId) || igniteIds.has(card.instanceId) || crumbleIds.has(card.instanceId)
                     )
                   ) : (
@@ -1677,12 +1695,12 @@ export function BoardGrid({
                 {igniteIds.has(card.instanceId) && (
                   // Gloryseeker (Warlord/Giant Bear's own hideIcon+overlay trick) --
                   // the real card underneath is left icon-less (see renderFaceUpContent's
-                  // hideIcon above) while a separate copy of the icon fades in ablaze
-                  // and chars to black (see .card-ignite-materialize in globals.css),
-                  // then hands off to the real icon once this overlay disappears.
-                  // Mirrors renderFaceUpContent's own flex-col layout exactly, same as
-                  // the paw-drop/slam overlays above, so nothing visibly jumps at the
-                  // handoff.
+                  // hideIcon above) while a separate copy of the icon swoops in ablaze
+                  // from the top-right corner and chars to black (see
+                  // .card-ignite-materialize in globals.css), then hands off to the
+                  // real icon once this overlay disappears. Mirrors renderFaceUpContent's
+                  // own flex-col layout exactly, same as the paw-drop/slam overlays
+                  // above, so nothing visibly jumps at the handoff.
                   <div className="card-ignite-materialize @container pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-0.5 p-1 text-center">
                     <span className="hidden w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight opacity-0 @[72px]:block">
                       {def.name}
@@ -1768,6 +1786,13 @@ export function BoardGrid({
                   // like Giant Bear/Warlord -- the icon just raises in place, so a
                   // plain ring sibling is enough.
                   <div className="card-horn-pulse pointer-events-none absolute inset-[20%] z-10 rounded-full" />
+                )}
+                {!flippingIds.has(card.instanceId) && trumpetIds.has(card.instanceId) && (
+                  // Earthshaker only -- same "icon shake plus a ring sibling" idea as
+                  // Bannerman's raise-call/horn-pulse above, but settled-only (see
+                  // TRUMPET_MS near flippingIds) since the ring's own longer duration
+                  // wouldn't fit inside the 500ms flip window the way Bannerman's does.
+                  <div className="card-trumpet-soundwave pointer-events-none absolute inset-[20%] z-10 rounded-full" />
                 )}
                 {hasMirrorTypeMatch && (
                   // Mirror Pool only -- a small badge of the location's own icon in
