@@ -366,7 +366,9 @@ function DisplayGameView({
     state.phase === "ended"
       ? resolveBoard(state.board, state.config.boardBounds, state.round, state.config.centerEffect, state.players.map((p) => p.id))
       : null;
-  const resolvedCards = endResult ? new Map(endResult.cards.map((c) => [c.instanceId, c])) : undefined;
+  const resolvedCards = endResult
+    ? new Map([...endResult.cards, ...(endResult.kingslayerCard ? [endResult.kingslayerCard] : [])].map((c) => [c.instanceId, c]))
+    : undefined;
 
   const opponentVisibleBoardCardIds = new Set([...state.board.values()].filter((c) => c.faceUp).map((c) => c.cardId));
   const flipUnlocked = isFlipUnlocked(state.round, state.config);
@@ -403,6 +405,7 @@ function DisplayGameView({
           dragOverKey={null}
           revealAll={state.phase === "ended"}
           resolvedCards={resolvedCards}
+          kingslayerHit={endResult?.kingslayerHit}
           onCellClick={() => {}}
           onCellDragOver={() => {}}
           onCellDragLeave={() => {}}
