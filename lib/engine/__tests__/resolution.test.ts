@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flipBoostTargets, flipDisruptionTargets, resolveBoard, ResolvedCard } from "../resolution";
+import { computePlagueInfection, flipBoostTargets, flipDisruptionTargets, resolveBoard, ResolvedCard } from "../resolution";
 import { Board, BoardBounds, CardId, CardInstance, posKey } from "../types";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, KINGSLAYER_BASE_VALUE } from "@/lib/content/centerEffects";
@@ -84,7 +84,7 @@ describe("resolveBoard — Footman row/column bonus", () => {
 });
 
 describe("resolveBoard — Warlord", () => {
-  it("penalizes -2 per unique enemy player with a Warlord on the board", () => {
+  it("penalizes -2 per other Warlord on the board", () => {
     const board: Board = new Map();
     const w1 = place(board, 0, 0, "Warlord", "p1");
     place(board, 1, 0, "Warlord", "p2");
@@ -100,26 +100,27 @@ describe("resolveBoard — Warlord", () => {
     expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
   });
 
-  it("does not penalize for other Warlords owned by the same player", () => {
+  it("also penalizes for other Warlords owned by the same player", () => {
     const board: Board = new Map();
     const w1 = place(board, 0, 0, "Warlord", "p1");
     place(board, 1, 0, "Warlord", "p1");
     place(board, 2, 0, "Warlord", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base);
+    // 2 other Warlords, own-owned or not, both count now.
+    expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 2 * 2);
   });
 
-  it("counts multiple Warlords from the same enemy only once", () => {
+  it("counts every other Warlord from the same enemy individually, no owner dedup", () => {
     const board: Board = new Map();
     const w1 = place(board, 0, 0, "Warlord", "p1");
     place(board, 1, 0, "Warlord", "p2");
     place(board, 2, 0, "Warlord", "p2");
     place(board, 3, 0, "Warlord", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 2 * 1);
+    expect(find(cards, w1.instanceId).finalValue).toBe(CARD_DEFS.Warlord.base - 2 * 3);
   });
 
-  it("floors at 0 once enough unique enemy owners are in play", () => {
+  it("floors at 0 once enough other Warlords are in play", () => {
     const board: Board = new Map();
     const w1 = place(board, 0, 0, "Warlord", "p1");
     place(board, 1, 0, "Warlord", "p2");
@@ -128,7 +129,7 @@ describe("resolveBoard — Warlord", () => {
     place(board, 4, 0, "Warlord", "p5");
     place(board, 5, 0, "Warlord", "p6");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    // 5 unique enemy owners -> base - 10, which floors to 0
+    // 5 other Warlords -> base - 10, which floors to 0
     expect(find(cards, w1.instanceId).finalValue).toBe(0);
   });
 });
@@ -247,7 +248,7 @@ describe("resolveBoard — Pretender", () => {
 });
 
 describe("resolveBoard — Berserker", () => {
-  it("gains +2 per unique enemy player with a Berserker anywhere on the board", () => {
+  it("gains +2 per other Berserker anywhere on the board", () => {
     const board: Board = new Map();
     const mine = place(board, 0, 0, "Berserker", "p1");
     place(board, 1, 0, "Berserker", "p2");
@@ -263,21 +264,21 @@ describe("resolveBoard — Berserker", () => {
     expect(find(cards, mine.instanceId).finalValue).toBe(CARD_DEFS.Berserker.base);
   });
 
-  it("does not double-count multiple Berserkers from the same rival (same shape as Warlord)", () => {
+  it("counts every other Berserker from the same rival individually, no owner dedup (same shape as Warlord)", () => {
     const board: Board = new Map();
     const mine = place(board, 0, 0, "Berserker", "p1");
     place(board, 5, 5, "Berserker", "p2");
     place(board, 6, 6, "Berserker", "p2");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, mine.instanceId).finalValue).toBe(CARD_DEFS.Berserker.base + 2);
+    expect(find(cards, mine.instanceId).finalValue).toBe(CARD_DEFS.Berserker.base + 2 * 2);
   });
 
-  it("does not count same-owner copies", () => {
+  it("also counts same-owner copies", () => {
     const board: Board = new Map();
     const mine = place(board, 0, 0, "Berserker", "p1");
     place(board, 1, 0, "Berserker", "p1");
     const { cards } = resolveBoard(board, BOUNDS, 3);
-    expect(find(cards, mine.instanceId).finalValue).toBe(CARD_DEFS.Berserker.base);
+    expect(find(cards, mine.instanceId).finalValue).toBe(CARD_DEFS.Berserker.base + 2);
   });
 });
 
@@ -572,6 +573,53 @@ describe("resolveBoard — Plague Bearer", () => {
     expect(find(cards, left.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base - 2);
     expect(find(cards, right.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base - 2);
     expect(find(cards, center.instanceId).finalValue).toBe(CARD_DEFS.PlagueBearer.base + 4);
+  });
+});
+
+describe("resolveBoard — Plague Rat", () => {
+  it("applies -1 to each adjacent card", () => {
+    const board: Board = new Map();
+    const rat = place(board, 1, 1, "PlagueRat", "p1");
+    const f1 = place(board, 0, 1, "Footman", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, f1.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 1);
+    expect(find(cards, rat.instanceId).finalValue).toBe(CARD_DEFS.PlagueRat.base);
+  });
+
+  it("spreads through a chain of same-owner cards beyond direct adjacency", () => {
+    const board: Board = new Map();
+    place(board, 0, 0, "PlagueRat", "p1");
+    const chainA = place(board, 1, 0, "Footman", "p2");
+    const chainB = place(board, 2, 0, "Footman", "p2");
+    const other = place(board, 3, 0, "Footman", "p3"); // different owner -- stops the spread
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    expect(find(cards, chainA.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 1);
+    expect(find(cards, chainB.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 1);
+    expect(find(cards, other.instanceId).finalValue).toBe(CARD_DEFS.Footman.base);
+  });
+
+  it("only infects a card once, even when reachable from two different rats", () => {
+    const board: Board = new Map();
+    place(board, 0, 0, "PlagueRat", "p1");
+    const target = place(board, 1, 0, "Footman", "p3"); // adjacent to both rats
+    place(board, 2, 0, "PlagueRat", "p2");
+    const { cards } = resolveBoard(board, BOUNDS, 3);
+    // A single -1, not -2 -- the whole point of computePlagueInfection's global pass.
+    expect(find(cards, target.instanceId).finalValue).toBe(CARD_DEFS.Footman.base - 1);
+    const breakdown = find(cards, target.instanceId).breakdown.filter((d) => d.label.includes(CARD_DEFS.PlagueRat.name));
+    expect(breakdown).toHaveLength(1);
+  });
+
+  it("requireSourceFaceUp excludes a still-hidden rat -- Board.tsx's live 'infected' badge must never leak a face-down rat's identity", () => {
+    const board: Board = new Map();
+    place(board, 0, 0, "PlagueRat", "p1", false); // face-down -- must not seed the live badge
+    const target = place(board, 1, 0, "Footman", "p3");
+    const negated = new Set<string>();
+    // The real scoring pass (requireSourceFaceUp defaulted to false) still infects
+    // the target -- a hidden rat's effect is genuinely real at game end.
+    expect(computePlagueInfection(board, BOUNDS, negated).has(target.instanceId)).toBe(true);
+    // But the live-badge variant must not, since the rat itself isn't revealed yet.
+    expect(computePlagueInfection(board, BOUNDS, negated, true).has(target.instanceId)).toBe(false);
   });
 });
 

@@ -8,7 +8,7 @@ import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, KINGSLAYER_BASE_VALUE, KINGSLAYER_INSTANCE_ID } from "@/lib/content/centerEffects";
 import { adjacentPositions, getAdjacentCards, inBounds, isOwnerlessPosition, isPositionFaceUp, parsePosKey } from "@/lib/engine/board";
 import { PLAYER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
-import { flipBoostTargets, flipDisruptionTargets, ResolvedCard } from "@/lib/engine/resolution";
+import { computeNegatedInstanceIds, computePlagueInfection, flipBoostTargets, flipDisruptionTargets, ResolvedCard } from "@/lib/engine/resolution";
 import { isFlipUnlocked } from "@/lib/engine/turns";
 import { CardId, CardInstance, GameState, Position, posKey } from "@/lib/engine/types";
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
@@ -621,7 +621,9 @@ export function BoardGrid({
         return getAdjacentCards(state.board, state.config.boardBounds, pos).some((n) => n.faceUp && n.cardId === "Footman");
       }
       if (card.cardId === "Berserker") {
-        return [...state.board.values()].some((c) => c.faceUp && c.cardId === "Berserker" && c.ownerId !== card.ownerId);
+        // Any other face-up Berserker now counts, own copies included -- see
+        // cards.ts's own rework (no more unique-enemy-owner dedup).
+        return [...state.board.values()].some((c) => c.faceUp && c.cardId === "Berserker" && c.instanceId !== card.instanceId);
       }
       if (card.cardId === "PlagueBearer") {
         const counts = new Map<CardId, number>();
@@ -810,6 +812,18 @@ export function BoardGrid({
   // assumes the toolbar is visible (the smallest possible viewport), so it's stable.
   const widthForHeightBudget = `calc(${VERTICAL_BUDGET_VH}svh * ${width / height})`;
 
+  // Computed once per render (not per-cell) -- see computePlagueInfection's own doc
+  // comment for why this is safe to call live, against the CURRENT board, to drive
+  // the top-left "infected" badge below.
+  const negatedInstanceIds = computeNegatedInstanceIds(state.board, state.config.boardBounds);
+  const plagueInfection = computePlagueInfection(state.board, state.config.boardBounds, negatedInstanceIds, true);
+
+  // World-Tree (the "none" location -- see its own label in centerEffects.ts) only --
+  // its icon starts small and grows a fixed amount each ROUND (not continuously as
+  // cards get placed), so it advances in discrete steps in step with the round
+  // counter rather than ticking up with every individual placement.
+  const worldTreeScale = 0.55 + 0.60 * Math.min(1, state.round / state.config.roundCap);
+
   return (
     <div
       className={`relative grid gap-1.5 rounded-xl p-1.5 ${turnHighlighted ? "turn-glow" : ""}`}
@@ -959,11 +973,22 @@ export function BoardGrid({
               !adjacentPositions(pos, state.config.boardBounds).some(
                 (p) => !isOwnerlessPosition(p, state.config.boardBounds) && !state.board.has(posKey(p))
               );
+            // Free Cities only -- recolors THIS specific City tile once every one of
+            // its own orthogonal neighbors is occupied, same "boxed in" definition as
+            // Corpse of the Great Wyrm's own per-head check above (Free Cities can
+            // have multiple City tiles -- each is checked independently).
+            const isCitySurrounded =
+              state.config.centerEffect === "freeCities" &&
+              !adjacentPositions(pos, state.config.boardBounds).some(
+                (p) => !isOwnerlessPosition(p, state.config.boardBounds) && !state.board.has(posKey(p))
+              );
             const locationThemeColorClass = isHeadSurrounded
               ? "text-stone-300 dark:text-stone-400"
-              : isErebusFlipUnlocked
-                ? "text-red-600 dark:text-red-500"
-                : effect.themeColorClass;
+              : isCitySurrounded
+                ? "text-amber-900 dark:text-amber-700"
+                : isErebusFlipUnlocked
+                  ? "text-red-600 dark:text-red-500"
+                  : effect.themeColorClass;
             // Always the flat base value, never the live computed one -- some of its
             // adjacency modifiers (Bannerman's, notably) don't require face-up, so
             // showing the true live value would leak a face-down card's identity
@@ -1030,6 +1055,7 @@ export function BoardGrid({
                         id={state.config.centerEffect}
                         variant={artVariant}
                         className={`${BOLD_LOCATION_ART_IDS.has(state.config.centerEffect) ? "h-3/4 w-3/4" : "h-1/2 w-1/2"} shrink-0 ${locationThemeColorClass} ${trenchSpinClass}`}
+                        style={state.config.centerEffect === "none" ? { transform: `scale(${worldTreeScale})` } : undefined}
                       />
                     )}
                     <span className="truncate">{displayLabel}</span>
@@ -1042,6 +1068,7 @@ export function BoardGrid({
                       id={state.config.centerEffect}
                       variant={artVariant}
                       className={`aspect-square w-full rounded-md ${BOLD_LOCATION_ART_IDS.has(state.config.centerEffect) ? "" : "opacity-60"} @[70px]:hidden ${locationThemeColorClass} ${effectHighlightClass} ${trenchSpinClass}`}
+                      style={state.config.centerEffect === "none" ? { transform: `scale(${worldTreeScale})` } : undefined}
                     />
                   ) : (
                     <div className={`aspect-square w-full rounded-md opacity-60 @[70px]:hidden ${locationThemeColorClass} bg-current ${effectHighlightClass}`} />
@@ -1156,6 +1183,14 @@ export function BoardGrid({
             // At game end, cards that were face-down during play are shown with faded
             // text instead of a separate badge -- distinguishable without being loud.
             const faded = revealAll && !card.faceUp;
+            // Negation (Suppressor/Lictor's 3+-adjacent rule) cancels a card's own
+            // printed effect entirely -- greys its icon out to make that visible at a
+            // glance, taking priority over every other tint below (a negated card's
+            // "other copies"/"boosted" conditions may still be numerically true, but
+            // none of them actually pay out while negated, so showing their normal
+            // color would be misleading). Purely positional (Suppressor's own
+            // 3+-neighbor gate), never a hidden identity, so always safe to show.
+            const isNegated = negatedInstanceIds.has(card.instanceId);
             const def = CARD_DEFS[card.cardId];
             // Live, per-render indicators (recomputed off the current board every
             // render, not a one-shot flip flourish) for four cards whose own
@@ -1247,14 +1282,6 @@ export function BoardGrid({
                 const occupied = isOwnerlessPosition(p, state.config.boardBounds) || state.board.has(posKey(p));
                 return occupied && isPositionFaceUp(state.board, state.config.boardBounds, p) === card.faceUp;
               }).length >= 4;
-            const isHydraMaxed =
-              card.cardId === "Berserker" &&
-              new Set(
-                [...state.board.values()]
-                  .filter((c) => c.faceUp && c.cardId === "Berserker" && c.ownerId !== card.ownerId)
-                  .map((c) => c.ownerId)
-              ).size >=
-                state.players.length - 1;
             const isConciliatorMaxed =
               card.cardId === "Mercenary" &&
               new Set(
@@ -1262,11 +1289,62 @@ export function BoardGrid({
                   .filter((n) => n.ownerId !== card.ownerId)
                   .map((n) => n.ownerId)
               ).size >= Math.min(4, state.players.length - 1);
-            const activatedColorClass = isLictorActive || isNoctuleActive ? "text-blue-500 dark:text-blue-400" : "";
-            const penalizedColorClass = isUsurperThreatened || isBearBoxedIn || isDyingGodMaxed ? "text-red-600 dark:text-red-500" : "";
-            const maxedColorClass = isZeusBornMaxed ? "text-yellow-400 dark:text-yellow-300" : "";
+            // Hydra (Berserker)/Warlord only -- how many OTHER face-up copies of the
+            // same card (any owner, own included -- see cards.ts's rework dropping the
+            // old unique-enemy-owner dedup) currently exist. Only ever counts
+            // currently-face-up cards, same hidden-info reasoning as Hipparch's/
+            // Hydra's own older "maxed" check above -- this depends on another card's
+            // IDENTITY, so a still-hidden matching card must never leak through here.
+            const otherFaceUpCopies = (cardId: CardId) =>
+              [...state.board.values()].filter((c) => c.faceUp && c.cardId === cardId && c.instanceId !== card.instanceId).length;
+            const isHydraOneOther = card.cardId === "Berserker" && otherFaceUpCopies("Berserker") === 1;
+            const isHydraTwoPlusOther = card.cardId === "Berserker" && otherFaceUpCopies("Berserker") >= 2;
+            const isWarlordOneOther = card.cardId === "Warlord" && otherFaceUpCopies("Warlord") === 1;
+            const isWarlordTwoPlusOther = card.cardId === "Warlord" && otherFaceUpCopies("Warlord") >= 2;
+            // Hoplite (Footman) only -- green if a same-owner unbroken line of 3+
+            // already includes it (re-derives the exact rowRun/colRun check
+            // Footman.valueModifier itself uses, purely occupancy/ownership-based, no
+            // identity dependency); blue if boosted by an adjacent Hornblower
+            // (Bannerman buffs ANY adjacent Footman, not just its own owner's, so this
+            // is occupancy-only too). Green wins when both apply -- see the shared
+            // activatedColorClass/bonusMaxedColorClass chains below, where green
+            // (bonusMaxedColorClass) is concatenated after blue (activatedColorClass),
+            // so it naturally wins the CSS cascade without needing its own ternary.
+            const isHopliteBoosted =
+              card.cardId === "Footman" && getAdjacentCards(state.board, state.config.boardBounds, pos).some((n) => n.cardId === "Bannerman");
+            const footmanRun = (dx: number, dy: number): number => {
+              let count = 0;
+              let x = pos.x + dx;
+              let y = pos.y + dy;
+              while (true) {
+                const c = state.board.get(posKey({ x, y }));
+                if (!c || c.ownerId !== card.ownerId) break;
+                count++;
+                x += dx;
+                y += dy;
+              }
+              return count;
+            };
+            const isHopliteRowOfThree =
+              card.cardId === "Footman" && (1 + footmanRun(-1, 0) + footmanRun(1, 0) >= 3 || 1 + footmanRun(0, -1) + footmanRun(0, 1) >= 3);
+            // Hornblower (Bannerman) only -- yellow if currently buffing an adjacent
+            // same-owner Hoplite (ownership is always public, no identity dependency).
+            const isHornblowerBoostingOwnHoplite =
+              card.cardId === "Bannerman" &&
+              getAdjacentCards(state.board, state.config.boardBounds, pos).some((n) => n.cardId === "Footman" && n.ownerId === card.ownerId);
+            const activatedColorClass =
+              isLictorActive || isNoctuleActive || isHydraOneOther || isHopliteRowOfThree ? "text-blue-500 dark:text-blue-400" : "";
+            const penalizedColorClass =
+              isUsurperThreatened || isBearBoxedIn || isDyingGodMaxed || isWarlordTwoPlusOther ? "text-red-600 dark:text-red-500" : "";
+            const maxedColorClass = isZeusBornMaxed || isHornblowerBoostingOwnHoplite ? "text-yellow-400 dark:text-yellow-300" : "";
             const bonusMaxedColorClass =
-              isHipparchMaxed || isNightjarMaxed || isHydraMaxed || isConciliatorMaxed ? "text-green-600 dark:text-green-400" : "";
+              isHipparchMaxed || isNightjarMaxed || isHydraTwoPlusOther || isConciliatorMaxed || isHopliteBoosted
+                ? "text-green-600 dark:text-green-400"
+                : "";
+            // Warlord only -- orange with exactly 1 other copy, red (folded into
+            // penalizedColorClass above) with 2+. New color, doesn't collide with
+            // anything else's tint since Warlord is its own exclusive cardId branch.
+            const warlordOneOtherColorClass = isWarlordOneOther ? "text-orange-600 dark:text-orange-400" : "";
             // Hovering a known card (revealed, or your own even if still face-down)
             // shows its short effect text -- same summary as the hand/catalog, not the
             // full rules text, so a mid-game hover stays a quick glance rather than a
@@ -1354,7 +1432,11 @@ export function BoardGrid({
                 ) : (
                   <CardArt
                     cardId={card.cardId}
-                    className={`h-1/2 w-1/2 shrink-0 ${faded ? "text-zinc-400 dark:text-zinc-500" : `${activatedColorClass} ${penalizedColorClass} ${maxedColorClass} ${bonusMaxedColorClass}`} ${iconExtraClass}`}
+                    className={`h-1/2 w-1/2 shrink-0 ${
+                      faded || isNegated
+                        ? "text-zinc-400 dark:text-zinc-500"
+                        : `${activatedColorClass} ${warlordOneOtherColorClass} ${penalizedColorClass} ${maxedColorClass} ${bonusMaxedColorClass}`
+                    } ${iconExtraClass}`}
                   />
                 )}
                 <span className={`text-[length:clamp(9px,26cqw,15px)] leading-none font-bold ${faded ? "text-zinc-400 dark:text-zinc-500" : ""}`}>
@@ -1394,6 +1476,37 @@ export function BoardGrid({
             // label like Lazaret's/Dragon Gate's own badges above) since that list is
             // exactly, and only, the instanceIds postResolution actually hit.
             const wasKingslayerHit = state.config.centerEffect === "kingslayer" && (kingslayerHit?.includes(card.instanceId) ?? false);
+            // Card-effect icons -- a NEW top-left badge convention (stacking downward
+            // when more than one applies), separate from the top-right LOCATION-effect
+            // badges above. Deliberately narrow (just these two) rather than one per
+            // disruptor card (Earthshaker, etc.) -- kept to cases that read as a
+            // genuinely different kind of information from the existing red/green
+            // flip-flash system.
+            //
+            // Every condition here must NEVER depend on a still-hidden card's own
+            // identity -- Cyclops is forceFaceUp (always public, so occupancy alone is
+            // safe), and both the infected and Noctule badges below only ever seed
+            // from an ALREADY-FACE-UP source card. A still-hidden Plague Rat or
+            // Noctule marking its neighbors would otherwise silently reveal exactly
+            // what that hidden card is before anyone actually flips it.
+            const isCyclopsAdjacent = getAdjacentCards(state.board, state.config.boardBounds, pos).some((n) => n.cardId === "Giant");
+            const isInfected = plagueInfection.has(card.instanceId);
+            // Noctule (PlagueBearer) only -- this card is one of the 2+ matching-type
+            // neighbors a face-up Noctule is currently stealing 2 points from. Re-runs
+            // the exact same "2+ face-up neighbors of the same type" grouping
+            // PlagueBearer.valueModifier itself uses (see cards.ts), scoped to each
+            // adjacent Noctule independently, face-up-only on both ends (the Noctule
+            // itself and every neighbor considered) so nothing hidden ever factors in.
+            const isNoctuleAffected =
+              card.faceUp &&
+              adjacentPositions(pos, state.config.boardBounds).some((npos) => {
+                const n = state.board.get(posKey(npos));
+                if (!n || n.cardId !== "PlagueBearer" || !n.faceUp) return false;
+                const matchingFaceUpNeighbors = getAdjacentCards(state.board, state.config.boardBounds, npos).filter(
+                  (m) => m.faceUp && m.cardId === card.cardId
+                );
+                return matchingFaceUpNeighbors.length >= 2;
+              });
             const tooltipId = `board:${key}`;
             return (
               <div
@@ -1692,6 +1805,22 @@ export function BoardGrid({
                     id="kingslayer"
                     className={`pointer-events-none absolute top-[clamp(1px,4cqw,4px)] right-[clamp(1px,4cqw,4px)] z-10 h-[clamp(8px,24cqw,18px)] w-[clamp(8px,24cqw,18px)] drop-shadow ${CENTER_EFFECTS.kingslayer.themeColorClass}`}
                   />
+                )}
+                {(isCyclopsAdjacent || isNoctuleAffected || isInfected) && (
+                  // Card-effect icons -- top-LEFT (as opposed to every location-effect
+                  // badge above, which lives top-right), stacking downward when more
+                  // than one applies at once. Each badge just reuses its source
+                  // card's own existing art at this small size, same "no dedicated
+                  // badge asset" convention as Mirror Pool/Kingslayer's own badges.
+                  <div className="pointer-events-none absolute top-[clamp(1px,4cqw,4px)] left-[clamp(1px,4cqw,4px)] z-10 flex flex-col gap-0.5">
+                    {isCyclopsAdjacent && (
+                      <CardArt cardId="Giant" className="h-[clamp(8px,24cqw,18px)] w-[clamp(8px,24cqw,18px)] drop-shadow" />
+                    )}
+                    {isNoctuleAffected && (
+                      <CardArt cardId="PlagueBearer" className="h-[clamp(8px,24cqw,18px)] w-[clamp(8px,24cqw,18px)] drop-shadow" />
+                    )}
+                    {isInfected && <CardArt cardId="PlagueRat" className="h-[clamp(8px,24cqw,18px)] w-[clamp(8px,24cqw,18px)] drop-shadow" />}
+                  </div>
                 )}
                 {activeTooltipId === tooltipId && activeRect && (
                   <FixedTooltip rect={activeRect}>

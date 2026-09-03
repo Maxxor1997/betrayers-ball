@@ -1,4 +1,4 @@
-import { getAdjacentCards, parsePosKey, posKey } from "./board";
+import { adjacentPositions, getAdjacentCards, parsePosKey, posKey } from "./board";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
 import { Board, BoardBounds, CardId, CardInstance, CenterEffectId, Position } from "./types";
@@ -359,6 +359,16 @@ export function flipDisruptionTargets(board: Board, bounds: BoardBounds, round: 
   if (CARD_DEFS[card.cardId].negatesNeighborsIf?.({ board, bounds, pos })) {
     for (const n of getAdjacentCards(board, bounds, pos)) targets.add(n.instanceId);
   }
+  // PlagueRat has no valueModifier of its own to run in isolation (see
+  // computePlagueInfection's own doc comment -- its spread has to be computed
+  // globally across every rat at once, not per-card) -- so contributionsOf above
+  // can never see it. Flash this rat's own full reach regardless of whether some of
+  // those cells already got claimed by a different rat for scoring purposes -- the
+  // flip still reveals "this card is plague-connected to me," which is the thing
+  // worth flashing, even where the actual -1 stays attributed elsewhere.
+  if (card.cardId === "PlagueRat") {
+    for (const targetId of plagueReachFrom(board, bounds, pos)) targets.add(targetId);
+  }
   return [...targets];
 }
 
@@ -379,6 +389,75 @@ export function flipBoostTargets(board: Board, bounds: BoardBounds, round: numbe
     if (deltas.some((d) => d.amount > 0)) targets.add(instanceId);
   }
   return [...targets];
+}
+
+/**
+ * Every card (any owner) a single PlagueRat at `pos` would infect in isolation --
+ * flood outward from each of its immediate neighbors through same-owner-connected
+ * cards, same shape as every other "spreads through a connected same-owner region"
+ * effect in this engine. Used both to build the globally-deduped infection set
+ * (computePlagueInfection, so overlapping rats don't stack a -1 on the same card) and
+ * by flipDisruptionTargets to flash a rat's own reach on flip regardless of which
+ * specific rat ends up owning a given cell's scoring attribution.
+ */
+function plagueReachFrom(board: Board, bounds: BoardBounds, pos: Position): Set<string> {
+  const reached = new Set<string>();
+  for (const seedPos of adjacentPositions(pos, bounds)) {
+    const seed = board.get(posKey(seedPos));
+    if (!seed || reached.has(seed.instanceId)) continue;
+    const stack: Position[] = [seedPos];
+    while (stack.length > 0) {
+      const curPos = stack.pop()!;
+      const cur = board.get(posKey(curPos));
+      if (!cur || reached.has(cur.instanceId)) continue;
+      reached.add(cur.instanceId);
+      for (const nPos of adjacentPositions(curPos, bounds)) {
+        const n = board.get(posKey(nPos));
+        if (n && n.ownerId === seed.ownerId && !reached.has(n.instanceId)) stack.push(nPos);
+      }
+    }
+  }
+  return reached;
+}
+
+/**
+ * Every PlagueRat on the board infects simultaneously, but a card already claimed by
+ * one rat's reach doesn't ALSO take a second -1 from a different rat's overlapping
+ * reach -- "each card can only be infected once" (see PlagueRat's own fullText). This
+ * can't be a per-card `valueModifier` hook (no hook can see what a DIFFERENT card's
+ * hook is about to do to the same target -- see PlagueRat's own doc comment in
+ * cards.ts), so it's computed once here, globally, before the main per-card pass.
+ * Iterating `board.entries()` in its own natural (placement) order gives a
+ * deterministic "first rat reached it" attribution for the returned map's value
+ * (used only to label/attribute the delta in computeValueModifiers below) --
+ * whichever rat is credited doesn't change the target's own final value, which is
+ * always exactly -1 once, regardless of how many rats can reach it.
+ *
+ * Exported so Board.tsx can also call this live, against the current mid-game board,
+ * to drive an "infected" badge -- pass `requireSourceFaceUp: true` for that live call
+ * (the real scoring pass below never does). A rat's own identity is exactly the kind
+ * of thing hidden-info rules protect: a face-down card's neighbors ending up marked
+ * "infected" would silently reveal it's a Plague Rat before anyone actually flips
+ * it, so the live badge must only ever seed from ALREADY-FACE-UP rats -- unlike the
+ * spread's own occupancy/ownership-only propagation once seeded, which is genuinely
+ * always public.
+ */
+export function computePlagueInfection(board: Board, bounds: BoardBounds, negated: Set<string>, requireSourceFaceUp = false): Map<string, string> {
+  const infectedBy = new Map<string, string>();
+  for (const [key, c] of board.entries()) {
+    // A negated rat can't infect anyone (negation cancels a card's own outgoing
+    // effects) -- but a negated TARGET can still be infected by an unnegated rat
+    // elsewhere (negation never blocks incoming effects, only outgoing ones -- see
+    // this function's own doc comment / computeValueModifiers' negation crossout
+    // pass for the same rule applied elsewhere).
+    if (c.cardId !== "PlagueRat" || negated.has(c.instanceId)) continue;
+    if (requireSourceFaceUp && !c.faceUp) continue;
+    const pos = parsePosKey(key);
+    for (const targetId of plagueReachFrom(board, bounds, pos)) {
+      if (!infectedBy.has(targetId)) infectedBy.set(targetId, c.instanceId);
+    }
+  }
+  return infectedBy;
 }
 
 /**
@@ -469,6 +548,14 @@ function computeValueModifiers(
         }
       }
     }
+  }
+
+  // PlagueRat's spread -- see computePlagueInfection's own doc comment for why this
+  // has to be a global pass rather than a per-card valueModifier hook. Attributed as
+  // "external" from whichever rat is credited (see computePlagueInfection), same
+  // "self" vs "external" split every other outgoing effect gets.
+  for (const [targetInstanceId, ratInstanceId] of computePlagueInfection(board, bounds, negated)) {
+    push(targetInstanceId, -1, `${CARD_DEFS.PlagueRat.name} (plague)`, "external", ratInstanceId);
   }
 
   // Center-effect scoring-time passes. These are board rules, not printed card text,

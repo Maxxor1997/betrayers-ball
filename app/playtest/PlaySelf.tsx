@@ -252,6 +252,9 @@ export function PlaySelf({
               }}
               disabled={!isHumanTurn}
               ownerAccentClass={playerAccentClass(state.players, SELF)}
+              round={state.round}
+              roundCap={state.config.roundCap}
+              board={state.board}
             />
             {humanMustPass && (
               <button

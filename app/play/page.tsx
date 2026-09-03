@@ -643,6 +643,9 @@ function Game() {
             onCardDragStart={handleHandDragStart}
             disabled={!isHumanTurn}
             ownerAccentClass={playerAccentClass(state.players, HUMAN)}
+            round={state.round}
+            roundCap={state.config.roundCap}
+            board={state.board}
           />
           {humanMustPass && (
             <button onClick={handlePass} className="rounded-full bg-zinc-900 px-4 py-1.5 text-sm text-white dark:bg-zinc-100 dark:text-black">

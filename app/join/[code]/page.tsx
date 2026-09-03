@@ -760,6 +760,9 @@ function GameView({
             onCardDragStart={handleHandDragStart}
             disabled={!isMyTurn}
             ownerAccentClass={playerAccentClass(state.players, myPlayerId)}
+            round={state.round}
+            roundCap={state.config.roundCap}
+            board={state.board}
           />
           {myMustPass && (
             <button onClick={handlePass} className="rounded-full bg-zinc-900 px-4 py-1.5 text-sm text-white dark:bg-zinc-100 dark:text-black">

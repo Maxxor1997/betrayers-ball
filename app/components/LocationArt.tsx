@@ -67,11 +67,14 @@ export function LocationArt({
   id,
   variant,
   className = "",
+  style,
 }: {
   id: CenterEffectId;
   /** Renders public/location-art/<id>-left.svg, -right.svg, or -badge.svg instead of the plain <id>.svg -- left/right are e.g. Dragon Gate's own left/right half-gate art, one half per ownerless tile; badge is a simplified/cropped version meant to read clearly at a small size (e.g. Dragon Gate's own small top-right card badge, see Board.tsx's wasSummitDoubled), separate from the main tile's own full art. */
   variant?: "left" | "right" | "badge";
   className?: string;
+  /** Merged in after the mask/padding styles below -- e.g. World-Tree's own live grow-with-board-fill `transform: scale(...)`, see Board.tsx. */
+  style?: React.CSSProperties;
 }) {
   const url = `/location-art/${id}${variant ? `-${variant}` : ""}.svg`;
   const padding = SHRINK_LOCATION_ART_PADDING[id];
@@ -92,6 +95,7 @@ export function LocationArt({
         WebkitMaskPosition: "center",
         maskOrigin,
         WebkitMaskOrigin: maskOrigin,
+        ...style,
       }}
     />
   );

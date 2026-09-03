@@ -154,23 +154,17 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     base: 8,
     bucket: "Slam",
     get text() {
-      return `−2 per unique enemy ${CARD_DEFS.Warlord.name} owner`;
+      return `−2 per other ${CARD_DEFS.Warlord.name}`;
     },
     get fullText() {
       const name = CARD_DEFS.Warlord.name;
-      return `−2 for each distinct opposing player with a ${name} anywhere on the board -- multiple from the same player only count once.`;
+      return `−2 for each other ${name} anywhere on the board, any owner -- including your own.`;
     },
     count: [6, 6, 6, 6, 8, 8, 8],
     valueModifier: ({ board, self, addDelta }) => {
-      const uniqueEnemyWarlordOwners = new Set(
-        [...board.values()].filter((c) => c.cardId === "Warlord" && c.ownerId !== self.ownerId).map((c) => c.ownerId)
-      ).size;
-      if (uniqueEnemyWarlordOwners > 0) {
-        addDelta(
-          self.instanceId,
-          -2 * uniqueEnemyWarlordOwners,
-          `${CARD_DEFS.Warlord.name} (${uniqueEnemyWarlordOwners} unique enemy ${CARD_DEFS.Warlord.name} owner${uniqueEnemyWarlordOwners > 1 ? "s" : ""})`
-        );
+      const others = [...board.values()].filter((c) => c.cardId === "Warlord" && c.instanceId !== self.instanceId).length;
+      if (others > 0) {
+        addDelta(self.instanceId, -2 * others, `${CARD_DEFS.Warlord.name} (${others} other ${CARD_DEFS.Warlord.name}${others > 1 ? "s" : ""})`);
       }
     },
   },
@@ -191,23 +185,19 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Berserker: {
     id: "Berserker",
     name: "Hydra",
-    base: 2,
+    base: 3,
     bucket: "Engine",
     get text() {
-      return `+2 per unique enemy ${CARD_DEFS.Berserker.name} owner`;
+      return `+2 per other ${CARD_DEFS.Berserker.name}`;
     },
     get fullText() {
-      return `+2 for each distinct opposing player with a ${CARD_DEFS.Berserker.name} anywhere on the board -- multiple from the same player only count once.`;
+      return `+2 for each other ${CARD_DEFS.Berserker.name} anywhere on the board, any owner -- including your own.`;
     },
     count: [0, 0, 0, 7, 7, 7, 8],
     valueModifier: ({ board, self, addDelta }) => {
-      const uniqueEnemyOwners = new Set([...board.values()].filter((c) => c.cardId === "Berserker" && c.ownerId !== self.ownerId).map((c) => c.ownerId)).size;
-      if (uniqueEnemyOwners > 0) {
-        addDelta(
-          self.instanceId,
-          2 * uniqueEnemyOwners,
-          `${CARD_DEFS.Berserker.name} (${uniqueEnemyOwners} unique enemy ${CARD_DEFS.Berserker.name} owner${uniqueEnemyOwners > 1 ? "s" : ""})`
-        );
+      const others = [...board.values()].filter((c) => c.cardId === "Berserker" && c.instanceId !== self.instanceId).length;
+      if (others > 0) {
+        addDelta(self.instanceId, 2 * others, `${CARD_DEFS.Berserker.name} (${others} other ${CARD_DEFS.Berserker.name}${others > 1 ? "s" : ""})`);
       }
     },
   },
@@ -323,7 +313,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     // effect and dropped this one entirely) -- reassigned here as a plain,
     // unconditional growth Engine card instead of leaving it retired. Same base/
     // count/valueModifier as that original.
-    base: 2,
+    base: 1,
     bucket: "Engine",
     text: "+1 per round elapsed",
     fullText: "+1 for every round elapsed when the game ends.",
@@ -471,30 +461,15 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
     bucket: "Control",
     text: "Afflicts adj. cards with Plague",
     get fullText() {
-      return `Applies Plague to each adjacent card (any owner). Plague: −1 to every afflicted card, and spreads from each afflicted card to every card of the same owner connected to it. Each card can only be afflicted once by the same ${CARD_DEFS.PlagueRat.name}.`
+      return `Applies Plague to each adjacent card (any owner). Plague: −1 to every afflicted card, and spreads from each afflicted card to every card of the same owner connected to it. Each card can only be infected once, even if adjacent to (or reachable from) multiple ${CARD_DEFS.PlagueRat.name}s.`;
     },
     count: [2, 2, 2, 2, 3, 3, 4],
-    valueModifier: ({ board, bounds, pos, addDelta }) => {
-      const afflicted = new Set<string>();
-      for (const seedPos of adjacentPositions(pos, bounds)) {
-        const seed = board.get(posKey(seedPos));
-        if (!seed || afflicted.has(seed.instanceId)) continue;
-        const stack: Position[] = [seedPos];
-        const visited = new Set<string>();
-        while (stack.length > 0) {
-          const curPos = stack.pop()!;
-          const cur = board.get(posKey(curPos));
-          if (!cur || visited.has(cur.instanceId)) continue;
-          visited.add(cur.instanceId);
-          afflicted.add(cur.instanceId);
-          for (const nPos of adjacentPositions(curPos, bounds)) {
-            const n = board.get(posKey(nPos));
-            if (n && n.ownerId === seed.ownerId && !visited.has(n.instanceId)) stack.push(nPos);
-          }
-        }
-      }
-      for (const instanceId of afflicted) addDelta(instanceId, -1, `${CARD_DEFS.PlagueRat.name} (plague)`);
-    },
+    // No valueModifier -- unlike every other card here, Plague's spread has to be
+    // computed GLOBALLY across every PlagueRat at once, not independently per rat
+    // (see resolution.ts's computePlagueInfection), so that two rats whose spreads
+    // reach the same card only infect it once instead of stacking a -1 per rat. A
+    // per-card valueModifier hook has no way to see what a DIFFERENT card's hook is
+    // about to do to the same target, which is exactly the coordination this needs.
   },
   Unknown: {
     id: "Unknown",

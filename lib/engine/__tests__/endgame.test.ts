@@ -141,16 +141,16 @@ describe("estimateMargin — fair, per-viewer evaluation", () => {
 
   it("resolveBoard (ground truth) and estimateMargin (viewer's estimate) genuinely diverge on hidden cards", () => {
     const board: Board = new Map();
-    // 3 isolated, hidden, same-owner Warlords -- Warlord's own penalty only counts a
-    // *different* player's Warlords (see cards.ts), so same-owner copies like these
-    // don't interact with each other at all; each is worth its full, unpenalized base.
+    // 3 isolated, hidden, same-owner Warlords -- Warlord's own penalty now counts ANY
+    // other Warlord anywhere on the board, own-owned included (see cards.ts), so each
+    // of these 3 sees the other 2 and takes a real -4 penalty each.
     board.set(posKey({ x: 0, y: 0 }), card("Warlord", "p2", false));
     board.set(posKey({ x: 2, y: 0 }), card("Warlord", "p2", false));
     board.set(posKey({ x: 0, y: 2 }), card("Warlord", "p2", false));
     const state = makeState({ board });
 
     const trueResult = computeGameResult(board, BOUNDS, state.round, ["p1", "p2"]);
-    expect(trueResult.scores.p2).toBe(3 * CARD_DEFS.Warlord.base);
+    expect(trueResult.scores.p2).toBe(3 * (CARD_DEFS.Warlord.base - 2 * 2));
 
     // p1 can't see any of them are Warlords -- each is estimated as an isolated,
     // effect-free Unknown placeholder (worth less than Warlord's real base), so p1's
@@ -176,7 +176,7 @@ describe("estimateMargin — fair, per-viewer evaluation", () => {
     // face-down, so this correctly weighs it as having no effect yet, exactly like the
     // genuine article would. Not a round number since it's a deck-composition-weighted
     // average, not a single card's printed rule.
-    expect(estimateMargin(makeState({ board }), "p1")).toBeCloseTo(-2.447368421052632);
+    expect(estimateMargin(makeState({ board }), "p1")).toBeCloseTo(-2.415254237288136);
   });
 });
 

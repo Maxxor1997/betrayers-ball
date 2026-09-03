@@ -6,7 +6,7 @@ import { FixedTooltip } from "@/app/components/CardCatalog";
 import { setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
-import { CardInstance } from "@/lib/engine/types";
+import { Board, CardId, CardInstance } from "@/lib/engine/types";
 
 /** How long a touch has to be held before it counts as a long-press (vs. a normal tap-to-select). */
 const LONG_PRESS_MS = 500;
@@ -19,9 +19,13 @@ export interface HandProps {
   disabled: boolean;
   /** The viewer's own board accent (see lib/config/players.ts's playerAccentClass) -- an unselected hand card's border/fill matches this, so it's visually the same color as that same card once placed on the board, not a hardcoded blue that only happens to match a fixed seat. */
   ownerAccentClass: string;
+  /** For Zeus-Born's/Dying God's max-round tint and Warlord's/Hydra's other-copy-count tint -- see Board.tsx's identical live conditions, mirrored here so a hand card already shows the same color before it's even placed. */
+  round: number;
+  roundCap: number;
+  board: Board;
 }
 
-export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disabled, ownerAccentClass }: HandProps) {
+export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disabled, ownerAccentClass, round, roundCap, board }: HandProps) {
   const sortedCards = [...cards].sort((a, b) => CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name));
 
   const hasHover = useHasHover();
@@ -68,6 +72,29 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
         const def = CARD_DEFS[card.cardId];
         const selected = card.instanceId === selectedInstanceId;
         const tooltipId = `hand:${card.instanceId}`;
+        // Same live tints Board.tsx applies once a card is actually placed -- a hand
+        // card isn't itself on the board yet, so "other copies" here just means every
+        // currently face-up copy anywhere (no self-exclusion needed, unlike Board.tsx's
+        // own version of this check). Only ever counts face-up cards, same hidden-info
+        // reasoning as Board.tsx's own identical conditions.
+        const isZeusBornMaxed = card.cardId === "Skysplitter" && round >= roundCap;
+        const isDyingGodMaxed = card.cardId === "DyingGod" && round >= roundCap;
+        const otherFaceUpCopies = (cardId: CardId) => [...board.values()].filter((c) => c.faceUp && c.cardId === cardId).length;
+        const isHydraOneOther = card.cardId === "Berserker" && otherFaceUpCopies("Berserker") === 1;
+        const isHydraTwoPlusOther = card.cardId === "Berserker" && otherFaceUpCopies("Berserker") >= 2;
+        const isWarlordOneOther = card.cardId === "Warlord" && otherFaceUpCopies("Warlord") === 1;
+        const isWarlordTwoPlusOther = card.cardId === "Warlord" && otherFaceUpCopies("Warlord") >= 2;
+        const colorClass = isZeusBornMaxed
+          ? "text-yellow-400 dark:text-yellow-300"
+          : isDyingGodMaxed || isWarlordTwoPlusOther
+            ? "text-red-600 dark:text-red-500"
+            : isWarlordOneOther
+              ? "text-orange-600 dark:text-orange-400"
+              : isHydraOneOther
+                ? "text-blue-500 dark:text-blue-400"
+                : isHydraTwoPlusOther
+                  ? "text-green-600 dark:text-green-400"
+                  : "";
         return (
           <div key={card.instanceId} className="relative" style={{ flex: "1 1 7rem", minWidth: "4rem", maxWidth: "7rem" }}>
             <button
@@ -131,7 +158,7 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
               } ${selected ? "border-amber-500 bg-amber-50 dark:bg-amber-950" : ownerAccentClass}`}
             >
               <span className="w-full text-[length:clamp(8px,20cqw,10px)] leading-tight break-words font-semibold">{def.name}</span>
-              <CardArt cardId={card.cardId} className="h-7 w-7 shrink-0" />
+              <CardArt cardId={card.cardId} className={`h-7 w-7 shrink-0 ${colorClass}`} />
               <span className="text-[length:clamp(14px,32cqw,20px)] leading-none font-bold">{def.base}</span>
               {/* Truncated to 2 lines, not left to grow -- keeps the card's fixed h-28
                   from growing with description length. Full text is available via
