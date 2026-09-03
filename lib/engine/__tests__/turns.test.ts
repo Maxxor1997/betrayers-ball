@@ -177,6 +177,32 @@ describe("flipping", () => {
     const next = applyFlip(state, { type: "flip", playerId: "p1", instanceId: opponentGloryseeker.instanceId });
     expect(next.board.get("2,1")?.faceUp).toBe(true);
   });
+
+  it("blocks flipping a card adjacent to Giant (Cyclops)", () => {
+    const board: Board = new Map();
+    board.set("2,1", { ...handCard("Giant", "p1"), faceUp: true });
+    board.set("3,1", handCard("Footman", "p2"));
+    const state = makeState({ board, round: 2 });
+    expect(getLegalFlipTargets(state)).toHaveLength(0);
+    const target = state.board.get("3,1")!;
+    expect(() => applyFlip(state, { type: "flip", playerId: "p1", instanceId: target.instanceId })).toThrow();
+  });
+
+  it("no longer blocks flipping once Giant (Cyclops) is negated by a qualifying adjacent Suppressor (Lictor)", () => {
+    const board: Board = new Map();
+    // Suppressor at (1,1) needs 3+ occupied neighbors to negate -- (2,1) Giant plus
+    // these two fillers give it exactly that.
+    board.set("1,1", { ...handCard("Suppressor", "p1"), faceUp: true });
+    board.set("1,0", handCard("Footman", "p1"));
+    board.set("0,1", handCard("Footman", "p1"));
+    board.set("2,1", { ...handCard("Giant", "p1"), faceUp: true });
+    board.set("3,1", handCard("Footman", "p2"));
+    const state = makeState({ board, round: 2 });
+    const target = state.board.get("3,1")!;
+    expect(getLegalFlipTargets(state).map((c) => c.instanceId)).toContain(target.instanceId);
+    const next = applyFlip(state, { type: "flip", playerId: "p1", instanceId: target.instanceId });
+    expect(next.board.get("3,1")?.faceUp).toBe(true);
+  });
 });
 
 describe("flipping — Shadowlands", () => {

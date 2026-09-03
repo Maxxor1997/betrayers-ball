@@ -1,11 +1,22 @@
 import { getAdjacentCards, getLegalPlacementPositions, isOwnerlessPosition, parsePosKey } from "./board";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
+import { computeNegatedInstanceIds } from "./resolution";
 import { Board, BoardBounds, CardInstance, FlipAction, GameConfig, GameState, PlaceAction, Position, posKey } from "./types";
 
-/** True if `pos` is adjacent to a card whose def blocks its neighbors from being flipped (e.g. Cyclops). */
-function isFlipBlockedAt(board: Board, bounds: BoardBounds, pos: Position): boolean {
-  return getAdjacentCards(board, bounds, pos).some((n) => CARD_DEFS[n.cardId].blocksAdjacentFlips);
+/**
+ * True if `pos` is adjacent to a card whose def blocks its neighbors from being
+ * flipped (e.g. Cyclops) -- unless that blocker is itself currently negated (e.g. by
+ * an adjacent qualifying Suppressor/Lictor), since a negated card's printed text (the
+ * flip-block included) is void, same as its value modifiers. `negatedInstanceIds`
+ * is passed in rather than computed here -- both call sites below run this per
+ * candidate position in a loop, and computeNegatedInstanceIds walks the whole board,
+ * so it's computed once per call instead of once per position.
+ */
+function isFlipBlockedAt(board: Board, bounds: BoardBounds, pos: Position, negatedInstanceIds: Set<string>): boolean {
+  return getAdjacentCards(board, bounds, pos).some(
+    (n) => CARD_DEFS[n.cardId].blocksAdjacentFlips && !negatedInstanceIds.has(n.instanceId)
+  );
 }
 
 export function currentPlayerId(state: GameState): string {
@@ -41,11 +52,12 @@ export function getLegalFlipTargets(state: GameState): CardInstance[] {
   if (state.hasFlippedThisTurn) return [];
   const flipperId = currentPlayerId(state);
   const bounds = state.config.boardBounds;
+  const negatedInstanceIds = computeNegatedInstanceIds(state.board, bounds);
   const targets = [...state.board.entries()]
     .filter(
       ([, c]) => !c.faceUp && !(CARD_DEFS[c.cardId].opponentOnlyFlip && c.ownerId === flipperId)
     )
-    .filter(([key]) => !isFlipBlockedAt(state.board, bounds, parsePosKey(key)))
+    .filter(([key]) => !isFlipBlockedAt(state.board, bounds, parsePosKey(key), negatedInstanceIds))
     .map(([, c]) => c);
   const flipTargetFilter = CENTER_EFFECTS[state.config.centerEffect].flipTargetFilter;
   if (flipTargetFilter) return flipTargetFilter(targets, flipperId);
@@ -104,7 +116,7 @@ export function applyFlip(state: GameState, action: FlipAction): GameState {
   if (CARD_DEFS[target.cardId].opponentOnlyFlip && target.ownerId === action.playerId) {
     throw new Error(`${CARD_DEFS[target.cardId].name} can only be flipped by an opponent, not its own owner`);
   }
-  if (isFlipBlockedAt(state.board, state.config.boardBounds, parsePosKey(key))) {
+  if (isFlipBlockedAt(state.board, state.config.boardBounds, parsePosKey(key), computeNegatedInstanceIds(state.board, state.config.boardBounds))) {
     throw new Error(`${CARD_DEFS[target.cardId].name} cannot be flipped while adjacent to a ${CARD_DEFS.Giant.name}`);
   }
   const flipTargetFilter = CENTER_EFFECTS[state.config.centerEffect].flipTargetFilter;

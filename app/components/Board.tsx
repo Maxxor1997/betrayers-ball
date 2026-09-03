@@ -1518,7 +1518,13 @@ export function BoardGrid({
             // from an ALREADY-FACE-UP source card. A still-hidden Plague Rat or
             // Noctule marking its neighbors would otherwise silently reveal exactly
             // what that hidden card is before anyone actually flips it.
-            const isCyclopsAdjacent = getAdjacentCards(state.board, state.config.boardBounds, pos).some((n) => n.cardId === "Giant");
+            // Excludes a Cyclops that's itself currently negated (e.g. by a qualifying
+            // adjacent Suppressor) -- its printed text (the flip-block included, see
+            // turns.ts's isFlipBlockedAt) is void, so the badge shouldn't claim it's
+            // still blocking anything.
+            const isCyclopsAdjacent = getAdjacentCards(state.board, state.config.boardBounds, pos).some(
+              (n) => n.cardId === "Giant" && !negatedInstanceIds.has(n.instanceId)
+            );
             const isInfected = plagueInfection.has(card.instanceId);
             // Noctule (PlagueBearer) only -- this card is one of the 2+ matching-type
             // neighbors a face-up Noctule is currently stealing 2 points from. Re-runs
