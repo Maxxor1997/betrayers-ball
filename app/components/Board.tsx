@@ -311,17 +311,19 @@ export function BoardGrid({
   // shake (not a translate) reads fine nested inside the parent's own rotateY
   // flip, so it doesn't need their "blank through the flip" treatment.
   const TRUMPET_MS = 700;
-  // Inquisitor (Truthseeker) only -- the torch icon swings up through two
-  // U-shaped arcs (top-left to top-right and back) before settling to rest, no
-  // color change at all (a red flash, a violet scale-pulse, a vertical blink, a
-  // full 360 spin, and a straight left-right sweep were all tried first and
-  // none of them landed). Applied ONLY at the settled call site, not the
-  // mid-flip one -- applying it at both (like iconSpinClass/hopClass) meant its
-  // 1.3s swing had already reached its first arc's peak before the mid-flip's
-  // back face ever became visible (which only happens roughly halfway through
-  // the parent's own 500ms flip), so it'd read as already mid-swing the instant
-  // it appeared instead of starting from rest. Settled-only means the viewer
-  // always sees the normal icon first, then the swing plays after.
+  // Inquisitor (Truthseeker) only -- the torch icon starts already at the
+  // top-left (pops there the instant the class mounts, no lead-in from rest),
+  // then swings through two wide U-shaped arcs (top-left to top-right and back)
+  // before settling to rest, no color change at all (a red flash, a violet
+  // scale-pulse, a vertical blink, a full 360 spin, and a narrower straight
+  // left-right sweep were all tried first and none of them landed). Applied
+  // ONLY at the settled call site, not the mid-flip one -- applying it at both
+  // (like iconSpinClass/hopClass) meant it'd already be sitting at the top-left
+  // well before the mid-flip's back face ever became visible (which only
+  // happens roughly halfway through the parent's own 500ms flip), so it'd read
+  // as already off in the corner the instant it appeared instead of starting
+  // from rest. Settled-only means the viewer always sees the normal icon first,
+  // then the swing plays after.
   const TRUTHGAZE_MS = FLIP_ANIMATION_MS + 1300;
   // Skysplitter (Zeus-Born) only -- a bright pulse, flavor for "+1 per round
   // elapsed" (it only ever gets stronger from here). Applied ONLY at the settled
