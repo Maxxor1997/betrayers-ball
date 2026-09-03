@@ -247,7 +247,7 @@ export interface HardFastOptions {
  * flipMaxCandidates/flipTimeBudgetMs (4 candidates, 50ms) and voteRoundsAhead/
  * voteTimeBudgetMs (1 round, 50ms) are trimmed down from an initial 100ms each --
  * flip search runs on essentially every turn once flip unlocks (unlike vote, which
- * only runs once per round), so its cost stacks additively onto the existing 550ms
+ * only runs once per round), so its cost stacks additively onto the existing 750ms
  * AI_TURN_DELAY_MS pacing beat every single turn for a real but rare payoff (flips
  * get chosen occasionally, not often -- see hardFast.test.ts's own flip-search test).
  * flipRoundsAhead (2) and flipThreshold (0) are similarly a first guess. None of the

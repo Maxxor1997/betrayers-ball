@@ -140,7 +140,7 @@ export interface TwoPlyOptions {
 }
 
 /**
- * 250ms hides inside the existing AI_TURN_DELAY_MS/550ms pacing beat both single-
+ * 250ms hides inside the existing AI_TURN_DELAY_MS/750ms pacing beat both single-
  * player and multiplayer already use between AI actions. maxCandidates=8,
  * roundsAhead=1 is the config validated by AI Arena testing -- a real, consistent
  * ~3-4 point win-rate edge over Medium across two separate large (n=400, n=1236)

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chooseAiActionForDifficulty, computeVoteForDifficulty } from "@/lib/ai/difficulty";
+import { AI_TURN_DELAY_MS, chooseAiActionForDifficulty, computeVoteForDifficulty } from "@/lib/ai/difficulty";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { Rng } from "@/lib/engine/deck";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
@@ -10,9 +10,6 @@ import { randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { resolveBoard } from "@/lib/engine/resolution";
 import { computeRanks, createEmptyStats, placementBaseline, placementMaxDeviation, PlaytestStats, statsSummary, tallyGame } from "@/lib/playtest/cardStats";
 import { DISPLAY_VIEWER_ID, LobbyState, RoomStatsEntry, RoomSummary, SeatInfo, toWireState, WireGameState } from "./protocol";
-
-/** Same pacing as the single-player AI turn effect in app/play/page.tsx, so a mixed human/AI room feels consistent regardless of mode. */
-const AI_TURN_DELAY_MS = 550;
 
 /** How long an unstarted lobby can sit with nobody touching it before RoomRegistry reaps it. */
 export const UNSTARTED_IDLE_TIMEOUT_MS = 60 * 60 * 1000;

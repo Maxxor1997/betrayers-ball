@@ -20,6 +20,22 @@ export const AI_DIFFICULTY_LABELS: Record<AiDifficulty, string> = {
 export const DEFAULT_AI_DIFFICULTY: AiDifficulty = "expert";
 
 /**
+ * Pacing beat between AI turns for real play with a visible board (single-player
+ * app/play/page.tsx, multiplayer lib/server/session.ts) -- long enough for the
+ * board's live tints/animations to finish before the next move lands. Bulk/headless
+ * paths (lib/playtest/aiArena.ts's simulation loops) skip this entirely by calling
+ * applyAction in a tight loop with no timer at all; app/playtest/PlaySelf.tsx still
+ * paces itself for a visible board but wants the fastest possible beat since it's a
+ * playtest/tuning tool, not real play, so it uses AI_TURN_DELAY_FAST_MS instead.
+ */
+export const AI_TURN_DELAY_MS = 750;
+
+/** See AI_TURN_DELAY_MS -- same role, but for playtest/tuning views that still render
+ * a board (so need a nonzero setTimeout to let React commit between turns) but have no
+ * reason to wait for animations. */
+export const AI_TURN_DELAY_FAST_MS = 0;
+
+/**
  * Single entrypoint every AI-turn call site should go through instead of importing a
  * specific strategy module (randomAi.ts/greedyAi.ts/twoPly.ts/hardFast.ts) directly --
  * keeps "which difficulty maps to which strategy" in exactly one place. "hard" and

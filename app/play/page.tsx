@@ -9,7 +9,7 @@ import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass, offeredCardsFor } from "@/lib/engine/turns";
 import { AiDifficulty, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
-import { AI_DIFFICULTIES, chooseAiActionForDifficulty, computeVoteForDifficulty, DEFAULT_AI_DIFFICULTY } from "@/lib/ai/difficulty";
+import { AI_DIFFICULTIES, AI_TURN_DELAY_MS, chooseAiActionForDifficulty, computeVoteForDifficulty, DEFAULT_AI_DIFFICULTY } from "@/lib/ai/difficulty";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, playerAccentClass, playerDotColorClass } from "@/lib/config/players";
 import { NewGameSetup, PendingFlip } from "./types";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
@@ -339,7 +339,7 @@ function Game() {
     const timer = setTimeout(() => {
       const action = chooseAiActionForDifficulty(state, currentPlayerId(state), state.config.aiDifficulty);
       dispatch(action);
-    }, 550);
+    }, AI_TURN_DELAY_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, isAiTurn]);

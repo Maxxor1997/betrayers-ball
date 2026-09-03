@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { AI_NAMES, playerAccentClass } from "@/lib/config/players";
-import { chooseAiActionForDifficulty, computeVoteForDifficulty } from "@/lib/ai/difficulty";
+import { AI_TURN_DELAY_FAST_MS, chooseAiActionForDifficulty, computeVoteForDifficulty } from "@/lib/ai/difficulty";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { ResolutionResult, resolveBoard, ResolvedCard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass } from "@/lib/engine/turns";
@@ -90,13 +90,14 @@ export function PlaySelf({
     });
   }
 
-  // Drive AI turns, same pacing as /play.
+  // Drive AI turns as fast as possible -- this is a playtest/tuning view, not real
+  // play, so it skips the animation-pacing delay /play uses (see AI_TURN_DELAY_FAST_MS).
   useEffect(() => {
     if (!isAiTurn || !state) return;
     const timer = setTimeout(() => {
       const action = chooseAiActionForDifficulty(state, currentPlayerId(state), state.config.aiDifficulty);
       dispatch(action);
-    }, 350);
+    }, AI_TURN_DELAY_FAST_MS);
     return () => clearTimeout(timer);
   }, [state, isAiTurn]);
 
