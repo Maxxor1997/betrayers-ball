@@ -310,7 +310,7 @@ export function BoardGrid({
   // settles -- unlike Footman's slide/Commander's charge, a rotate+scale icon
   // shake (not a translate) reads fine nested inside the parent's own rotateY
   // flip, so it doesn't need their "blank through the flip" treatment.
-  const TRUMPET_MS = 700;
+  const TRUMPET_MS = 600;
   // Inquisitor (Truthseeker) only -- same hideIcon+overlay swoop-in trick as
   // Gloryseeker's own ignite above (see igniteIds/IGNITE_MS), including playing
   // continuously across BOTH the mid-flip and settled call sites -- the real
@@ -1280,22 +1280,24 @@ export function BoardGrid({
             // its own -1-per-round-elapsed penalty: once the round counter can't go
             // any higher, its penalty has already hit the worst it's ever going to get.
             const isDyingGodMaxed = card.cardId === "DyingGod" && state.round >= state.config.roundCap;
-            // Hipparch/Nightjar/Hydra/Conciliator only -- each has its own hard cap on
-            // how big its bonus can possibly get, and turns green once the live bonus
-            // has actually reached it. Hipparch/Nightjar's caps are just the physical
-            // 4-neighbor limit; Hydra/Conciliator's are additionally capped by the
-            // number of OTHER players actually in the game (can't have more unique
-            // enemy owners than that). Hipparch's and Hydra's own underlying
-            // conditions depend on a neighbor's/board-mate's IDENTITY, so (same
-            // reasoning as isUsurperThreatened/isNoctuleActive above) those two only
-            // ever count already-face-up cards, to avoid a hidden card's identity
-            // leaking through a "maxed out" hint it can't yet honestly earn.
-            // Nightjar's condition depends only on face STATE (always public) and
-            // Conciliator's only on OWNERSHIP (also always public), so neither needs
-            // that filtering.
+            // Hipparch/Nightjar/Hydra/Conciliator only -- each has its own threshold
+            // for "call this maxed," and turns green once the live bonus has reached
+            // it. Nightjar's is the physical 4-neighbor limit; Hydra/Conciliator's are
+            // capped by the number of OTHER players actually in the game (can't have
+            // more unique enemy owners than that). Hipparch's own +2-per-adjacent-
+            // Footman bonus has no real hard cap (it keeps scaling past 4 neighbors
+            // if a board ever allowed more), so 2 here is a UI call -- a strong-enough
+            // bonus to read as "maxed," not a real rule ceiling. Hipparch's and
+            // Hydra's own underlying conditions depend on a neighbor's/board-mate's
+            // IDENTITY, so (same reasoning as isUsurperThreatened/isNoctuleActive
+            // above) those two only ever count already-face-up cards, to avoid a
+            // hidden card's identity leaking through a "maxed out" hint it can't yet
+            // honestly earn. Nightjar's condition depends only on face STATE (always
+            // public) and Conciliator's only on OWNERSHIP (also always public), so
+            // neither needs that filtering.
             const isHipparchMaxed =
               card.cardId === "Commander" &&
-              getAdjacentCards(state.board, state.config.boardBounds, pos).filter((n) => n.faceUp && n.cardId === "Footman").length >= 4;
+              getAdjacentCards(state.board, state.config.boardBounds, pos).filter((n) => n.faceUp && n.cardId === "Footman").length >= 2;
             const isNightjarMaxed =
               card.cardId === "Beacon" &&
               adjacentPositions(pos, state.config.boardBounds).filter((p) => {
@@ -1321,10 +1323,10 @@ export function BoardGrid({
             const isHydraTwoPlusOther = card.cardId === "Berserker" && otherFaceUpCopies("Berserker") >= 2;
             const isWarlordOneOther = card.cardId === "Warlord" && otherFaceUpCopies("Warlord") === 1;
             const isWarlordTwoPlusOther = card.cardId === "Warlord" && otherFaceUpCopies("Warlord") >= 2;
-            // Hoplite (Footman) only -- green if a same-owner unbroken line of 3+
+            // Hoplite (Footman) only -- blue if a same-owner unbroken line of 3+
             // already includes it (re-derives the exact rowRun/colRun check
             // Footman.valueModifier itself uses, purely occupancy/ownership-based, no
-            // identity dependency); blue if boosted by an adjacent face-up Hornblower
+            // identity dependency); green if boosted by an adjacent face-up Hornblower
             // (Bannerman buffs ANY adjacent Footman, not just its own owner's, but this
             // DOES depend on the neighbor's identity, so a still-hidden Bannerman must
             // never light this up). Green wins when both apply -- see the shared
@@ -1367,10 +1369,14 @@ export function BoardGrid({
               isHipparchMaxed || isNightjarMaxed || isHydraTwoPlusOther || isConciliatorMaxed || isHopliteBoosted
                 ? "text-green-600 dark:text-green-400"
                 : "";
-            // Warlord only -- orange with exactly 1 other copy, red (folded into
-            // penalizedColorClass above) with 2+. New color, doesn't collide with
-            // anything else's tint since Warlord is its own exclusive cardId branch.
-            const warlordOneOtherColorClass = isWarlordOneOther ? "text-orange-600 dark:text-orange-400" : "";
+            // Warlord only -- violet with exactly 1 other copy, red (folded into
+            // penalizedColorClass above) with 2+. Deliberately far from red on the
+            // wheel (an earlier orange sat too close to red -- both warm hues, hard to
+            // tell apart at a glance, especially in dark mode) so the two tiers read
+            // as clearly distinct severities rather than "which shade of red is this."
+            // Doesn't collide with anything else's tint since Warlord is its own
+            // exclusive cardId branch.
+            const warlordOneOtherColorClass = isWarlordOneOther ? "text-violet-600 dark:text-violet-400" : "";
             // Hovering a known card (revealed, or your own even if still face-down)
             // shows its short effect text -- same summary as the hand/catalog, not the
             // full rules text, so a mid-game hover stays a quick glance rather than a
@@ -1855,7 +1861,7 @@ export function BoardGrid({
                   // resolvedCard above). No dedicated SVG asset needed for a plain
                   // plus shape, unlike Mirror Pool's/Dragon Gate's own location
                   // icons.
-                  <span className="pointer-events-none absolute top-0 right-1 z-10 text-[length:clamp(10px,30cqw,18px)] leading-none font-bold text-green-500 drop-shadow-sm dark:text-green-400">
+                  <span className="pointer-events-none absolute top-0 right-1 z-10 text-[length:clamp(10px,30cqw,18px)] leading-none font-bold text-green-600 drop-shadow-sm dark:text-green-400">
                     +
                   </span>
                 )}
