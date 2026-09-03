@@ -311,17 +311,17 @@ export function BoardGrid({
   // shake (not a translate) reads fine nested inside the parent's own rotateY
   // flip, so it doesn't need their "blank through the flip" treatment.
   const TRUMPET_MS = 700;
-  // Inquisitor (Truthseeker) only -- the torch icon spins a full 360 in place,
-  // no color change at all (three earlier versions -- a red flash, a violet
-  // scale-pulse, then a vertical blink -- didn't land). Applied ONLY at the
-  // settled call site, not the mid-flip one -- applying it at both (like
-  // iconSpinClass/hopClass) meant its 0.7s spin had already reached its final
-  // orientation before the mid-flip's back face ever became visible (which
-  // only happens roughly halfway through the parent's own 500ms flip), so it'd
-  // read as already mid-spin the instant it appeared instead of starting from
-  // rest. Settled-only means the viewer always sees the normal icon first,
-  // then the spin plays after.
-  const TRUTHGAZE_MS = FLIP_ANIMATION_MS + 700;
+  // Inquisitor (Truthseeker) only -- the torch icon sweeps out past the card's
+  // right edge and back, no color change at all (a red flash, a violet
+  // scale-pulse, a vertical blink, and a full 360 spin were all tried first and
+  // none of them landed). Applied ONLY at the settled call site, not the
+  // mid-flip one -- applying it at both (like iconSpinClass/hopClass) meant its
+  // 0.9s sweep had already reached its outbound peak before the mid-flip's back
+  // face ever became visible (which only happens roughly halfway through the
+  // parent's own 500ms flip), so it'd read as already mid-sweep the instant it
+  // appeared instead of starting from rest. Settled-only means the viewer
+  // always sees the normal icon first, then the sweep plays after.
+  const TRUTHGAZE_MS = FLIP_ANIMATION_MS + 900;
   // Skysplitter (Zeus-Born) only -- a bright pulse, flavor for "+1 per round
   // elapsed" (it only ever gets stronger from here). Applied ONLY at the settled
   // call site, same reasoning/timing as Inquisitor's flame flash above -- the

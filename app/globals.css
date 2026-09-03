@@ -982,28 +982,33 @@ html {
   }
 }
 
-/* Truthseeker/Inquisitor -- the torch icon spins a full turn in place, then
-   settles back to normal. No color change at all -- two earlier versions (a
-   straight red flash, then a violet scale-pulse) both read as gaudy/off, and a
-   third (a vertical blink) didn't land either, so this drops any color/squash
-   gimmick and just spins the torch itself once around. Applied straight to the
-   real icon (see Board.tsx's truthgazeClass, settled-call-site-only -- see its
-   own doc comment near flippingIds for why) rather than a clip-path-cropped
-   overlay -- simpler, and avoids an even earlier version's own timing bug (a
-   cropped copy needing to wait for the real icon to actually be visible before
-   it could line up with it). */
+/* Truthseeker/Inquisitor -- the torch icon sweeps out past the card's right
+   edge, then swings back to its resting spot, like a wave/beckon rather than a
+   spin. No color change at all -- a straight red flash, a violet scale-pulse,
+   a vertical blink, and a full 360 spin were all tried first and none of them
+   landed, so this is a different motion again: a single out-and-back sweep.
+   One keyframe timeline with the reversal AT its natural peak (the far right,
+   where it's actually supposed to slow to a stop before swinging back) rather
+   than at an arbitrary waypoint mid-motion -- see .card-ignite-materialize's own
+   doc comment above for why an arbitrary mid-motion stop reads as a stutter,
+   which doesn't apply here since this reversal point is the real turnaround.
+   Applied straight to the real icon (see Board.tsx's truthgazeClass,
+   settled-call-site-only -- see its own doc comment near flippingIds for why)
+   rather than a clip-path-cropped overlay -- simpler, and avoids an even
+   earlier version's own timing bug (a cropped copy needing to wait for the
+   real icon to actually be visible before it could line up with it). */
 @keyframes card-icon-truthgaze-pulse {
-  0% {
-    transform: rotate(0deg);
-  }
+  0%,
   100% {
-    transform: rotate(360deg);
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(160%);
   }
 }
 
 .card-icon-truthgaze-pulse {
-  animation: card-icon-truthgaze-pulse 0.7s ease-in-out forwards;
-  transform-origin: center;
+  animation: card-icon-truthgaze-pulse 0.9s ease-in-out forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
