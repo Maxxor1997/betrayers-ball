@@ -1304,14 +1304,16 @@ export function BoardGrid({
             // Hoplite (Footman) only -- green if a same-owner unbroken line of 3+
             // already includes it (re-derives the exact rowRun/colRun check
             // Footman.valueModifier itself uses, purely occupancy/ownership-based, no
-            // identity dependency); blue if boosted by an adjacent Hornblower
-            // (Bannerman buffs ANY adjacent Footman, not just its own owner's, so this
-            // is occupancy-only too). Green wins when both apply -- see the shared
+            // identity dependency); blue if boosted by an adjacent face-up Hornblower
+            // (Bannerman buffs ANY adjacent Footman, not just its own owner's, but this
+            // DOES depend on the neighbor's identity, so a still-hidden Bannerman must
+            // never light this up). Green wins when both apply -- see the shared
             // activatedColorClass/bonusMaxedColorClass chains below, where green
             // (bonusMaxedColorClass) is concatenated after blue (activatedColorClass),
             // so it naturally wins the CSS cascade without needing its own ternary.
             const isHopliteBoosted =
-              card.cardId === "Footman" && getAdjacentCards(state.board, state.config.boardBounds, pos).some((n) => n.cardId === "Bannerman");
+              card.cardId === "Footman" &&
+              getAdjacentCards(state.board, state.config.boardBounds, pos).some((n) => n.faceUp && n.cardId === "Bannerman");
             const footmanRun = (dx: number, dy: number): number => {
               let count = 0;
               let x = pos.x + dx;
@@ -1328,10 +1330,14 @@ export function BoardGrid({
             const isHopliteRowOfThree =
               card.cardId === "Footman" && (1 + footmanRun(-1, 0) + footmanRun(1, 0) >= 3 || 1 + footmanRun(0, -1) + footmanRun(0, 1) >= 3);
             // Hornblower (Bannerman) only -- yellow if currently buffing an adjacent
-            // same-owner Hoplite (ownership is always public, no identity dependency).
+            // same-owner face-up Hoplite. Ownership is always public, but identity
+            // (Footman vs. anything else) is not, so a still-hidden same-owner
+            // neighbor must never light this up.
             const isHornblowerBoostingOwnHoplite =
               card.cardId === "Bannerman" &&
-              getAdjacentCards(state.board, state.config.boardBounds, pos).some((n) => n.cardId === "Footman" && n.ownerId === card.ownerId);
+              getAdjacentCards(state.board, state.config.boardBounds, pos).some(
+                (n) => n.faceUp && n.cardId === "Footman" && n.ownerId === card.ownerId
+              );
             const activatedColorClass =
               isLictorActive || isNoctuleActive || isHydraOneOther || isHopliteRowOfThree ? "text-blue-500 dark:text-blue-400" : "";
             const penalizedColorClass =
