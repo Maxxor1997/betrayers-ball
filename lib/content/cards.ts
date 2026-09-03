@@ -185,7 +185,7 @@ export const CARD_DEFS: Record<CardId, CardDef> = {
   Berserker: {
     id: "Berserker",
     name: "Hydra",
-    base: 3,
+    base: 2,
     bucket: "Engine",
     get text() {
       return `+2 per other ${CARD_DEFS.Berserker.name}`;
