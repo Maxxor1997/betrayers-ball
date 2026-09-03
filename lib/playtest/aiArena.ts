@@ -58,6 +58,32 @@ export function normalizeArenaBucket(bucket: Partial<ArenaBucketStats> | null | 
 }
 
 /**
+ * Combines two buckets tallying disjoint sets of games into one -- every field here is
+ * a plain running count/sum (see ArenaBucketStats' own doc comments), and
+ * summarizeBucket only ever derives its displayed ratios from those sums afterward, so
+ * adding two buckets field-by-field is exactly equivalent to having tallied all of both
+ * buckets' games into a single bucket from the start. This is what makes running a
+ * batch across several parallel workers (see arenaPool.ts) safe: each worker tallies
+ * its own disjoint slice of games independently, and the main thread just sums
+ * whatever each one reports, at any point mid-run -- there's no shared mutable state
+ * to race on, and a batch cancelled early still merges correctly (the sums just cover
+ * however many games actually finished).
+ */
+export function mergeArenaBucket(a: ArenaBucketStats, b: ArenaBucketStats): ArenaBucketStats {
+  return {
+    gamesPlayed: a.gamesPlayed + b.gamesPlayed,
+    wins: a.wins + b.wins,
+    placementDeltaSum: a.placementDeltaSum + b.placementDeltaSum,
+    searchSamplesSum: a.searchSamplesSum + b.searchSamplesSum,
+    searchCandidatesSum: a.searchCandidatesSum + b.searchCandidatesSum,
+    flipEligibleDecisions: a.flipEligibleDecisions + b.flipEligibleDecisions,
+    flipsChosen: a.flipsChosen + b.flipsChosen,
+    votesCast: a.votesCast + b.votesCast,
+    votesYes: a.votesYes + b.votesYes,
+  };
+}
+
+/**
  * Two independent marginal breakdowns of the same batch of arena games -- not a full
  * difficulty×position cross-tab, which would need a lot more games per cell to be
  * readable. `byPosition` is keyed by 1-indexed turn-order position (1 = goes first),
@@ -74,6 +100,24 @@ export function createEmptyArenaStats(): ArenaStats {
     byDifficulty: { easy: emptyArenaBucket(), medium: emptyArenaBucket(), hard: emptyArenaBucket(), expert: emptyArenaBucket() },
     byPosition: {},
   };
+}
+
+/** Shuffle mode's own mergeArenaBucket -- see that function's doc comment for why
+ * field-wise summing two independently-tallied stats objects is exactly equivalent to
+ * having tallied both into one from the start. `byPosition` is unioned over both
+ * sides' keys (a position that only came up in one shard's games still needs to show
+ * up in the merged result), defaulting a side missing that key to an empty bucket. */
+export function mergeArenaStats(a: ArenaStats, b: ArenaStats): ArenaStats {
+  const byDifficulty = { ...a.byDifficulty };
+  for (const d of Object.keys(b.byDifficulty) as AiDifficulty[]) {
+    byDifficulty[d] = mergeArenaBucket(byDifficulty[d] ?? emptyArenaBucket(), b.byDifficulty[d]);
+  }
+  const byPosition = { ...a.byPosition };
+  for (const posKey of Object.keys(b.byPosition)) {
+    const pos = Number(posKey);
+    byPosition[pos] = mergeArenaBucket(byPosition[pos] ?? emptyArenaBucket(), b.byPosition[pos]);
+  }
+  return { byDifficulty, byPosition };
 }
 
 /** Derived per-bucket averages for display -- null (not 0) win rate/delta for a bucket with no games yet, so a UI can render "—" instead of a misleading 0, same convention cardStats.ts's own statsSummary uses. */
@@ -365,6 +409,13 @@ export type ArenaSeatBuckets = ArenaBucketStats[];
 
 export function createEmptyFixedSeatArenaStats(playerCount: number): ArenaSeatBuckets {
   return Array.from({ length: playerCount }, () => emptyArenaBucket());
+}
+
+/** Fixed-per-seat mode's own mergeArenaBucket -- see that function's doc comment.
+ * Seats line up positionally between the two sides (both were sized off the same
+ * seatConfigs.length for the whole batch), so this is just an index-wise zip+merge. */
+export function mergeArenaSeatBuckets(a: ArenaSeatBuckets, b: ArenaSeatBuckets): ArenaSeatBuckets {
+  return a.map((bucket, i) => mergeArenaBucket(bucket, b[i] ?? emptyArenaBucket()));
 }
 
 export interface ArenaSeatBucketRow extends ArenaBucketRow {

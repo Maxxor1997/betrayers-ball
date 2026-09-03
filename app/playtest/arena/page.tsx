@@ -6,7 +6,7 @@ import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { IntegerField } from "@/app/components/IntegerField";
 import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS } from "@/lib/ai/difficulty";
 import { DEFAULT_TWO_PLY_OPTIONS } from "@/lib/ai/twoPly";
-import { CENTER_EFFECTS, centerEffectLabel, randomCenterEffectPool, selectableCenterEffects } from "@/lib/content/centerEffects";
+import { CENTER_EFFECTS, centerEffectLabel, selectableCenterEffects } from "@/lib/content/centerEffects";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
 import { AiDifficulty, CenterEffectId } from "@/lib/engine/types";
 import {
@@ -22,12 +22,13 @@ import {
   createEmptyFixedSeatArenaStats,
   defaultArenaSeatConfig,
   defaultArenaSeatConfigFor,
-  simulateArenaGame,
-  simulateFixedSeatArenaGame,
+  mergeArenaSeatBuckets,
+  mergeArenaStats,
   summarizeArenaStats,
   summarizeFixedSeatArenaStats,
 } from "@/lib/playtest/aiArena";
 import { loadArenaState, resetArenaState, saveArenaState } from "@/lib/playtest/arenaStore";
+import type { ArenaWorkerRequest, ArenaWorkerResponse } from "./arenaWorker";
 
 /**
  * A diagnostic tool, listed on the home page as "AI Arena" alongside Card Balance --
@@ -45,9 +46,6 @@ import { loadArenaState, resetArenaState, saveArenaState } from "@/lib/playtest/
  * "watch live" board or per-card breakdown though -- just the result tables.
  */
 const ALL_PLAYER_COUNTS = Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i);
-
-/** Same cadence the main playtest page's runSimulation uses -- long enough to batch real throughput, short enough that the tab stays responsive/paintable during a large run. */
-const YIELD_INTERVAL_MS = 50;
 
 /**
  * Deliberately well above DEFAULT_TWO_PLY_OPTIONS.timeBudgetMs (the real-game default) --
@@ -459,8 +457,36 @@ function Arena() {
   // persisted -- purely a display preference, not part of the batch's own
   // config/results.
   const [shuffleBreakdown, setShuffleBreakdown] = useState<"difficulty" | "position">("difficulty");
-  const cancelRef = useRef(false);
   const runInProgressRef = useRef(false);
+  // The batch loop itself lives in arenaWorker.ts, off the main thread -- see its own
+  // doc comment for the full story, including why this does NOT actually fix a
+  // long-backgrounded tab stalling (Chrome throttles a page's workers along with its
+  // main thread; tested and confirmed still stalls after several minutes
+  // backgrounded). What moving it here DOES buy is genuine parallelism.
+  //
+  // A whole POOL of them, not just one -- every game is independent (no shared state
+  // between games), and ArenaBucketStats' fields are all plain sums (see
+  // mergeArenaBucket in aiArena.ts), so splitting the batch across
+  // navigator.hardwareConcurrency workers and summing their periodic snapshots gives a
+  // correct running total at any point, including mid-cancel, without any of them
+  // needing to coordinate with each other.
+  const workersRef = useRef<Worker[]>([]);
+  // Each worker's own most recent snapshot (stats/seatBuckets/completed), by index --
+  // re-summed into one combined total every time ANY worker reports progress (see
+  // runBatch below). Kept outside React state since these are overwritten many times
+  // per second during a big run and only the merged total actually needs to trigger a
+  // re-render.
+  const workerSnapshotsRef = useRef<{ stats: ArenaStats; seatBuckets: ArenaSeatBuckets; completed: number; done: boolean }[]>([]);
+
+  // Terminates any still-running workers if this page unmounts mid-batch -- otherwise
+  // they'd keep simulating (and holding their own working-copy stats) in the
+  // background forever, with nothing left to receive their postMessages.
+  useEffect(() => {
+    return () => {
+      workersRef.current.forEach((w) => w.terminate());
+      workersRef.current = [];
+    };
+  }, []);
 
   // Persists the whole batch -- results and the config that produced them -- on every
   // change, including the periodic mid-run commits below, so a refresh (accidental or
@@ -495,7 +521,7 @@ function Arena() {
     setSeatConfigs((prev) => prev.map((c, i) => (i === seatIndex ? config : c)));
   }
 
-  async function runBatch() {
+  function runBatch() {
     if (runInProgressRef.current) return;
     if (mode === "shuffle" && selectedDifficulties.length === 0) return;
     // The Games/budget number fields intentionally don't clamp until blur (see their
@@ -509,48 +535,98 @@ function Arena() {
     runInProgressRef.current = true;
     setRunning(true);
     setProgress(0);
-    cancelRef.current = false;
-    // Yield once immediately so the "running" UI (disabled inputs, progress bar)
-    // actually paints before the batch's first uninterrupted stretch of work --
-    // same reasoning as the main playtest page's own runSimulation.
-    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    // Mutated in place across the whole run, same working-copy pattern
-    // cardStats.ts's tallyGame uses -- committed to React state once per batch, not
-    // once per game, so a large run doesn't trigger thousands of re-renders.
-    const workingStats = stats;
-    const workingSeatBuckets = seatBuckets;
-    // Captured once, for this whole batch -- exactly the "fixed for the batch"
-    // semantics this mode promises. Editing a seat mid-run isn't possible anyway (the
-    // form's disabled while running), so this is never stale, just deliberately
-    // pinned to whatever was configured at the moment Run was clicked.
-    const fixedSeatConfigs = seatConfigs;
-    const randomPool = centerEffect === "random" ? randomCenterEffectPool(playerCount) : null;
-    const hardOptions = { ...DEFAULT_TWO_PLY_OPTIONS, timeBudgetMs: clampedHardBudgetMs };
-    let completed = 0;
-    let lastYieldAt = performance.now();
+    // One worker per logical core (see this ref's own doc comment for why splitting
+    // across workers is safe), but never more workers than games -- spawning 16
+    // workers for a 3-game batch would just be overhead with nothing to do.
+    // navigator.hardwareConcurrency is a standard, universally-supported API; the ||4
+    // fallback only matters for the rare environment that doesn't report it at all.
+    const workerCount = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, clampedGameCount));
+    const baseShare = Math.floor(clampedGameCount / workerCount);
+    const remainder = clampedGameCount % workerCount;
 
-    for (let i = 0; i < clampedGameCount; i++) {
-      const effect = centerEffect === "random" ? randomPool![Math.floor(Math.random() * randomPool!.length)] : centerEffect;
-      if (mode === "shuffle") {
-        simulateArenaGame(playerCount, effect, selectedDifficulties, workingStats, Math.random, hardOptions);
-      } else {
-        simulateFixedSeatArenaGame(effect, fixedSeatConfigs, workingSeatBuckets, Math.random);
-      }
-      completed++;
+    workersRef.current = [];
+    // Only worker 0 gets the batch's real running totals to build on -- see
+    // mergeArenaBucket's own doc comment: giving every worker the same starting stats
+    // would double- (or N-times-) count everything already accumulated before this
+    // Run click. Every other worker starts from empty and only ever contributes the
+    // NEW games its own shard plays; the merge below adds all of that back together.
+    workerSnapshotsRef.current = Array.from({ length: workerCount }, (_, i) => ({
+      stats: i === 0 ? stats : createEmptyArenaStats(),
+      seatBuckets: i === 0 ? seatBuckets : createEmptyFixedSeatArenaStats(seatConfigs.length),
+      completed: 0,
+      done: false,
+    }));
 
-      if (completed === gameCount || performance.now() - lastYieldAt >= YIELD_INTERVAL_MS) {
-        setProgress(completed);
-        if (mode === "shuffle") setStats({ ...workingStats });
-        else setSeatBuckets([...workingSeatBuckets]);
-        if (cancelRef.current) break;
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        lastYieldAt = performance.now();
-      }
+    function applyMergedSnapshot() {
+      const snapshots = workerSnapshotsRef.current;
+      setProgress(snapshots.reduce((sum, s) => sum + s.completed, 0));
+      if (mode === "shuffle") setStats(snapshots.reduce((acc, s) => mergeArenaStats(acc, s.stats), createEmptyArenaStats()));
+      else setSeatBuckets(snapshots.reduce((acc, s) => mergeArenaSeatBuckets(acc, s.seatBuckets), createEmptyFixedSeatArenaStats(seatConfigs.length)));
     }
 
-    setRunning(false);
-    runInProgressRef.current = false;
+    for (let w = 0; w < workerCount; w++) {
+      // `new URL(..., import.meta.url)` is the standard worker-bundling syntax both
+      // webpack 5 and Turbopack (this Next version's default `next build`/`next dev`
+      // bundler) support natively -- no extra loader/config needed either way,
+      // confirmed via a real `next build`. Each worker gets its own stats/seatBuckets
+      // working copies (see arenaWorker.ts) and reports back periodically via
+      // postMessage instead of setState -- see arenaWorker.ts's own doc comment for
+      // what this does and doesn't fix (parallelism: yes; a tab backgrounded for
+      // several+ minutes: no, Chrome throttles the worker right along with it).
+      const worker = new Worker(new URL("./arenaWorker.ts", import.meta.url));
+      workersRef.current.push(worker);
+
+      worker.onmessage = (e: MessageEvent<ArenaWorkerResponse>) => {
+        const msg = e.data;
+        const snapshot = workerSnapshotsRef.current[w];
+        snapshot.completed = msg.completed;
+        if (msg.stats) snapshot.stats = msg.stats;
+        if (msg.seatBuckets) snapshot.seatBuckets = msg.seatBuckets;
+        applyMergedSnapshot();
+
+        if (msg.type === "done") {
+          snapshot.done = true;
+          worker.terminate();
+          if (workerSnapshotsRef.current.every((s) => s.done)) {
+            setRunning(false);
+            runInProgressRef.current = false;
+            workersRef.current = [];
+          }
+        }
+      };
+
+      // First `remainder` workers take one extra game each, so the whole batch is
+      // covered exactly (e.g. 17 games / 4 workers -> shares of 5, 4, 4, 4). Always
+      // >= 1 -- workerCount is clamped to never exceed clampedGameCount above.
+      const share = baseShare + (w < remainder ? 1 : 0);
+
+      const request: ArenaWorkerRequest = {
+        type: "start",
+        payload: {
+          mode,
+          playerCount,
+          centerEffect,
+          selectedDifficulties,
+          gameCount: share,
+          hardBudgetMs: clampedHardBudgetMs,
+          // Captured once, for this whole batch -- exactly the "fixed for the batch"
+          // semantics fixed-per-seat mode promises. Editing a seat mid-run isn't
+          // possible anyway (the form's disabled while running), so this is never
+          // stale, just deliberately pinned to whatever was configured at the moment
+          // Run was clicked.
+          fixedSeatConfigs: seatConfigs,
+          initialStats: workerSnapshotsRef.current[w].stats,
+          initialSeatBuckets: workerSnapshotsRef.current[w].seatBuckets,
+        },
+      };
+      worker.postMessage(request);
+    }
+  }
+
+  function cancelBatch() {
+    const request: ArenaWorkerRequest = { type: "cancel" };
+    workersRef.current.forEach((w) => w.postMessage(request));
   }
 
   // Clearing the underlying storage isn't strictly necessary -- the persist effect
@@ -723,7 +799,7 @@ function Arena() {
                 {progress} / {gameCount}
               </span>
               <button
-                onClick={() => (cancelRef.current = true)}
+                onClick={cancelBatch}
                 className="shrink-0 rounded-full border border-zinc-300 px-3 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
               >
                 Cancel

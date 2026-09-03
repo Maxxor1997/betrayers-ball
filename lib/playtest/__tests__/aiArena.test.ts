@@ -7,6 +7,10 @@ import {
   createEmptyFixedSeatArenaStats,
   defaultArenaSeatConfig,
   defaultArenaSeatConfigFor,
+  emptyArenaBucket,
+  mergeArenaBucket,
+  mergeArenaSeatBuckets,
+  mergeArenaStats,
   simulateArenaGame,
   simulateFixedSeatArenaGame,
   summarizeArenaStats,
@@ -377,5 +381,70 @@ describe("summarizeFixedSeatArenaStats", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0].winRate).toBeNull();
     expect(rows[0].avgPlacementDelta).toBeNull();
+  });
+});
+
+// Merging is what makes the AI Arena page's worker pool correct (see its own
+// runBatch): each worker tallies a disjoint slice of games independently, and the
+// main thread just sums whatever each one reports. These verify that summing is
+// exactly equivalent to having tallied every game into a single bucket from the start.
+describe("mergeArenaBucket / mergeArenaStats / mergeArenaSeatBuckets", () => {
+  it("sums every field of two buckets", () => {
+    const a = { gamesPlayed: 3, wins: 1, placementDeltaSum: -0.5, searchSamplesSum: 100, searchCandidatesSum: 10, flipEligibleDecisions: 4, flipsChosen: 2, votesCast: 2, votesYes: 1 };
+    const b = { gamesPlayed: 5, wins: 4, placementDeltaSum: 1.5, searchSamplesSum: 200, searchCandidatesSum: 20, flipEligibleDecisions: 6, flipsChosen: 3, votesCast: 3, votesYes: 2 };
+    expect(mergeArenaBucket(a, b)).toEqual({
+      gamesPlayed: 8,
+      wins: 5,
+      placementDeltaSum: 1,
+      searchSamplesSum: 300,
+      searchCandidatesSum: 30,
+      flipEligibleDecisions: 10,
+      flipsChosen: 5,
+      votesCast: 5,
+      votesYes: 3,
+    });
+  });
+
+  it("merging an empty bucket into a real one is a no-op", () => {
+    const bucket = { gamesPlayed: 4, wins: 2, placementDeltaSum: 0.25, searchSamplesSum: 40, searchCandidatesSum: 8, flipEligibleDecisions: 3, flipsChosen: 1, votesCast: 2, votesYes: 1 };
+    expect(mergeArenaBucket(bucket, emptyArenaBucket())).toEqual(bucket);
+  });
+
+  it("gives the same result as tallying all games into one bucket, whether split into 1 shard or many equal-sized shards", () => {
+    // Splitting a batch of 8 games' worth of accumulated stats into 4 shards of 2
+    // "games played" each, then merging them back, should reproduce the original.
+    const whole = { gamesPlayed: 8, wins: 3, placementDeltaSum: -1, searchSamplesSum: 400, searchCandidatesSum: 40, flipEligibleDecisions: 8, flipsChosen: 4, votesCast: 4, votesYes: 2 };
+    const shard = { gamesPlayed: 2, wins: whole.wins / 4, placementDeltaSum: whole.placementDeltaSum / 4, searchSamplesSum: 100, searchCandidatesSum: 10, flipEligibleDecisions: 2, flipsChosen: 1, votesCast: 1, votesYes: 0.5 };
+    const merged = [shard, shard, shard, shard].reduce(mergeArenaBucket, emptyArenaBucket());
+    expect(merged).toEqual(whole);
+  });
+
+  it("mergeArenaStats unions byDifficulty and byPosition across two independently-tallied ArenaStats", () => {
+    const a = createEmptyArenaStats();
+    a.byDifficulty.easy = { ...emptyArenaBucket(), gamesPlayed: 2, wins: 1 };
+    a.byPosition[1] = { ...emptyArenaBucket(), gamesPlayed: 2, wins: 2 };
+
+    const b = createEmptyArenaStats();
+    b.byDifficulty.easy = { ...emptyArenaBucket(), gamesPlayed: 3, wins: 0 };
+    b.byPosition[2] = { ...emptyArenaBucket(), gamesPlayed: 1, wins: 1 };
+
+    const merged = mergeArenaStats(a, b);
+    expect(merged.byDifficulty.easy).toEqual({ ...emptyArenaBucket(), gamesPlayed: 5, wins: 1 });
+    expect(merged.byDifficulty.medium).toEqual(emptyArenaBucket());
+    expect(merged.byPosition[1]).toEqual({ ...emptyArenaBucket(), gamesPlayed: 2, wins: 2 });
+    expect(merged.byPosition[2]).toEqual({ ...emptyArenaBucket(), gamesPlayed: 1, wins: 1 });
+  });
+
+  it("mergeArenaSeatBuckets sums seat buckets positionally", () => {
+    const a = createEmptyFixedSeatArenaStats(2);
+    a[0] = { ...emptyArenaBucket(), gamesPlayed: 4, wins: 1 };
+    a[1] = { ...emptyArenaBucket(), gamesPlayed: 4, wins: 2 };
+    const b = createEmptyFixedSeatArenaStats(2);
+    b[0] = { ...emptyArenaBucket(), gamesPlayed: 6, wins: 3 };
+    b[1] = { ...emptyArenaBucket(), gamesPlayed: 6, wins: 1 };
+
+    const merged = mergeArenaSeatBuckets(a, b);
+    expect(merged[0]).toEqual({ ...emptyArenaBucket(), gamesPlayed: 10, wins: 4 });
+    expect(merged[1]).toEqual({ ...emptyArenaBucket(), gamesPlayed: 10, wins: 3 });
   });
 });
