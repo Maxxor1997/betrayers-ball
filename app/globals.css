@@ -982,30 +982,22 @@ html {
   }
 }
 
-/* Truthseeker/Inquisitor -- the icon blinks, like an eye fixing its gaze after
-   a moment of scrutiny, then settles back to normal. No color change at all this
-   time -- two earlier versions (a straight red flash, then a violet
-   scale-pulse) both read as gaudy/off, so this drops the color gimmick
-   entirely and leans on a motion-only cue instead: two quick vertical
-   squashes (scaleY toward near-zero and back), the second softer than the
-   first, like an eye blinking to focus rather than anything alarming.
-   Applied straight to the real icon (see Board.tsx's truthgazeClass,
-   settled-call-site-only -- see its own doc comment near flippingIds for why)
-   rather than a clip-path-cropped overlay -- simpler, and avoids an even
-   earlier version's own timing bug (a cropped copy needing to wait for the
-   real icon to actually be visible before it could line up with it). */
+/* Truthseeker/Inquisitor -- the torch icon spins a full turn in place, then
+   settles back to normal. No color change at all -- two earlier versions (a
+   straight red flash, then a violet scale-pulse) both read as gaudy/off, and a
+   third (a vertical blink) didn't land either, so this drops any color/squash
+   gimmick and just spins the torch itself once around. Applied straight to the
+   real icon (see Board.tsx's truthgazeClass, settled-call-site-only -- see its
+   own doc comment near flippingIds for why) rather than a clip-path-cropped
+   overlay -- simpler, and avoids an even earlier version's own timing bug (a
+   cropped copy needing to wait for the real icon to actually be visible before
+   it could line up with it). */
 @keyframes card-icon-truthgaze-pulse {
-  0%,
-  28%,
-  50%,
+  0% {
+    transform: rotate(0deg);
+  }
   100% {
-    transform: scaleY(1);
-  }
-  14% {
-    transform: scaleY(0.12);
-  }
-  62% {
-    transform: scaleY(0.45);
+    transform: rotate(360deg);
   }
 }
 
@@ -1233,14 +1225,15 @@ html {
 /* Earthshaker only, again -- but on its OWN card this time, not its targets (see
    .card-earthshake-wobble above for those). Ring on a sibling overlay (same
    "not clipped by the card's own overflow-hidden" reasoning as Bannerman's own
-   .card-horn-pulse ring) reading as a trumpet blast: three expanding-and-fading
-   rings in one keyframe timeline (same "one keyframe, not several delayed
-   elements" approach as .card-icon-hop's decaying bounces below), rather than a
-   single pulse, so it reads as an actual sound wave radiating outward instead of
-   a one-off flash. Starts at the same moment as the flip itself (see Board.tsx's
-   trumpetIds/TRUMPET_MS), lining it up with .card-earthshake-wobble's own start
-   on the cells it's disrupting, rather than lagging behind until the card
-   settles. A rotate+scale icon shake (unlike Footman's translateX slide) doesn't
+   .card-horn-pulse ring) reading as a single trumpet blast -- one expanding,
+   fading ring, same shape as Bannerman's own horn-pulse. (An earlier version
+   used three staggered pulses in one keyframe timeline to read as a repeating
+   sound wave, but that was too busy/cluttered on a small card icon -- one
+   clean pulse reads as a blast just as well without the noise.) Starts at the
+   same moment as the flip itself (see Board.tsx's trumpetIds/TRUMPET_MS),
+   lining it up with .card-earthshake-wobble's own start on the cells it's
+   disrupting, rather than lagging behind until the card settles. A rotate+scale
+   icon shake (unlike Footman's translateX slide) doesn't
    warp when nested inside the parent's own rotateY flip, so it can play through
    the flip too instead of needing to wait for it. */
 @keyframes card-icon-trumpet-shake {
@@ -1276,41 +1269,18 @@ html {
 }
 
 @keyframes card-trumpet-soundwave {
-  0%,
-  100% {
-    opacity: 0;
-  }
   0% {
-    transform: scale(0.3);
-  }
-  10% {
     opacity: 0.7;
-    transform: scale(0.55);
+    transform: scale(0.4);
   }
-  32% {
-    opacity: 0;
-    transform: scale(1.5);
-  }
-  40% {
-    opacity: 0.55;
-    transform: scale(0.55);
-  }
-  62% {
-    opacity: 0;
-    transform: scale(1.55);
-  }
-  70% {
-    opacity: 0.4;
-    transform: scale(0.55);
-  }
-  95% {
+  100% {
     opacity: 0;
     transform: scale(1.6);
   }
 }
 
 .card-trumpet-soundwave {
-  animation: card-trumpet-soundwave 1s ease-out forwards;
+  animation: card-trumpet-soundwave 0.6s ease-out forwards;
   border: 2px solid rgb(56 189 248); /* sky-400 -- an audible/sonar tone, distinct from every other card's own ring color */
 }
 

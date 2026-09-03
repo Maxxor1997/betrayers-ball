@@ -302,25 +302,25 @@ export function BoardGrid({
   const SWORD_SWING_MS = FLIP_ANIMATION_MS + 600;
   // Earthshaker only -- its OWN reveal, not the ground-shake wobble it inflicts on
   // its targets (see earthshakenIds elsewhere) -- a trumpet-blast: a quick icon
-  // shake plus a sibling ring reading as sound waves (see .card-icon-trumpet-
-  // shake/.card-trumpet-soundwave in globals.css). Starts at the same moment as
-  // the flip itself (t=0), same as earthshakenIds/DISRUPTION_FLASH_MS above, so
-  // it lines up with the moment its targets start visibly shaking rather than
-  // lagging behind until the card settles -- unlike Footman's slide/Commander's
-  // charge, a rotate+scale icon shake (not a translate) reads fine nested inside
-  // the parent's own rotateY flip, so it doesn't need their "blank through the
-  // flip" treatment.
-  const TRUMPET_MS = 1000;
-  // Inquisitor (Truthseeker) only -- a "truth-gaze" blink: the icon squashes
-  // vertically twice like an eye blinking to focus, no color change at all
-  // (two earlier versions -- a red flash, then a violet scale-pulse -- both
-  // read as gaudy/off). Applied ONLY at the settled call site, not the
-  // mid-flip one -- applying it at both (like iconSpinClass/hopClass) meant
-  // its 0.7s animation had already blinked once before the mid-flip's back
-  // face ever became visible (which only happens roughly halfway through the
-  // parent's own 500ms flip), so it'd read as already mid-motion the instant
-  // it appeared instead of starting settled. Settled-only means the viewer
-  // always sees the normal icon first, then the blink plays after.
+  // shake plus a sibling ring reading as a single sound-wave pulse (see
+  // .card-icon-trumpet-shake/.card-trumpet-soundwave in globals.css, both 0.6s).
+  // Starts at the same moment as the flip itself (t=0), same as
+  // earthshakenIds/DISRUPTION_FLASH_MS above, so it lines up with the moment its
+  // targets start visibly shaking rather than lagging behind until the card
+  // settles -- unlike Footman's slide/Commander's charge, a rotate+scale icon
+  // shake (not a translate) reads fine nested inside the parent's own rotateY
+  // flip, so it doesn't need their "blank through the flip" treatment.
+  const TRUMPET_MS = 700;
+  // Inquisitor (Truthseeker) only -- the torch icon spins a full 360 in place,
+  // no color change at all (three earlier versions -- a red flash, a violet
+  // scale-pulse, then a vertical blink -- didn't land). Applied ONLY at the
+  // settled call site, not the mid-flip one -- applying it at both (like
+  // iconSpinClass/hopClass) meant its 0.7s spin had already reached its final
+  // orientation before the mid-flip's back face ever became visible (which
+  // only happens roughly halfway through the parent's own 500ms flip), so it'd
+  // read as already mid-spin the instant it appeared instead of starting from
+  // rest. Settled-only means the viewer always sees the normal icon first,
+  // then the spin plays after.
   const TRUTHGAZE_MS = FLIP_ANIMATION_MS + 700;
   // Skysplitter (Zeus-Born) only -- a bright pulse, flavor for "+1 per round
   // elapsed" (it only ever gets stronger from here). Applied ONLY at the settled
