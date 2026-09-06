@@ -7,11 +7,14 @@ import {
   computeRanks,
   createEmptyStats,
   disruptionFor,
+  flipDecisionStats,
+  overallAvgEligibleFlipRate,
   overallAvgFlipRate,
   overallAvgRoundLength,
   ownValueFor,
   placementBaseline,
   placementMaxDeviation,
+  resetFlipDecisionStats,
   simulateOneGame,
   simulateOneGameSteps,
   statsSummary,
@@ -553,6 +556,27 @@ describe("overallAvgFlipRate", () => {
   });
 });
 
+describe("overallAvgEligibleFlipRate", () => {
+  it("is null before anything's been tallied", () => {
+    expect(overallAvgEligibleFlipRate(createEmptyStats())).toBeNull();
+  });
+
+  it("is null for games tallied without flip-decision counts (defaulted to 0), unlike overallAvgFlipRate which is 0", () => {
+    const stats = createEmptyStats();
+    tallyGame(stats, [], { p1: 0 }, 2, 2);
+    expect(overallAvgEligibleFlipRate(stats)).toBeNull();
+  });
+
+  it("is the fraction of eligible decisions where the AI actually chose to flip, not the face-up fraction of the board", () => {
+    const stats = createEmptyStats();
+    // Game 1: 3 of 4 eligible decisions flipped.
+    tallyGame(stats, [], { p1: 0 }, 2, 2, "none", 4, 3);
+    // Game 2: 1 of 6 eligible decisions flipped.
+    tallyGame(stats, [], { p1: 0 }, 2, 2, "none", 6, 1);
+    expect(overallAvgEligibleFlipRate(stats)).toBeCloseTo((3 + 1) / (4 + 6));
+  });
+});
+
 describe("simulateOneGame", () => {
   it("plays an all-AI game to completion with a real result, deterministically for a fixed seed", () => {
     const state = simulateOneGame(3, "none", deterministicRng(7));
@@ -593,5 +617,18 @@ describe("simulateOneGameSteps", () => {
     expect(rerun.phase).toBe(last.phase);
     expect(rerun.round).toBe(last.round);
     expect(rerun.result).toEqual(last.result);
+  });
+
+  it("tallies eligible/chosen flip decisions into the shared flipDecisionStats counter as it plays", () => {
+    resetFlipDecisionStats();
+    const before = { ...flipDecisionStats };
+    const steps = [...simulateOneGameSteps(3, "none", deterministicRng(11), "medium")];
+    expect(steps.length).toBeGreaterThan(1);
+
+    const eligible = flipDecisionStats.eligibleDecisions - before.eligibleDecisions;
+    const chosen = flipDecisionStats.chosen - before.chosen;
+    expect(eligible).toBeGreaterThan(0);
+    expect(chosen).toBeGreaterThanOrEqual(0);
+    expect(chosen).toBeLessThanOrEqual(eligible);
   });
 });

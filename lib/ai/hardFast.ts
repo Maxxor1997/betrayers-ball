@@ -191,25 +191,44 @@ export interface HardFastOptions {
    * targets of that kind exist.
    */
   flipMaxCandidates: number;
-  /** Same idea as timeBudgetMs, but for the flip-candidate search -- deliberately smaller. A flip sample is inherently a bit MORE expensive than a placement sample too: a flip doesn't consume the turn, so the forward loop's very first step is a real chooseGreedyAiAction call for the follow-up placement, unlike a placement candidate's own turn (already used up before the loop starts, see evaluateCandidateOnce's doc comment). */
+  /**
+   * Same idea as timeBudgetMs, but for the flip-candidate search -- deliberately
+   * smaller. A flip sample is inherently a bit MORE expensive than a placement
+   * sample too: a flip doesn't consume the turn, so the forward loop's very first
+   * step is a real chooseGreedyAiAction call for the follow-up placement, unlike a
+   * placement candidate's own turn (already used up before the loop starts, see
+   * evaluateCandidateOnce's doc comment). Bumped from an original 50ms once adding
+   * the "don't flip" baseline option (see chooseHardFastAction) made an already-tight
+   * budget's starvation at high player counts measurably worse -- see
+   * effectiveFlipSearchSize for the other half of that fix (scaling
+   * flipMaxCandidates/flipRoundsAhead down instead of just raising this).
+   */
   flipTimeBudgetMs: number;
   /** Same idea as maxPasses, but for the flip-candidate search. */
   flipMaxPasses?: number;
   /**
    * How many rounds forward the flip search simulates -- independent of roundsAhead
    * (placement's own lookahead), and deliberately deeper (2, vs placement's 1):
-   * flipping is judged standalone against flipThreshold now (see
-   * chooseHardFastAction's own doc comment for why the old flip-vs-placement
-   * comparison was dropped), not against a same-depth placement baseline, so there's
-   * no reason its depth needs to match placement's.
+   * flipping is judged standalone against a same-metric "don't flip" baseline now
+   * (see chooseHardFastAction's own doc comment for why the old flip-vs-placement
+   * comparison was dropped in favor of this), not against a same-depth placement
+   * baseline, so there's no reason its depth needs to match placement's.
    */
   flipRoundsAhead: number;
   /**
-   * The bar a flip candidate's average simulated margin must clear (strictly) to
-   * actually get taken, now that flip is decided on its own terms instead of by
-   * comparison against a placement search that would otherwise have to run
-   * needlessly on every turn. 0 is a first guess ("only flip if it looks better than
-   * a dead-even game"), not yet AI-Arena-validated.
+   * How much better than NOT flipping a candidate's average simulated margin must be
+   * (strictly) to actually get taken -- an additive margin over the "don't flip"
+   * baseline (see chooseHardFastAction), not a fixed absolute bar. It used to be
+   * compared directly against a flip candidate's raw average
+   * (myScore - bestOpponent), but that average's own scale isn't independent of
+   * player count -- Math.max over more opponents (7 at 8p vs. 3 at 4p) skews higher
+   * simply from being a max over more draws, so a fixed absolute bar cleared a real
+   * flip rate at 4p (71.5% of legal opportunities, measured) but almost never at 8p
+   * (22.3%) even though flipping wasn't actually worse there -- the yardstick had
+   * just moved. Comparing against a same-metric baseline computed the same way
+   * cancels that drift out, the same reasoning chooseExpertVote already uses for its
+   * own end-now-vs-continue comparison. 0 is a first guess ("only flip if it looks
+   * strictly better than not flipping"), not yet AI-Arena-validated.
    */
   flipThreshold: number;
   /**
@@ -244,15 +263,17 @@ export interface HardFastOptions {
  * config wired into chooseAiActionForDifficulty's "expert" difficulty (see
  * difficulty.ts).
  *
- * flipMaxCandidates/flipTimeBudgetMs (4 candidates, 50ms) and voteRoundsAhead/
- * voteTimeBudgetMs (1 round, 50ms) are trimmed down from an initial 100ms each --
- * flip search runs on essentially every turn once flip unlocks (unlike vote, which
- * only runs once per round), so its cost stacks additively onto the existing 750ms
- * AI_TURN_DELAY_MS pacing beat every single turn for a real but rare payoff (flips
- * get chosen occasionally, not often -- see hardFast.test.ts's own flip-search test).
- * flipRoundsAhead (2) and flipThreshold (0) are similarly a first guess. None of the
- * flip/vote numbers are independently AI-Arena-validated yet the way the placement
- * numbers above are -- tune from here once measured.
+ * flipMaxCandidates/flipTimeBudgetMs (4 candidates, 75ms -- bumped from an original
+ * 50ms, see its own doc comment) and voteRoundsAhead/voteTimeBudgetMs (1 round, 50ms)
+ * are trimmed down from an initial 100ms each -- flip search runs on essentially
+ * every turn once flip unlocks (unlike vote, which only runs once per round), so its
+ * cost stacks additively onto the existing 750ms AI_TURN_DELAY_MS pacing beat every
+ * single turn for a real but rare payoff (flips get chosen occasionally, not often --
+ * see hardFast.test.ts's own flip-search test). flipRoundsAhead (2, before
+ * effectiveFlipSearchSize's own player-count scaling) and flipThreshold (0) are
+ * similarly a first guess. None of the flip/vote numbers are independently
+ * AI-Arena-validated yet the way the placement numbers above are -- tune from here
+ * once measured.
  */
 export const DEFAULT_HARD_FAST_OPTIONS: HardFastOptions = {
   timeBudgetMs: 200,
@@ -261,7 +282,7 @@ export const DEFAULT_HARD_FAST_OPTIONS: HardFastOptions = {
   voteRoundsAhead: 2,
   voteTimeBudgetMs: 50,
   flipMaxCandidates: 4,
-  flipTimeBudgetMs: 50,
+  flipTimeBudgetMs: 75,
   flipRoundsAhead: 2,
   flipThreshold: 0,
 };
@@ -464,8 +485,28 @@ function evaluateCandidateOnce(state: GameState, playerId: string, initialAction
  * case) or `candidates` was empty to begin with. Shared by chooseHardFastAction's two
  * independent searches below (placement and flip) so their round-robin bookkeeping
  * can't silently drift apart from each other.
+ *
+ * `toAction` may return null for a candidate that means "do nothing this option" --
+ * evaluateCandidateOnce already accepts a null initialAction (it's how vote's own
+ * "end now" option scores the freshly-determinized board with no action applied
+ * first). This is what lets the flip search below fold a "don't flip" baseline into
+ * the SAME round-robin as the real flip candidates, sampled under identical
+ * conditions, instead of a separate pass. `averages` exposes every candidate's own
+ * average (null if it never got a sample) alongside the overall best -- placement's
+ * call site ignores it (it only ever wants the single best), flip's needs it to find
+ * the best REAL candidate and the baseline's own average separately, since "highest
+ * average overall" doesn't distinguish "best flip" from "baseline won."
  */
-function searchBest<T>(candidates: T[], toAction: (candidate: T) => GameAction, roundsAhead: number, timeBudgetMs: number, maxPasses: number, state: GameState, playerId: string, rng: Rng): { action: GameAction; avg: number } | null {
+function searchBest<T>(
+  candidates: T[],
+  toAction: (candidate: T) => GameAction | null,
+  roundsAhead: number,
+  timeBudgetMs: number,
+  maxPasses: number,
+  state: GameState,
+  playerId: string,
+  rng: Rng
+): { action: GameAction | null; avg: number; averages: (number | null)[] } | null {
   if (candidates.length === 0) return null;
   benchmarkTimings.candidatesEvaluated += candidates.length;
 
@@ -484,18 +525,19 @@ function searchBest<T>(candidates: T[], toAction: (candidate: T) => GameAction, 
     passes++;
   }
 
+  const averages = totals.map((t) => (t.count === 0 ? null : t.sum / t.count));
   let bestIdx = -1;
   let bestAvg = -Infinity;
   for (let i = 0; i < candidates.length; i++) {
-    if (totals[i].count === 0) continue;
-    const avg = totals[i].sum / totals[i].count;
+    const avg = averages[i];
+    if (avg === null) continue;
     if (avg > bestAvg) {
       bestAvg = avg;
       bestIdx = i;
     }
   }
   if (bestIdx === -1) return null;
-  return { action: toAction(candidates[bestIdx]), avg: bestAvg };
+  return { action: toAction(candidates[bestIdx]), avg: bestAvg, averages };
 }
 
 /**
@@ -505,16 +547,44 @@ function searchBest<T>(candidates: T[], toAction: (candidate: T) => GameAction, 
  * experimenting with making Hard faster, so twoPly.ts's own validated behavior never
  * has to be disturbed to try something new.
  *
- * Flip is decided FIRST, standalone, against flipThreshold -- not by comparison
- * against a placement search. An earlier version ran the full placement search
- * (options.maxCandidates/timeBudgetMs) unconditionally every decision just to get a
- * baseline to compare flip against, even though that result is completely discarded
- * whenever flip wins: flipping doesn't consume the turn, so the very next call
- * re-runs the placement search from scratch against the post-flip board anyway. That
- * made the (expensive) placement search pure wasted work on every turn flip won, for
- * no benefit -- its own result was never actually used. Now the (cheap) flip search
- * runs first, and the (expensive) placement search only runs at all when flip isn't
- * taken this turn, which is also the only time its result is ever needed.
+ * Flip is decided FIRST, standalone, against a same-metric "don't flip" baseline --
+ * not by comparison against a placement search. An earlier version ran the full
+ * placement search (options.maxCandidates/timeBudgetMs) unconditionally every
+ * decision just to get a baseline to compare flip against, even though that result is
+ * completely discarded whenever flip wins: flipping doesn't consume the turn, so the
+ * very next call re-runs the placement search from scratch against the post-flip
+ * board anyway. That made the (expensive) placement search pure wasted work on every
+ * turn flip won, for no benefit -- its own result was never actually used. Now the
+ * (cheap) flip search runs first, and the (expensive) placement search only runs at
+ * all when flip isn't taken this turn, which is also the only time its result is ever
+ * needed.
+ *
+ * The flip search folds a "don't flip" option into the SAME round-robin as the real
+ * flip candidates (searchBest's `toAction` returning null for it), rather than
+ * comparing a flip candidate's raw average against a fixed constant. A fixed constant
+ * doesn't work here: evaluateCandidateOnce's score is myScore - max(every opponent's
+ * score), and Math.max over more opponents (7 at 8p vs. 3 at 4p) is systematically
+ * higher just from being a max over more draws -- nothing to do with whether flipping
+ * is actually good. That drift alone was enough to collapse Expert's real flip rate
+ * from 71.5% of legal opportunities at 4p to 22.3% at 8p (measured via AI Arena),
+ * even though flipping wasn't genuinely worse at 8p -- the yardstick had just moved.
+ * Comparing against a baseline sampled the exact same way (same metric, same
+ * roundsAhead, same time budget) cancels that drift out, since the baseline drifts by
+ * the same amount the real candidates do. Same reasoning chooseExpertVote below
+ * already uses for its own end-now-vs-continue comparison.
+ *
+ * That fix alone made things WORSE at 8p (flip rate collapsed further, to ~0.1%) --
+ * debug-logging searchBest's own per-candidate averages showed why: a sample's cost
+ * is roughly roundsAhead * playerCount (each simulated round costs about one turn
+ * per player), so at 8p, a single flipTimeBudgetMs (50ms) round-robin pass across
+ * flipMaxCandidates (4) real candidates PLUS the new baseline was usually only
+ * completing ONE sample of the FIRST candidate before the deadline hit -- everything
+ * else, baseline included, stayed at zero samples on most decisions. Adding the
+ * baseline pushed an already-tight budget over the edge; effectiveFlipSearchSize
+ * below scales flipRoundsAhead/flipMaxCandidates down as player count grows (and
+ * flipTimeBudgetMs was bumped up too, see DEFAULT_HARD_FAST_OPTIONS) so a full pass
+ * costs roughly the same regardless of table size, restoring the round-robin's own
+ * stated guarantee of covering every option at least once.
  *
  * A flip candidate's evaluateCandidateOnce call naturally ends up letting `playerId`
  * immediately choose their own follow-up placement via chooseGreedyAiAction (see that
@@ -523,6 +593,51 @@ function searchBest<T>(candidates: T[], toAction: (candidate: T) => GameAction, 
  * own fresh hidden-info guess (see determinize's doc comment) so no single wrong
  * guess about hidden cards can dominate one candidate's average.
  */
+/**
+ * Scales flipMaxCandidates/flipRoundsAhead down as player count grows past 4, so a
+ * full flip round-robin pass costs roughly the same regardless of table size instead
+ * of quietly costing ~playerCount/4 times as much -- see chooseHardFastAction's own
+ * doc comment for the measured 8p failure this fixes (the round-robin was barely
+ * completing a single sample of a single candidate before its time budget ran out).
+ * Both scale as roughly options.value * 4 / playerCount, floored at a safe minimum
+ * (1 round, 2 candidates) so the search never degenerates to nothing -- clamped to
+ * leave 2-4 player games completely untouched (their behavior was never broken, and
+ * the reported problem was specifically measured at 8p). A first-guess proportional
+ * curve derived from the cost model above, not an independently AI-Arena-validated
+ * one -- same caveat as the rest of these flip/vote numbers.
+ */
+function effectiveFlipSearchSize(playerCount: number, options: HardFastOptions): { flipMaxCandidates: number; flipRoundsAhead: number } {
+  if (playerCount <= 4) return { flipMaxCandidates: options.flipMaxCandidates, flipRoundsAhead: options.flipRoundsAhead };
+  const scale = 4 / playerCount;
+  return {
+    flipMaxCandidates: Math.max(2, Math.round(options.flipMaxCandidates * scale)),
+    flipRoundsAhead: Math.max(1, Math.round(options.flipRoundsAhead * scale)),
+  };
+}
+
+/**
+ * Per-player-above-4 discount applied to flipThreshold by effectiveFlipThreshold --
+ * an explicit, acknowledged thumb on the scale (not a measured cost or fairness
+ * argument like effectiveFlipSearchSize above) to close the remainder of the 4p/8p
+ * eligible-flip-rate gap that effectiveFlipSearchSize's budget fix didn't reach
+ * (measured: 4p 63.4%, 8p 34.2% after that fix -- see chooseHardFastAction's doc
+ * comment). A first guess, meant to be re-tuned against lib/playtest/scripts/
+ * checkFlipRate.ts rather than trusted as correctly calibrated.
+ */
+const FLIP_THRESHOLD_BIAS_PER_PLAYER = 0.5;
+
+/**
+ * Makes flip strictly easier to justify as player count grows past 4, by lowering
+ * the bar flip's own average has to clear over the "don't flip" baseline (see
+ * chooseHardFastAction) -- unlike effectiveFlipSearchSize, this isn't fixing a bug,
+ * it's deliberately biasing the decision because 8p's flip rate stayed well below
+ * 4p's even once the search itself was put on equal footing.
+ */
+function effectiveFlipThreshold(playerCount: number, options: HardFastOptions): number {
+  if (playerCount <= 4) return options.flipThreshold;
+  return options.flipThreshold - (playerCount - 4) * FLIP_THRESHOLD_BIAS_PER_PLAYER;
+}
+
 export function chooseHardFastAction(
   state: GameState,
   playerId: string,
@@ -533,19 +648,42 @@ export function chooseHardFastAction(
   const greedyChoice = chooseGreedyAiAction(state, playerId, rng);
   if (greedyChoice.type === "castVote" || greedyChoice.type === "pass") return greedyChoice; // voting/pass -- Medium's existing logic is untouched
 
-  const flipCandidates = rankedFlipCandidates(state, playerId, options.flipMaxCandidates);
+  const { flipMaxCandidates, flipRoundsAhead } = effectiveFlipSearchSize(state.config.playerCount, options);
+  const flipCandidates = rankedFlipCandidates(state, playerId, flipMaxCandidates);
   if (flipCandidates.length > 0) {
-    const flipResult = searchBest(
-      flipCandidates,
-      (target) => ({ type: "flip", playerId, instanceId: target.instanceId }),
-      options.flipRoundsAhead,
+    // `null` as the trailing entry means "don't flip" -- see this function's own doc
+    // comment for why folding it into the same round-robin (instead of comparing a
+    // flip candidate's raw average against a fixed constant) is what actually fixes
+    // the player-count-dependent flip rate.
+    const withBaseline: (CardInstance | null)[] = [...flipCandidates, null];
+    const flipSearch = searchBest(
+      withBaseline,
+      (target) => (target ? { type: "flip", playerId, instanceId: target.instanceId } : null),
+      flipRoundsAhead,
       options.flipTimeBudgetMs,
       options.flipMaxPasses ?? Infinity,
       state,
       playerId,
       rng
     );
-    if (flipResult && flipResult.avg > options.flipThreshold) return flipResult.action;
+    if (flipSearch) {
+      const baselineAvg = flipSearch.averages[flipSearch.averages.length - 1];
+      let bestFlipIdx = -1;
+      let bestFlipAvg = -Infinity;
+      for (let i = 0; i < flipCandidates.length; i++) {
+        const avg = flipSearch.averages[i];
+        if (avg === null) continue;
+        if (avg > bestFlipAvg) {
+          bestFlipAvg = avg;
+          bestFlipIdx = i;
+        }
+      }
+      const flipThreshold = effectiveFlipThreshold(state.config.playerCount, options);
+      if (bestFlipIdx !== -1 && baselineAvg !== null && bestFlipAvg > baselineAvg + flipThreshold) {
+        const target = flipCandidates[bestFlipIdx];
+        return { type: "flip", playerId, instanceId: target.instanceId };
+      }
+    }
   }
 
   const placementCandidates = rankedPlacementCandidates(state, playerId, options.maxCandidates);

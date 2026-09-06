@@ -18,6 +18,8 @@ import { AiDifficulty, CardBucket, CardId, CenterEffectId, GameState } from "@/l
 import {
   CardStatsRow,
   createEmptyStats,
+  flipDecisionStats,
+  overallAvgEligibleFlipRate,
   overallAvgFlipRate,
   overallAvgRoundLength,
   PlaytestStats,
@@ -73,16 +75,27 @@ function ownScoreDelta(row: CardStatsRow): number | null {
 
 /**
  * The heatmap's "Value" metric -- a single number meant to read as "what is this card
- * actually worth to play", using whichever half of its worth is the real story for its
- * bucket: a Control card's own base rarely moves on its own (see cardStats.ts's
- * disruptionFor), so its value is base + what it does to the average opponent; every
- * other card's value already comes from its own base + conditions (avgOwnScore, which
- * deliberately excludes anything a neighbor did *to* it -- a debuff from someone
- * else's Earthshaker isn't this card's own worth, it's board misfortune).
+ * actually worth to play", using whichever half of its worth is the real story: a
+ * Control card's own base rarely moves on its own (see cardStats.ts's disruptionFor),
+ * so its value is base + what it does to the average opponent. The same base+disruption
+ * treatment also applies to any OTHER card whose own score never moves either
+ * (ownScoreDelta === 0) even though it isn't bucketed as Control -- Hornblower
+ * (Bannerman) is the concrete case: its whole printed effect is "+2/+1 to adjacent
+ * cards," nothing for itself, so its avgOwnScore is just its base with zero signal in
+ * it, and using avgOwnScore alone silently discarded the entire card. Every other
+ * card's value comes from its own base + conditions (avgOwnScore, which deliberately
+ * excludes anything a neighbor did *to* it -- a debuff from someone else's Earthshaker
+ * isn't this card's own worth, it's board misfortune). Safe to gate on `=== 0` rather
+ * than a bucket check: any card that DOES move its own score (nonzero ownScoreDelta)
+ * still falls through to the plain avgOwnScore branch exactly as before, so this can
+ * only add coverage for a card the old check silently skipped, never change an
+ * existing one's number.
  */
 function cardValueMetric(row: CardStatsRow): number | null {
   const def = CARD_DEFS[row.cardId];
-  if (def.bucket === "Control") return row.avgDisruption === null ? null : def.base + row.avgDisruption;
+  if (def.bucket === "Control" || ownScoreDelta(row) === 0) {
+    return row.avgDisruption === null ? null : def.base + row.avgDisruption;
+  }
   return row.avgOwnScore;
 }
 
@@ -341,11 +354,11 @@ function buildEverythingMarkdown(
     sections.push(roundLengthLines.join("\n") + "\n");
 
     const flipRateLines = [
-      "Average flip rate by player count",
+      "Average eligible flip rate by player count -- of decisions where flipping was legal, what fraction actually flipped",
       "",
-      "| Player count | Avg flip rate |",
+      "| Player count | Avg eligible flip rate |",
       "|---|---|",
-      ...availablePlayerCounts.map((pc) => `| ${pc}p | ${fmtPercent(overallAvgFlipRate(stats.byPlayerCount[pc]))} |`),
+      ...availablePlayerCounts.map((pc) => `| ${pc}p | ${fmtPercent(overallAvgEligibleFlipRate(stats.byPlayerCount[pc]))} |`),
     ];
     sections.push(flipRateLines.join("\n") + "\n");
 
@@ -453,7 +466,7 @@ function Playtest() {
     }
   }
 
-  function tallyOneGame(working: PlaytestStats, finalState: GameState) {
+  function tallyOneGame(working: PlaytestStats, finalState: GameState, flipEligibleDecisions: number, flipsChosen: number) {
     const result = resolveBoard(
       finalState.board,
       finalState.config.boardBounds,
@@ -461,7 +474,16 @@ function Playtest() {
       finalState.config.centerEffect,
       finalState.players.map((p) => p.id)
     );
-    tallyGame(working, result.cards, finalState.result!.scores, finalState.config.playerCount, finalState.round, finalState.config.centerEffect);
+    tallyGame(
+      working,
+      result.cards,
+      finalState.result!.scores,
+      finalState.config.playerCount,
+      finalState.round,
+      finalState.config.centerEffect,
+      flipEligibleDecisions,
+      flipsChosen
+    );
   }
 
   /** `startFresh` clears any already-tallied data before this run instead of adding to it -- see the pre-run confirmation popup below, which is the only place that ever passes true. */
@@ -499,6 +521,13 @@ function Playtest() {
       for (let i = 0; i < gameCount; i++) {
         const effect = centerEffect === "random" ? randomPool![Math.floor(Math.random() * randomPool!.length)] : centerEffect;
 
+        // Snapshotted before/after this one game's simulation (both branches below
+        // route through simulateOneGameSteps under the hood) so tallyOneGame gets
+        // exactly this game's own eligible/chosen flip counts, not a running total
+        // across the whole batch -- see cardStats.ts's flipDecisionStats doc comment
+        // for why this is a shared counter rather than part of the return value.
+        const flipStatsBefore = { ...flipDecisionStats };
+
         let finalState: GameState;
         if (watchLive) {
           // Steps through the game action-by-action instead of running it in one call,
@@ -526,7 +555,12 @@ function Playtest() {
           finalState = simulateOneGame(pc, effect, Math.random, aiDifficulty);
         }
 
-        tallyOneGame(working, finalState);
+        tallyOneGame(
+          working,
+          finalState,
+          flipDecisionStats.eligibleDecisions - flipStatsBefore.eligibleDecisions,
+          flipDecisionStats.chosen - flipStatsBefore.chosen
+        );
         completed++;
 
         if (completed === totalGames || performance.now() - lastYieldAt >= YIELD_INTERVAL_MS) {
@@ -1043,9 +1077,9 @@ function Playtest() {
             />
           ) : (
             <BarChartByPlayerCount
-              title="Average flip rate by player count -- fraction of the board face-up at game end"
+              title="Average eligible flip rate by player count -- of decisions where flipping was legal, what fraction actually flipped"
               counts={availablePlayerCounts}
-              values={availablePlayerCounts.map((pc) => overallAvgFlipRate(stats.byPlayerCount[pc]))}
+              values={availablePlayerCounts.map((pc) => overallAvgEligibleFlipRate(stats.byPlayerCount[pc]))}
               format={fmtPercent}
             />
           )}

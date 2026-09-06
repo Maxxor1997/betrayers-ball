@@ -1,0 +1,379 @@
+<!--
+  Starting-point template for the /balance-report skill (.claude/commands/balance-report.md).
+  This is the actual HTML/CSS/JS from a real prior report (a single-player-count,
+  4p-only run), saved here so a new report reuses its proven visual system instead of
+  being rebuilt from scratch each time. Copy this file, then follow
+  balance-report.md's own instructions for what to change: real data from a fresh
+  runBalanceBatch.ts run, hand-written insights grounded in that run's actual numbers,
+  and (when more than one player count was run) a player-count toggle -- see that
+  skill doc for the exact adaptation, since this file's own DATA/INSIGHTS/ANALYSIS
+  section below is only ever an example, never something to publish verbatim.
+-->
+<title>Location Report</title>
+<style>
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17121d; --surface: #201a29; --surface-2: #2b2335; --border: #3d3249;
+      --text: #ece6f2; --text-dim: #ab9cbd; --accent: #d4af5a;
+      --slam: #d8695c; --engine: #4fb39c; --control: #a685d6;
+      --good: #4fb39c; --bad: #d8695c; --good-rgb: 79,179,156; --bad-rgb: 216,105,92; --accent-rgb: 212,175,90;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17121d; --surface: #201a29; --surface-2: #2b2335; --border: #3d3249;
+    --text: #ece6f2; --text-dim: #ab9cbd; --accent: #d4af5a;
+    --slam: #d8695c; --engine: #4fb39c; --control: #a685d6;
+    --good: #4fb39c; --bad: #d8695c; --good-rgb: 79,179,156; --bad-rgb: 216,105,92; --accent-rgb: 212,175,90;
+  }
+  :root {
+    --bg: #eee7f4; --surface: #fffdfb; --surface-2: #e5dbef; --border: #c7b6da;
+    --text: #251c30; --text-dim: #5e5170; --accent: #93701f;
+    --slam: #a23e34; --engine: #276b5a; --control: #6b4c9a;
+    --good: #276b5a; --bad: #a23e34; --good-rgb: 39,107,90; --bad-rgb: 162,62,52; --accent-rgb: 147,112,31;
+    --font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-body); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 40px 24px 80px; }
+  .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin: 0 0 8px; }
+  h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(28px, 4vw, 40px); margin: 0 0 4px; text-wrap: balance; }
+  .sub { color: var(--text-dim); font-size: 14px; margin: 0 0 10px; max-width: 68ch; line-height: 1.55; }
+  .caveat-box {
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 12px 16px; font-size: 12.5px; color: var(--text-dim); line-height: 1.55;
+    max-width: 72ch; margin: 16px 0 30px;
+  }
+  .caveat-box strong { color: var(--text); }
+  .kpi-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 36px; }
+  .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 20px; min-width: 160px; }
+  .kpi .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 6px; }
+  .kpi .value { font-family: var(--font-display); font-size: 24px; font-variant-numeric: tabular-nums; }
+
+  h2 { font-family: var(--font-display); font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .section-note { color: var(--text-dim); font-size: 13px; margin: 0 0 18px; max-width: 74ch; line-height: 1.5; }
+
+  .loc-grid { display: grid; gap: 18px; }
+  .loc-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px 24px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .loc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+  .loc-name { font-family: var(--font-display); font-size: 20px; font-weight: 600; }
+  .loc-mechanic { font-size: 12.5px; color: var(--text-dim); margin-top: 4px; max-width: 56ch; line-height: 1.5; }
+  .loc-mini-kpis { display: flex; gap: 18px; font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+  .loc-mini-kpis b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+  .verdicts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 700px) { .verdicts { grid-template-columns: 1fr; } }
+  .verdict {
+    border-radius: 8px; padding: 12px 14px; font-size: 12.5px; line-height: 1.55;
+    border-left: 3px solid var(--v-color);
+    background: color-mix(in srgb, var(--v-color) 8%, transparent);
+  }
+  .verdict .vh { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+  .verdict .vtag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--v-color); }
+  .verdict .vname { font-weight: 700; font-size: 14px; }
+  .verdict .vstat { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--v-color); margin-left: auto; }
+  .verdict p { margin: 0; color: var(--text-dim); }
+  .verdict .flag { display: inline-block; margin-top: 6px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: var(--accent); }
+
+  .strip-wrap { margin-top: 4px; }
+  .strip-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); font-weight: 700; margin-bottom: 6px; }
+  .strip { display: flex; gap: 2px; height: 22px; }
+  .strip .seg { flex: 1; border-radius: 3px; background: var(--surface-2); position: relative; }
+  .strip .seg.na { opacity: 0.25; }
+
+  footer { color: var(--text-dim); font-size: 11.5px; text-align: center; padding-top: 20px; margin-top: 30px; border-top: 1px solid var(--border); }
+
+  .seg { cursor: default; }
+  #tooltip {
+    position: fixed;
+    z-index: 1000;
+    pointer-events: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 9px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    opacity: 0;
+    transform: translate(-50%, -100%);
+    transition: opacity 0.08s ease;
+    white-space: nowrap;
+  }
+  #tooltip.show { opacity: 1; }
+  #tooltip .tt-val { font-variant-numeric: tabular-nums; color: var(--tt-color, var(--text)); margin-left: 6px; }
+
+  .bucket-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.03em; padding: 2px 9px; border-radius: 999px; width: fit-content; }
+  .bucket-chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .bucket-Slam { color: var(--slam); background: rgba(var(--bad-rgb), 0.12); }
+  .bucket-Engine { color: var(--engine); background: rgba(var(--good-rgb), 0.12); }
+  .bucket-Control { color: var(--control); background: rgba(147, 112, 194, 0.14); }
+
+  .profile-controls { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 18px; }
+  .control-group { display: flex; align-items: center; gap: 8px; }
+  .control-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-dim); font-weight: 700; }
+  select { font-family: var(--font-body); font-size: 13px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; }
+
+  .profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .profile-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .profile-card.empty { opacity: 0.6; justify-content: center; align-items: center; text-align: center; min-height: 100px; }
+  .profile-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .profile-title { display: flex; flex-direction: column; gap: 6px; }
+  .profile-title .name { font-family: var(--font-display); font-size: 18px; font-weight: 600; }
+  .score-badge { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 54px; height: 54px; border-radius: 50%; border: 3px solid var(--score-color, var(--accent)); flex-shrink: 0; }
+  .score-badge .num { font-family: var(--font-display); font-size: 18px; font-weight: 700; line-height: 1; color: var(--score-color, var(--accent)); }
+  .score-badge .of { font-size: 8px; color: var(--text-dim); }
+  .score-tag { align-self: flex-start; font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; color: var(--score-color, var(--accent)); background: color-mix(in srgb, var(--score-color, var(--accent)) 14%, transparent); }
+
+  .profile-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 11px; }
+  .profile-stats .cell { background: var(--surface-2); border-radius: 6px; padding: 6px 8px; }
+  .profile-stats .cell .k { color: var(--text-dim); text-transform: uppercase; font-size: 9px; letter-spacing: 0.04em; display: block; margin-bottom: 2px; }
+  .profile-stats .cell .v { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px; }
+
+  .profile-subhead { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 700; margin: 2px 0 -4px; }
+  .profile-insight { font-size: 12.5px; line-height: 1.55; color: var(--text-dim); border-top: 1px solid var(--border); padding-top: 10px; }
+  .profile-insight strong { color: var(--text); }
+  .rebalance-note { display: inline-block; margin-top: 8px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--good); }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Betrayer's Ball — Location Report</p>
+  <h1>Where Every Card Wins or Dies</h1>
+  <p class="sub">The same batch, read location-first instead of card-first: for each location, which card benefits most from its specific rule, which one gets punished by it, and why — grounded in the actual card and location text, not just the numbers.</p>
+
+  <div class="caveat-box">
+    <strong>Example caveat box</strong> — replace with this run's real caveats: which player count(s), any structurally-absent cards (disabled, or 0 copies at this player count — not a balance signal), and anything about sample size worth flagging up front.
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi"><div class="label">Avg round length</div><div class="value">0.00</div></div>
+    <div class="kpi"><div class="label">Avg flip rate</div><div class="value">0%</div></div>
+    <div class="kpi"><div class="label">Locations analyzed</div><div class="value">0</div></div>
+    <div class="kpi"><div class="label">Cards tracked</div><div class="value">0 / 20</div></div>
+  </div>
+
+  <section>
+    <h2>Card profiles</h2>
+    <p class="section-note">A balance score (0–100, higher = closer to neutral) combining each card's overall Placement Δ with how much it swings across locations, plus a short insight grounded in its actual printed rule.</p>
+    <div class="profile-controls">
+      <div class="control-group">
+        <span class="control-label">Sort</span>
+        <select id="profile-sort">
+          <option value="score">Balance score (needs attention first)</option>
+          <option value="pd">Placement Δ (best first)</option>
+          <option value="name">Name</option>
+        </select>
+      </div>
+    </div>
+    <div class="profile-grid" id="profile-grid"></div>
+  </section>
+
+  <section>
+    <h2>Per-location breakdown</h2>
+    <p class="section-note">Best = most negative Placement Δ (its holders finish better than baseline there); worst = most positive. The strip under each shows every tracked card at that location, sorted best → worst.</p>
+    <div class="loc-grid" id="loc-grid"></div>
+  </section>
+
+  <footer>Read alongside the Card Balance report for the cross-card view.</footer>
+</div>
+<div id="tooltip"></div>
+
+<script>
+  // All 12 currently-runnable locations (11 real effects + the "none"/World-Tree
+  // baseline), in CenterEffectId -> {name, mechanic} form. "Twin Isles" is disabled in
+  // the current card set and deliberately excluded -- see lib/content/centerEffects.ts.
+  // Keep this list's wording in sync with each effect's own `description` field there.
+  const LOCATIONS = [
+    { id: "none", name: "World-Tree", mechanic: "No special rule this game -- the control group every other location is read against." },
+    { id: "mirrorPool", name: "Mirror Pool", mechanic: "Each card has one mirror position (same column, opposite side of the center row). If occupied, both cards get +1, or +2 each if they're the same card type." },
+    { id: "frontier", name: "Contested Lands", mechanic: "Every card gains +1 for each distinct opposing player with a card adjacent to it." },
+    { id: "championOfTheWeak", name: "The Lazaret", mechanic: "At the end of the game, each player's single lowest-valued card is worth double (a tie is broken by whichever was placed last)." },
+    { id: "summit", name: "Dragon Gate", mechanic: "At the end of the game, each player's single highest-valued face-up card is worth double (a tie is broken by whichever was placed last)." },
+    { id: "shadowlands", name: "The Pit of Erebus", mechanic: "Flips unlock one round later than usual." },
+    { id: "reckoning", name: "Hall of Fortunes", mechanic: "On each of your turns, you may only place one of 3 random, unique cards offered from your hand -- a fresh offer is drawn once the previous one is used." },
+    { id: "threeHeadedDragon", name: "Corpse of the Great Wyrm", mechanic: "Any card adjacent to any of the three heads gains +1." },
+    { id: "freeCities", name: "The Free Cities", mechanic: "No adjacency requirement -- any empty tile on the board is a legal placement." },
+    { id: "borderlands", name: "The Frontier", mechanic: "Cards on the board's edge gain +1. Cards in a corner instead gain +2 (flat, not stacked with the edge bonus)." },
+    { id: "noMansLand", name: "No Man's Land", mechanic: "Any card on the center's row or column takes -2." },
+    { id: "kingslayer", name: "Kingslayer's Court", mechanic: "Kingslayer counts as a card worth 3. After scoring, its value is subtracted from the highest-value card(s) on the board -- tied cards all get hit." },
+  ];
+
+  // ---- REPLACE EVERYTHING BELOW WITH THIS RUN'S REAL DATA ----
+  // See balance-report.md for exactly how to derive OVERVIEW/CARDS_META/PD/CARD_STATS
+  // from runBalanceBatch.ts's JSON output, and how INSIGHTS/ANALYSIS must be
+  // hand-written from the real numbers plus cards.ts/centerEffects.ts's actual rule
+  // text -- never templated/generic filler.
+  const OVERVIEW = { rl: LOCATIONS.map(() => 0), fr: LOCATIONS.map(() => 0) };
+  const CARDS_META = {};
+  const PD = {};
+  const CARD_STATS = {};
+  const NO_DATA_CARDS = [];
+  const INSIGHTS = {};
+  const ANALYSIS = LOCATIONS.map(() => ({ best: { name: "", text: "" }, worst: { name: "", text: "" } }));
+  // ---- END REPLACE ----
+
+  function stdev(values) {
+    const v = values.filter((x) => x !== null && x !== undefined);
+    if (v.length < 2) return 0;
+    const mean = v.reduce((s, x) => s + x, 0) / v.length;
+    return Math.sqrt(v.reduce((s, x) => s + (x - mean) ** 2, 0) / v.length);
+  }
+
+  /** score/tag/color from one function so they can't contradict each other. */
+  function classifyCard(name, overallPd) {
+    const spread = stdev(PD[name] || []);
+    const magnitudePenalty = Math.min(55, Math.abs(overallPd) * 180);
+    const volatilityPenalty = Math.min(30, spread * 90);
+    const score = Math.max(0, Math.round(100 - magnitudePenalty - volatilityPenalty));
+    let tag, color;
+    if (magnitudePenalty < 10 && volatilityPenalty >= 12) { tag = "Context-dependent"; color = "var(--control)"; }
+    else if (score >= 80) { tag = "Balanced"; color = "var(--good)"; }
+    else { tag = overallPd < 0 ? "Overperforming" : "Underperforming"; color = "var(--bad)"; }
+    return { score, tag, color };
+  }
+
+  function renderProfiles() {
+    const grid = document.getElementById("profile-grid");
+    const sortMode = document.getElementById("profile-sort").value;
+    const rows = Object.keys(CARD_STATS).map((name) => {
+      const [bucket, o] = CARD_STATS[name];
+      return { name, bucket, o, ...classifyCard(name, o.pd) };
+    });
+    rows.sort((a, b) => {
+      if (sortMode === "score") return a.score - b.score;
+      if (sortMode === "pd") return a.o.pd - b.o.pd;
+      return a.name.localeCompare(b.name);
+    });
+
+    const cardsHtml = rows.map(({ name, bucket, o, score, tag, color }) => {
+      const locVals = PD[name] || [];
+      const localMaxAbs = Math.max(...locVals.filter((v) => v !== null).map(Math.abs));
+      const strip = locVals.map((v, i) => {
+        const bg = v === null ? "var(--surface-2)" : heatColor(v, localMaxAbs);
+        return `<div class="seg" style="background:${bg}" data-tip="${LOCATIONS[i].name}" data-val="${fmtSigned(v)}" data-color="${v === null ? "" : v < 0 ? "var(--good)" : "var(--bad)"}"></div>`;
+      }).join("");
+      return `
+        <div class="profile-card">
+          <div class="profile-head">
+            <div class="profile-title">
+              <span class="bucket-chip bucket-${bucket}">${bucket}</span>
+              <span class="name">${name}</span>
+              <span class="score-tag" style="--score-color:${color}">${tag}</span>
+            </div>
+            <div class="score-badge" style="--score-color:${color}"><span class="num">${score}</span><span class="of">/ 100</span></div>
+          </div>
+          <div class="profile-stats">
+            <div class="cell"><span class="k">Placement Δ</span><span class="v">${fmtSigned(o.pd)}</span></div>
+            <div class="cell"><span class="k">Impact</span><span class="v">${o.im > 0 ? "+" : ""}${o.im.toFixed(3)}</span></div>
+            <div class="cell"><span class="k">Played</span><span class="v">${o.pl}%</span></div>
+            <div class="cell"><span class="k">Flip rate</span><span class="v">${o.fr}%</span></div>
+            <div class="cell"><span class="k">Value</span><span class="v">${o.va.toFixed(1)}</span></div>
+            <div class="cell"><span class="k">Own Δ</span><span class="v">${o.od > 0 ? "+" : ""}${o.od.toFixed(1)}</span></div>
+            <div class="cell"><span class="k">Final score</span><span class="v">${o.fs.toFixed(1)}</span></div>
+            <div class="cell"><span class="k">Disruption</span><span class="v">${o.di > 0 ? "+" : ""}${o.di.toFixed(1)}</span></div>
+          </div>
+          <div class="profile-subhead">Placement Δ by location</div>
+          <div class="strip">${strip}</div>
+          <p class="profile-insight">${INSIGHTS[name] || ""}</p>
+        </div>
+      `;
+    }).join("");
+
+    const noDataHtml = NO_DATA_CARDS.map(({ name, bucket, reason }) => `
+      <div class="profile-card empty">
+        <span class="bucket-chip bucket-${bucket}">${bucket}</span>
+        <p style="margin:8px 0 0; color:var(--text-dim); font-size:13px;"><strong style="color:var(--text)">${name}</strong> not in this batch — ${reason}</p>
+      </div>
+    `).join("");
+
+    grid.innerHTML = cardsHtml + noDataHtml;
+  }
+  document.getElementById("profile-sort").addEventListener("change", renderProfiles);
+
+  const fmtSigned = (n) => n === null || n === undefined ? "—" : (n > 0 ? "+" : "") + n.toFixed(2);
+
+  /**
+   * Scaled against `maxAbs` from whichever *specific* set of values is being
+   * rendered right now (a single location's cards, or a single card's locations) --
+   * NOT a single dataset-wide constant, or one outlier crushes every other, more
+   * typical value down near the same barely-visible minimum alpha.
+   */
+  function heatColor(v, maxAbs) {
+    if (v === null) return null;
+    const t = maxAbs === 0 ? 0 : Math.min(1, Math.abs(v) / maxAbs);
+    const rgb = v < 0 ? getComputedStyle(document.documentElement).getPropertyValue("--good-rgb") : getComputedStyle(document.documentElement).getPropertyValue("--bad-rgb");
+    return `rgba(${rgb.trim()}, ${(0.18 + t * 0.55).toFixed(2)})`;
+  }
+
+  const grid = document.getElementById("loc-grid");
+  grid.innerHTML = LOCATIONS.map((loc, i) => {
+    const a = ANALYSIS[i];
+    const cardsAtLoc = Object.keys(PD)
+      .map((name) => ({ name, v: PD[name][i] }))
+      .filter((c) => c.v !== null)
+      .sort((x, y) => x.v - y.v);
+    const localMaxAbs = Math.max(...cardsAtLoc.map((c) => Math.abs(c.v)));
+
+    const strip = cardsAtLoc.map((c) => {
+      const bg = heatColor(c.v, localMaxAbs);
+      return `<div class="seg" style="background:${bg}" data-tip="${c.name}" data-val="${fmtSigned(c.v)} · ${CARDS_META[c.name]}% played" data-color="${c.v < 0 ? "var(--good)" : "var(--bad)"}"></div>`;
+    }).join("");
+
+    const verdict = (v, color) => `
+      <div class="verdict" style="--v-color:${color}">
+        <div class="vh">
+          <span class="vtag">${color === "var(--good)" ? "Best here" : "Worst here"}</span>
+          <span class="vname">${v.name}</span>
+          <span class="vstat">${fmtSigned((PD[v.name.split(" / ")[0]] || [])[i])}</span>
+        </div>
+        <p>${v.text}</p>
+        ${v.confidence === "tentative" ? '<span class="flag">Tentative read</span>' : ""}
+        ${v.confidence === "low-sample" ? '<span class="flag">Small sample</span>' : ""}
+      </div>
+    `;
+
+    return `
+      <div class="loc-card">
+        <div class="loc-head">
+          <div>
+            <div class="loc-name">${loc.name}</div>
+            <div class="loc-mechanic">${loc.mechanic}</div>
+          </div>
+          <div class="loc-mini-kpis">
+            <span>Avg rounds <b>${OVERVIEW.rl[i].toFixed(2)}</b></span>
+            <span>Flip rate <b>${OVERVIEW.fr[i]}%</b></span>
+          </div>
+        </div>
+        <div class="verdicts">
+          ${verdict(a.best, "var(--good)")}
+          ${verdict(a.worst, "var(--bad)")}
+        </div>
+        <div class="strip-wrap">
+          <div class="strip-label">All tracked cards here, best → worst</div>
+          <div class="strip">${strip}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  renderProfiles();
+
+  /** Custom hover tooltip, delegated on document since both grids get rebuilt/re-sorted. */
+  const tooltip = document.getElementById("tooltip");
+  document.addEventListener("mousemove", (e) => {
+    const seg = e.target.closest(".seg[data-tip]");
+    if (!seg) {
+      tooltip.classList.remove("show");
+      return;
+    }
+    tooltip.innerHTML = `${seg.dataset.tip}<span class="tt-val" style="--tt-color:${seg.dataset.color || "var(--text)"}">${seg.dataset.val}</span>`;
+    tooltip.style.left = `${e.clientX}px`;
+    tooltip.style.top = `${e.clientY - 10}px`;
+    tooltip.classList.add("show");
+  });
+  document.addEventListener("mouseleave", () => tooltip.classList.remove("show"));
+</script>

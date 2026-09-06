@@ -3,7 +3,7 @@ import { ALL_CARD_IDS, CARD_DEFS, copiesForPlayerCount } from "@/lib/content/car
 import { Rng } from "@/lib/engine/deck";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { FLOORED_AT_ZERO_LABEL, ResolvedCard } from "@/lib/engine/resolution";
-import { currentPlayerId } from "@/lib/engine/turns";
+import { currentPlayerId, getLegalFlipTargets } from "@/lib/engine/turns";
 import { AiDifficulty, CardId, CenterEffectId, GameState } from "@/lib/engine/types";
 
 /** Running totals for one card across however many completed games have been tallied -- see statsSummary for the derived per-game averages a UI actually wants. */
@@ -92,9 +92,25 @@ export interface OverallStats {
    * Sum of (face-up card count / total card count on the board), once per tallied
    * game's final state -- the board-wide version of each card's own faceUpAtEndSum
    * (see CardStats), blended across every card type instead of tracking one. See
-   * overallAvgFlipRate.
+   * overallAvgFlipRate. An OUTCOME metric -- "how much of the board ended up
+   * face-up," which says nothing about how often flipping was actually available
+   * versus taken. See flipEligibleDecisions/flipsChosen below for the DECISION
+   * metric (same concept lib/playtest/aiArena.ts's own ArenaBucketStats tracks).
    */
   faceUpFractionSum: number;
+  /**
+   * How many turn-decisions, across every tallied game, had at least one legal flip
+   * target (getLegalFlipTargets(state).length > 0) -- the denominator for
+   * overallAvgEligibleFlipRate. Unlike faceUpFractionSum, this is a DECISION metric:
+   * of the moments a player COULD have flipped something, how often did they. Same
+   * concept and counting convention as aiArena.ts's ArenaBucketStats.flipEligibleDecisions
+   * (see simulateOneGameSteps for where this gets counted), kept here too so the main
+   * playtest page's own by-player-count/by-location breakdowns can show it without
+   * needing the separate AI Arena tool.
+   */
+  flipEligibleDecisions: number;
+  /** How many of those flip-eligible decisions actually resulted in a flip -- the numerator for overallAvgEligibleFlipRate. */
+  flipsChosen: number;
 }
 
 /** One "slice" of tallied stats -- everything, or scoped to just one player count (see PlaytestStats.byPlayerCount). Both are folded by the same tallyGame/read by the same statsSummary/overallAvgRoundLength, since a per-player-count slice is shaped identically to the all-games total. */
@@ -139,7 +155,7 @@ export function createEmptyBucket(): StatsBucket {
       faceUpAtEndSum: 0,
     };
   }
-  return { cards, overall: { gamesTallied: 0, roundLengthSum: 0, faceUpFractionSum: 0 } };
+  return { cards, overall: { gamesTallied: 0, roundLengthSum: 0, faceUpFractionSum: 0, flipEligibleDecisions: 0, flipsChosen: 0 } };
 }
 
 export function createEmptyStats(): PlaytestStats {
@@ -255,7 +271,9 @@ function tallyIntoBucket(
   resolvedCards: ResolvedCard[],
   scores: Record<string, number>,
   playerCount: number,
-  roundsPlayed: number
+  roundsPlayed: number,
+  flipEligibleDecisions: number,
+  flipsChosen: number
 ): void {
   for (const cardId of ALL_CARD_IDS) {
     if (cardId === "Unknown") continue;
@@ -267,6 +285,8 @@ function tallyIntoBucket(
   if (resolvedCards.length > 0) {
     bucket.overall.faceUpFractionSum += resolvedCards.filter((c) => c.faceUp).length / resolvedCards.length;
   }
+  bucket.overall.flipEligibleDecisions += flipEligibleDecisions;
+  bucket.overall.flipsChosen += flipsChosen;
 
   const ranks = computeFractionalRanks(scores);
   const baseline = placementBaseline(playerCount);
@@ -299,7 +319,13 @@ function tallyIntoBucket(
  * (GameState.round at "ended" -- the engine never increments it past the last round
  * actually played, see game.ts's advanceTurn). `centerEffect` defaults to "none" so
  * every existing caller/test that doesn't care about the location breakdown doesn't
- * need updating.
+ * need updating. `flipEligibleDecisions`/`flipsChosen` default to 0 for the same
+ * reason -- every caller that doesn't pass them (session.ts's room stats,
+ * humanStats.ts, most of this file's own tests) simply doesn't contribute to
+ * overallAvgEligibleFlipRate's denominator. Only simulateOneGameSteps (below)
+ * actually counts these today -- see its own doc comment for why they're
+ * accumulated on flipDecisionStats (a shared mutable counter) rather than returned
+ * from the generator directly.
  */
 export function tallyGame(
   stats: PlaytestStats,
@@ -307,13 +333,15 @@ export function tallyGame(
   scores: Record<string, number>,
   playerCount: number,
   roundsPlayed: number,
-  centerEffect: CenterEffectId = "none"
+  centerEffect: CenterEffectId = "none",
+  flipEligibleDecisions = 0,
+  flipsChosen = 0
 ): void {
-  tallyIntoBucket(stats, resolvedCards, scores, playerCount, roundsPlayed);
+  tallyIntoBucket(stats, resolvedCards, scores, playerCount, roundsPlayed, flipEligibleDecisions, flipsChosen);
   if (!stats.byPlayerCount[playerCount]) stats.byPlayerCount[playerCount] = createEmptyBucket();
-  tallyIntoBucket(stats.byPlayerCount[playerCount], resolvedCards, scores, playerCount, roundsPlayed);
+  tallyIntoBucket(stats.byPlayerCount[playerCount], resolvedCards, scores, playerCount, roundsPlayed, flipEligibleDecisions, flipsChosen);
   if (!stats.byCenterEffect[centerEffect]) stats.byCenterEffect[centerEffect] = createEmptyBucket();
-  tallyIntoBucket(stats.byCenterEffect[centerEffect], resolvedCards, scores, playerCount, roundsPlayed);
+  tallyIntoBucket(stats.byCenterEffect[centerEffect], resolvedCards, scores, playerCount, roundsPlayed, flipEligibleDecisions, flipsChosen);
 }
 
 export interface CardStatsRow {
@@ -374,6 +402,27 @@ export function overallAvgFlipRate(bucket: StatsBucket): number | null {
 }
 
 /**
+ * "Of every decision where flipping was legal, what fraction actually resulted in a
+ * flip" -- a DECISION metric, unlike overallAvgFlipRate's OUTCOME one above. The two
+ * can diverge a lot: a card-flip could be legal on nearly every turn but rarely taken
+ * (a low number here) while still leaving most of the board face-up by game end
+ * because forceFaceUp cards and cascading reveals push overallAvgFlipRate up anyway
+ * -- or vice versa. Null (not 0) if no flip-eligible decision has been tallied yet,
+ * same convention as every other average here. Same concept as
+ * lib/playtest/aiArena.ts's ArenaBucketStats.flipEligibleDecisions/flipsChosen
+ * (avgEligibleFlipRate there) -- kept here too so the main playtest page's own
+ * by-player-count/by-location breakdowns can show it without needing that separate
+ * tool. Only ever nonzero for games run via simulateOneGameSteps (the only place
+ * that actually counts flipDecisionStats) -- games tallied through tallyGame's
+ * flipEligibleDecisions/flipsChosen defaulting to 0 (session.ts's live multiplayer
+ * rooms, humanStats.ts) simply don't contribute to this metric, same as they've
+ * never contributed to any other decision-level stat.
+ */
+export function overallAvgEligibleFlipRate(bucket: StatsBucket): number | null {
+  return bucket.overall.flipEligibleDecisions === 0 ? null : bucket.overall.flipsChosen / bucket.overall.flipEligibleDecisions;
+}
+
+/**
  * Plays one full game entirely with AI (greedy heuristic) players to completion,
  * yielding the state after every single action -- lets a caller (the playtest page's
  * "watch games simulate" mode) sample and render intermediate boards instead of only
@@ -383,6 +432,21 @@ export function overallAvgFlipRate(bucket: StatsBucket): number | null {
  * "ended". `simulateOneGame` below is the plain (non-stepped) equivalent for bulk runs
  * that don't need to observe intermediate states.
  */
+/**
+ * Accumulates across simulateOneGameSteps calls -- mirrors lib/ai/hardFast.ts's own
+ * benchmarkTimings pattern (a shared mutable counter a caller reads the delta of
+ * around one game, rather than changing simulateOneGameSteps/simulateOneGame's own
+ * return shape, which every existing caller/test already treats as a plain
+ * GameState). Reset via resetFlipDecisionStats before a batch if you want a clean
+ * delta rather than a running total across many games.
+ */
+export const flipDecisionStats = { eligibleDecisions: 0, chosen: 0 };
+
+export function resetFlipDecisionStats(): void {
+  flipDecisionStats.eligibleDecisions = 0;
+  flipDecisionStats.chosen = 0;
+}
+
 export function* simulateOneGameSteps(
   playerCount: number,
   centerEffect: CenterEffectId,
@@ -397,7 +461,16 @@ export function* simulateOneGameSteps(
 
   while (state.phase === "playing") {
     const activeId = currentPlayerId(state);
+    // Checked BEFORE choosing the action, against the position the AI is actually
+    // deciding from -- same "eligibility on state, then check the returned action's
+    // type" pattern lib/playtest/aiArena.ts's simulateArenaGame uses for its own
+    // identical ArenaBucketStats.flipEligibleDecisions/flipsChosen counters.
+    const flipEligible = getLegalFlipTargets(state).length > 0;
     const action = chooseAiActionForDifficulty(state, activeId, aiDifficulty, rng);
+    if (flipEligible) {
+      flipDecisionStats.eligibleDecisions++;
+      if (action.type === "flip") flipDecisionStats.chosen++;
+    }
     state = applyAction(state, action, rng);
     yield state;
   }
