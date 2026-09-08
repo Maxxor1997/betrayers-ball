@@ -651,11 +651,20 @@ export function chooseHardFastAction(
   const { flipMaxCandidates, flipRoundsAhead } = effectiveFlipSearchSize(state.config.playerCount, options);
   const flipCandidates = rankedFlipCandidates(state, playerId, flipMaxCandidates);
   if (flipCandidates.length > 0) {
-    // `null` as the trailing entry means "don't flip" -- see this function's own doc
+    // `null` as the LEADING entry means "don't flip" -- see this function's own doc
     // comment for why folding it into the same round-robin (instead of comparing a
     // flip candidate's raw average against a fixed constant) is what actually fixes
-    // the player-count-dependent flip rate.
-    const withBaseline: (CardInstance | null)[] = [...flipCandidates, null];
+    // the player-count-dependent flip rate. It goes FIRST, not last: searchBest's
+    // round-robin evaluates candidates in array order and can bail out mid-pass once
+    // its time budget expires (see searchBest's own loop) -- a trailing baseline only
+    // ever got a sample once a FULL pass through every real flip candidate completed
+    // first, which a tight flipTimeBudgetMs frequently can't do outside a JIT-warmed
+    // benchmark loop. Confirmed live: in a real single game, `averages`' last slot
+    // came back `null` on nearly every decision, and baselineAvg !== null is required
+    // below before flip can ever be chosen -- so flipping was silently almost always
+    // blocked. Leading position guarantees baseline gets at least the first sample of
+    // every pass, same as any other candidate would if it went first.
+    const withBaseline: (CardInstance | null)[] = [null, ...flipCandidates];
     const flipSearch = searchBest(
       withBaseline,
       (target) => (target ? { type: "flip", playerId, instanceId: target.instanceId } : null),
@@ -667,11 +676,11 @@ export function chooseHardFastAction(
       rng
     );
     if (flipSearch) {
-      const baselineAvg = flipSearch.averages[flipSearch.averages.length - 1];
+      const baselineAvg = flipSearch.averages[0];
       let bestFlipIdx = -1;
       let bestFlipAvg = -Infinity;
       for (let i = 0; i < flipCandidates.length; i++) {
-        const avg = flipSearch.averages[i];
+        const avg = flipSearch.averages[i + 1];
         if (avg === null) continue;
         if (avg > bestFlipAvg) {
           bestFlipAvg = avg;
