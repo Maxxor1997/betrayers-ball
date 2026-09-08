@@ -155,6 +155,23 @@ describe("chooseHardFastAction", () => {
     const action = chooseHardFastAction(state, "p1", options, deterministicRng(9));
     expect(action.type).not.toBe("flip");
   });
+
+  it("still takes a clearly-good flip even with a zero-length time budget -- guards against a slow/shared CPU (confirmed live on Render) starving every real candidate down to zero samples, not just the baseline", () => {
+    const config = configForPlayerCount(2, "none", "medium");
+    let state = createGame(["p1", "p2"], config, deterministicRng(5), [], 0);
+    const board = new Map(state.board);
+    const pos = { x: state.config.boardBounds.center.x, y: state.config.boardBounds.center.y + 1 };
+    board.set(posKey(pos), { instanceId: "own-1", cardId: "Footman", ownerId: "p1", faceUp: false });
+    state = { ...state, board, round: state.config.flipUnlockRound };
+
+    // A deadline of 0ms is already exceeded before the round-robin's first candidate
+    // ever runs -- without a guaranteed full pass, every candidate (baseline
+    // included) would stay at zero samples and flip could never be taken no matter
+    // how good it is.
+    const options: HardFastOptions = { ...FAST_OPTIONS, flipTimeBudgetMs: 0, flipThreshold: -1000 };
+    const action = chooseHardFastAction(state, "p1", options, deterministicRng(9));
+    expect(action).toEqual({ type: "flip", playerId: "p1", instanceId: "own-1" });
+  });
 });
 
 describe("chooseExpertVote", () => {

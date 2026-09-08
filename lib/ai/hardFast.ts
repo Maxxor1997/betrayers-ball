@@ -505,7 +505,8 @@ function searchBest<T>(
   maxPasses: number,
   state: GameState,
   playerId: string,
-  rng: Rng
+  rng: Rng,
+  guaranteeFullPass = false
 ): { action: GameAction | null; avg: number; averages: (number | null)[] } | null {
   if (candidates.length === 0) return null;
   benchmarkTimings.candidatesEvaluated += candidates.length;
@@ -513,6 +514,31 @@ function searchBest<T>(
   const totals = candidates.map(() => ({ sum: 0, count: 0 }));
   const deadline = performance.now() + timeBudgetMs;
   let passes = 0;
+
+  // `guaranteeFullPass` runs pass 0 to completion regardless of the deadline --
+  // needed because the deadline is only ever checked BEFORE a candidate's
+  // evaluateCandidateOnce call, never during/after it. On hardware where a single
+  // call can itself take longer than the whole budget (confirmed live on Render:
+  // placement decisions logged at 200ms budget taking up to 1.5s real time -- a
+  // single sample can trivially exceed a much smaller flip budget), the deadline
+  // gets blown before the round-robin ever reaches most candidates, so most/all of
+  // them stay at 0 samples ("null" average) no matter how the array is ordered.
+  // Flip's own decision depends on every real candidate having gotten a genuine
+  // chance next to baseline (see chooseHardFastAction) -- without this, a slow/
+  // shared CPU can starve every real flip candidate down to "no data", not just
+  // the baseline, and flip silently never fires no matter what. Only used for the
+  // flip search (a handful of cheap candidates) -- the placement search's own
+  // budget/candidate count stays exactly as before, so this doesn't change
+  // placement's already-tolerated worst-case latency.
+  if (guaranteeFullPass && maxPasses > 0) {
+    for (let i = 0; i < candidates.length; i++) {
+      const value = evaluateCandidateOnce(state, playerId, toAction(candidates[i]), roundsAhead, rng);
+      if (value === null) continue;
+      totals[i].sum += value;
+      totals[i].count++;
+    }
+    passes = 1;
+  }
 
   outer: while (performance.now() < deadline && passes < maxPasses) {
     for (let i = 0; i < candidates.length; i++) {
@@ -673,7 +699,8 @@ export function chooseHardFastAction(
       options.flipMaxPasses ?? Infinity,
       state,
       playerId,
-      rng
+      rng,
+      true // guaranteeFullPass -- see searchBest's own doc comment
     );
     if (flipSearch) {
       const baselineAvg = flipSearch.averages[0];
