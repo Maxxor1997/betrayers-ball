@@ -39,6 +39,12 @@ export interface MultiplayerSession {
   readyForRematch: () => void;
   /** Host-only. Permanently closes the room, lobby or mid-game -- everyone still connected (including the caller) gets bounced to the "room closed" state. */
   endRoom: () => void;
+  /** Lobby-only (pre-start), any seated player (host or guest) -- see GameSession.renameSeat. */
+  renameSelf: (name: string) => void;
+  /** Lobby-only (pre-start), guest-only -- see GameSession.leaveLobby. On success, clears this browser's stored credentials and flips `leftRoom` true. */
+  leaveRoom: () => void;
+  /** True once this browser has successfully left the room via leaveRoom -- render a "you left" state, distinct from roomClosed (which the host caused for everyone). */
+  leftRoom: boolean;
   dispatch: (action: GameAction) => void;
 }
 
@@ -59,6 +65,7 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   const [needsName, setNeedsName] = useState(false);
   const [roomClosed, setRoomClosed] = useState(false);
+  const [leftRoom, setLeftRoom] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -171,6 +178,29 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
     });
   }, [roomCode]);
 
+  const renameSelf = useCallback(
+    (name: string) => {
+      const socket = socketRef.current;
+      const credentials = credentialsRef.current;
+      if (!socket || !credentials) return;
+      socket.emit("room:rename", { roomCode, token: credentials.token, name }, (ack) => {
+        if (!ack.ok) setError(ack.error);
+      });
+    },
+    [roomCode]
+  );
+
+  const leaveRoom = useCallback(() => {
+    const socket = socketRef.current;
+    const credentials = credentialsRef.current;
+    if (!socket || !credentials) return;
+    socket.emit("room:leave", { roomCode, token: credentials.token }, (ack) => {
+      if (!ack.ok) return setError(ack.error);
+      clearCredentials(roomCode);
+      setLeftRoom(true);
+    });
+  }, [roomCode]);
+
   const dispatch = useCallback(
     (action: GameAction) => {
       const socket = socketRef.current;
@@ -191,12 +221,15 @@ export function useMultiplayerSession(roomCode: string): MultiplayerSession {
     myPlayerId,
     needsName,
     roomClosed,
+    leftRoom,
     error,
     join,
     startGame,
     rematch,
     readyForRematch,
     endRoom,
+    renameSelf,
+    leaveRoom,
     dispatch,
   };
 }

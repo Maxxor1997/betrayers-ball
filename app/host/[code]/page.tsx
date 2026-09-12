@@ -19,6 +19,7 @@ import { InstructionsModal } from "@/app/components/InstructionsModal";
 import { LocationTitle } from "@/app/components/LocationTitle";
 import { NewGameModal, NewGameSetup } from "@/app/components/NewGameModal";
 import { RoomStatsModal } from "@/app/components/RoomStatsModal";
+import { QrCode } from "@/app/components/QrCode";
 import { nameFor, SeatRow } from "@/app/join/[code]/page";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
@@ -276,38 +277,45 @@ function DisplayLobby({ roomCode, session }: { roomCode: string; session: Return
 
   return (
     <div className="flex w-full max-w-xl flex-col gap-4 rounded-lg border border-zinc-300 p-5 dark:border-zinc-700">
-      <div>
-        <p className="mb-1 text-sm font-medium">Everyone joins from their own phone:</p>
-        <div className="flex items-center gap-2">
-          <code className="min-w-0 flex-1 overflow-x-auto rounded border border-zinc-300 bg-zinc-50 px-2 py-1.5 text-xs whitespace-nowrap dark:border-zinc-700 dark:bg-zinc-900">
-            {joinUrl}
-          </code>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(joinUrl).then(() => {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              });
-            }}
-            className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-xs whitespace-nowrap hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-          >
-            {copied ? "Copied!" : "Copy"}
-          </button>
-        </div>
-        <p className="mt-2 text-xs text-zinc-500">
-          Or join with just the room code:{" "}
-          <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-sm font-semibold tracking-wide text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100">
-            {roomCode}
-          </span>
-        </p>
-        {roomPassword && (
-          <p className="mt-1 text-xs text-zinc-500">
-            Room password: <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">{roomPassword}</span>
-          </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        {joinUrl && (
+          <div className="flex shrink-0 justify-center">
+            <QrCode value={joinUrl} />
+          </div>
         )}
-        <p className="mt-1 text-xs text-zinc-500">
-          Everyone must be on the same network as this screen. Any empty seats left when you hit Start get filled with AI.
-        </p>
+        <div className="min-w-0 flex-1">
+          <p className="mb-1 text-sm font-medium">Everyone joins from their own phone:</p>
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 overflow-x-auto rounded border border-zinc-300 bg-zinc-50 px-2 py-1.5 text-xs whitespace-nowrap dark:border-zinc-700 dark:bg-zinc-900">
+              {joinUrl}
+            </code>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(joinUrl).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                });
+              }}
+              className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-xs whitespace-nowrap hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-zinc-500">
+            Or join with just the room code:{" "}
+            <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-sm font-semibold tracking-wide text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100">
+              {roomCode}
+            </span>
+          </p>
+          {roomPassword && (
+            <p className="mt-1 text-xs text-zinc-500">
+              Room password: <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">{roomPassword}</span>
+            </p>
+          )}
+          <p className="mt-1 text-xs text-zinc-500">
+            Everyone must be on the same network as this screen. Any empty seats left when you hit Start get filled with AI.
+          </p>
+        </div>
       </div>
 
       <div>

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { AI_TURN_DELAY_MS, chooseAiActionForDifficulty, computeVoteForDifficulty } from "@/lib/ai/difficulty";
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
-import { Rng } from "@/lib/engine/deck";
+import { Rng, shuffle } from "@/lib/engine/deck";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
 import { redactedStateFor } from "@/lib/engine/playerView";
 import { currentPlayerId } from "@/lib/engine/turns";
@@ -36,8 +36,8 @@ export class GameSession {
   /** DISPLAY_VIEWER_ID when displayHosted -- the host has no seat, so this is a pseudo-playerId, not a key into `seats`. */
   readonly hostPlayerId: string;
   private readonly displayHosted: boolean;
-  /** Stored separately from `seats` -- getSummary() needs it even when displayHosted leaves no host seat to read it from. */
-  private readonly hostNameLabel: string;
+  /** Stored separately from `seats` -- getSummary() needs it even when displayHosted leaves no host seat to read it from. Not readonly -- renameSeat can update it for the host same as any other seat. */
+  private hostNameLabel: string;
   private readonly hostTokenValue: string;
   /** Undefined means no password -- the room:join-gating check is skipped entirely, matching the room's pre-password behavior. Never sent back to any client (see getSummary()'s hasPassword instead). */
   private readonly roomPassword?: string;
@@ -217,6 +217,42 @@ export class GameSession {
     return { playerId: seat.playerId, token: seat.token! };
   }
 
+  /**
+   * Lets a seated player (host or guest) change their own display name while still in
+   * the lobby -- pre-start only, same as addPlayer itself; renaming mid-game would
+   * desync every other viewer's already-rendered name history (past turns, votes,
+   * end-screen rows) for no real benefit. Trims/rejects empty the same way addPlayer's
+   * name arg is sanitized by its own caller.
+   */
+  renameSeat(token: string, name: string): { ok: true } | { error: string } {
+    if (this.started) return { error: "Can't rename after the game has started." };
+    const trimmed = name.trim();
+    if (!trimmed) return { error: "Name can't be empty." };
+    const seat = this.requireSeatByToken(token);
+    if ("error" in seat) return seat;
+    seat.name = trimmed;
+    if (this.isHost(token)) this.hostNameLabel = trimmed;
+    this.onLobbyChange(this.getLobbyState());
+    return { ok: true };
+  }
+
+  /**
+   * A guest (never the host -- see room:end for closing the whole room instead)
+   * leaving the lobby before the game starts. Frees the seat entirely (not just
+   * marked disconnected) so the slot re-opens for someone else to join, and the
+   * departing token stops working for any future rejoin.
+   */
+  leaveLobby(token: string): { ok: true } | { error: string } {
+    if (this.started) return { error: "Can't leave once the game has started." };
+    if (this.isHost(token)) return { error: "The host can't leave their own room -- close it instead." };
+    const seat = this.requireSeatByToken(token);
+    if ("error" in seat) return seat;
+    this.seats.delete(seat.playerId);
+    this.touch();
+    this.onLobbyChange(this.getLobbyState());
+    return { ok: true };
+  }
+
   /** Re-attaches a fresh connection (e.g. a page refresh) to an already-claimed seat -- or, for a display-hosted room, back to the host's seatless pseudo-identity. */
   rejoin(token: string): { playerId: string } | { error: string } {
     if (this.displayHosted && token === this.hostTokenValue) {
@@ -262,9 +298,14 @@ export class GameSession {
     if (!this.isHost(callerToken)) return { error: "Only the host can start the game." };
     if (this.started) return { error: "This game has already started." };
 
+    // Shuffled per room -- which specific name a given AI seat gets is random, so
+    // (say) "Sir Loin of Beef" isn't always the same seat every game. Colors are
+    // unaffected: they come from each seat's stable colorIndex (see
+    // PlayerState.colorIndex's own doc comment), never from name assignment.
     let aiIndex = 0;
+    const shuffledAiNames = shuffle(AI_NAMES, this.rng ?? Math.random);
     while (this.seats.size < this.playerCount) {
-      const seat = this.newSeat(AI_NAMES[aiIndex % AI_NAMES.length], true);
+      const seat = this.newSeat(shuffledAiNames[aiIndex % shuffledAiNames.length], true);
       this.seats.set(seat.playerId, seat);
       aiIndex++;
     }
@@ -375,12 +416,20 @@ export class GameSession {
       this.aiTimer = null;
     }
     this.rematchReady.clear();
-    const allIds = [...this.seats.keys()];
-    const aiIds = [...this.seats.values()].filter((s) => s.isAI).map((s) => s.playerId);
     const rand = this.rng ?? Math.random;
+    const seatOrder = [...this.seats.keys()];
+    // Shuffled fresh every deal (not just a random starting index into the seats'
+    // fixed insertion order) -- so who follows whom in turn order actually varies
+    // game to game, including on a rematch/continue, instead of only ever rotating
+    // the same fixed relative sequence to a different starting point. seatOrder
+    // itself (unshuffled) is passed through separately as colorOrder so each seat
+    // keeps its own stable color across every game despite turn order moving --
+    // see PlayerState.colorIndex's own doc comment for why these two can't share
+    // the same array.
+    const allIds = shuffle(seatOrder, rand);
+    const aiIds = [...this.seats.values()].filter((s) => s.isAI).map((s) => s.playerId);
     const config = configForPlayerCount(this.playerCount, this.centerEffect, this.aiDifficulty, rand);
-    const firstPlayerIndex = Math.floor(rand() * allIds.length);
-    this.setState(createGame(allIds, config, this.rng, aiIds, firstPlayerIndex));
+    this.setState(createGame(allIds, config, this.rng, aiIds, 0, seatOrder));
     this.scheduleAiTurnIfNeeded();
   }
 

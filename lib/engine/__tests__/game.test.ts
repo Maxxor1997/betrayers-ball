@@ -48,6 +48,44 @@ describe("createGame", () => {
     const chosenState = createGame(["p1", "p2", "p3"], config, deterministicRng(1), [], 2);
     expect(chosenState.currentPlayerIndex).toBe(2);
   });
+
+  it("defaults colorIndex to array position when no separate colorOrder is given -- single-player's exact prior behavior", () => {
+    const config: GameConfig = {
+      boardBounds: { width: 5, height: 3, center: { x: 2, y: 1 } },
+      handSize: 7,
+      roundCap: 6,
+      flipUnlockRound: 2,
+      centerEffect: "none",
+      minRoundFloor: 1,
+      playerCount: 3,
+      aiDifficulty: "medium",
+    };
+    const state = createGame(["p1", "p2", "p3"], config, deterministicRng(1));
+    expect(state.players.map((p) => p.colorIndex)).toEqual([0, 1, 2]);
+  });
+
+  // Regression test for a real multiplayer bug: turn order is shuffled fresh every
+  // game (see GameSession.dealAndStart), but colorIndex must stay tied to a stable
+  // seat order regardless -- otherwise a seat's card/name color would visibly change
+  // game to game along with its turn-order position, which is exactly what "don't
+  // randomize colors" means.
+  it("keeps colorIndex tied to the given colorOrder, independent of playerIds' own (turn) order", () => {
+    const config: GameConfig = {
+      boardBounds: { width: 5, height: 3, center: { x: 2, y: 1 } },
+      handSize: 7,
+      roundCap: 6,
+      flipUnlockRound: 2,
+      centerEffect: "none",
+      minRoundFloor: 1,
+      playerCount: 3,
+      aiDifficulty: "medium",
+    };
+    // Turn order is p3, p1, p2 -- but color order is the original p1, p2, p3.
+    const state = createGame(["p3", "p1", "p2"], config, deterministicRng(1), [], 0, ["p1", "p2", "p3"]);
+    expect(state.players.map((p) => p.id)).toEqual(["p3", "p1", "p2"]); // turn order unchanged
+    const colorIndexById = Object.fromEntries(state.players.map((p) => [p.id, p.colorIndex]));
+    expect(colorIndexById).toEqual({ p1: 0, p2: 1, p3: 2 }); // color order stays the stable one
+  });
 });
 
 describe("applyAction — round-boundary-only endgame (cap)", () => {

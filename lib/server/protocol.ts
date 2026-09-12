@@ -173,6 +173,15 @@ export interface RematchPayload {
   aiDifficulty: AiDifficulty;
 }
 
+export interface RenameSeatPayload {
+  roomCode: string;
+  token: string;
+  name: string;
+}
+
+/** Same shape as StartRoomPayload -- see GameSession.leaveLobby. Guest-only; the host closes the room instead (room:end). */
+export type LeaveLobbyPayload = StartRoomPayload;
+
 export interface GameActionPayload {
   roomCode: string;
   token: string;
@@ -214,6 +223,10 @@ export interface ClientToServerEvents {
   "room:rematchReady": (payload: RematchReadyPayload, ack: (result: AckResult) => void) => void;
   /** Host-only. Permanently closes the room -- lobby or mid-game, either way -- and removes it from the registry (and so from the home screen's active-sessions list). Everyone still connected gets "room:closed". Same payload shape as room:start. */
   "room:end": (payload: StartRoomPayload, ack: (result: AckResult) => void) => void;
+  /** Lobby-only (pre-start), any seated player (host or guest) renaming themselves -- see GameSession.renameSeat. */
+  "room:rename": (payload: RenameSeatPayload, ack: (result: AckResult) => void) => void;
+  /** Lobby-only (pre-start), guest-only -- see GameSession.leaveLobby. */
+  "room:leave": (payload: LeaveLobbyPayload, ack: (result: AckResult) => void) => void;
   "game:action": (payload: GameActionPayload, ack: (result: AckResult) => void) => void;
   /** No payload -- lists every room still open for a new player to join, for the home screen's "active sessions" picker. */
   "rooms:list": (ack: (result: AckResult<{ rooms: RoomSummary[] }>) => void) => void;

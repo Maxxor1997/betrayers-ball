@@ -88,13 +88,25 @@ export const PLAYER_DOT_COLOR_CLASSES = [
  * sits there; see Board.tsx's ownerColorClass, this function's original home before it
  * needed to be shared with non-board UI too.
  */
-export function playerAccentClass(players: { id: string }[], playerId: string): string {
-  const idx = players.findIndex((p) => p.id === playerId);
+/**
+ * Prefers a player's own stable `colorIndex` (see PlayerState's doc comment) when
+ * present, falling back to plain array position for any caller passing a bare
+ * `{id}[]` that never carried one (tests, tooling) -- keeps color assignment
+ * independent of turn order without breaking anything that predates colorIndex.
+ */
+export function colorIndexFor(players: { id: string; colorIndex?: number }[], playerId: string): number {
+  const player = players.find((p) => p.id === playerId);
+  if (player?.colorIndex !== undefined) return player.colorIndex;
+  return players.findIndex((p) => p.id === playerId);
+}
+
+export function playerAccentClass(players: { id: string; colorIndex?: number }[], playerId: string): string {
+  const idx = colorIndexFor(players, playerId);
   return PLAYER_COLOR_CLASSES[idx] ?? "border-zinc-400 bg-zinc-50 dark:bg-zinc-900";
 }
 
 /** Same indexing as playerAccentClass, for a solid-dot swatch instead of a border+fill box. */
-export function playerDotColorClass(players: { id: string }[], playerId: string): string {
-  const idx = players.findIndex((p) => p.id === playerId);
+export function playerDotColorClass(players: { id: string; colorIndex?: number }[], playerId: string): string {
+  const idx = colorIndexFor(players, playerId);
   return PLAYER_DOT_COLOR_CLASSES[idx] ?? "bg-zinc-400";
 }

@@ -68,6 +68,16 @@ export interface PlayerState {
   id: string;
   hand: CardInstance[];
   isAI: boolean;
+  /**
+   * Stable per-seat index used ONLY for color assignment (see playerAccentClass/
+   * playerDotColorClass in lib/config/players.ts) -- deliberately independent of this
+   * player's position in `GameState.players`, which is turn order and can be
+   * reshuffled every game (see GameSession.dealAndStart) without a seat's color
+   * changing game to game. Optional so any test/tooling that builds a PlayerState by
+   * hand without this field still works -- the color helpers fall back to plain array
+   * position when it's undefined.
+   */
+  colorIndex?: number;
 }
 
 export type CenterEffectId =

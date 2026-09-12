@@ -260,6 +260,79 @@ describe("GameSession lobby", () => {
   });
 });
 
+describe("GameSession renameSeat", () => {
+  it("lets a seated guest rename themselves pre-start, broadcasting the new name", () => {
+    const { session, lobbyPushes } = harness(3);
+    const { playerId, token } = session.addPlayer("Guest") as { playerId: string; token: string };
+    const result = session.renameSeat(token, "Renamed Guest");
+    expect(result).toEqual({ ok: true });
+    expect(session.getLobbyState().seats.find((s) => s.playerId === playerId)?.name).toBe("Renamed Guest");
+    expect(lobbyPushes.at(-1)?.seats.find((s) => s.playerId === playerId)?.name).toBe("Renamed Guest");
+  });
+
+  it("lets the host rename themselves too, updating both the seat and the room summary's hostName", () => {
+    const { session, hostToken } = harness(2);
+    const result = session.renameSeat(hostToken, "New Host Name");
+    expect(result).toEqual({ ok: true });
+    expect(session.getLobbyState().seats.find((s) => s.playerId === session.hostPlayerId)?.name).toBe("New Host Name");
+    expect(session.getSummary().hostName).toBe("New Host Name");
+  });
+
+  it("trims whitespace and rejects an empty name", () => {
+    const { session, hostToken } = harness(2);
+    expect(session.renameSeat(hostToken, "  Padded  ")).toEqual({ ok: true });
+    expect(session.getLobbyState().seats.find((s) => s.playerId === session.hostPlayerId)?.name).toBe("Padded");
+    expect(session.renameSeat(hostToken, "   ")).toEqual({ error: "Name can't be empty." });
+  });
+
+  it("rejects an unrecognized token", () => {
+    const { session } = harness(2);
+    expect(session.renameSeat("not-a-real-token", "Whoever")).toMatchObject({ error: expect.any(String) });
+  });
+
+  it("rejects renaming once the game has started", () => {
+    const { session, hostToken } = harness(2);
+    session.start(hostToken);
+    expect(session.renameSeat(hostToken, "Too Late")).toEqual({ error: "Can't rename after the game has started." });
+  });
+});
+
+describe("GameSession leaveLobby", () => {
+  it("lets a guest leave pre-start, freeing their seat", () => {
+    const { session, lobbyPushes } = harness(3);
+    const result = session.addPlayer("Guest") as { playerId: string; token: string };
+    expect(session.getLobbyState().seats).toHaveLength(2);
+    expect(session.leaveLobby(result.token)).toEqual({ ok: true });
+    expect(session.getLobbyState().seats).toHaveLength(1);
+    expect(lobbyPushes.at(-1)?.seats.map((s) => s.playerId)).not.toContain(result.playerId);
+  });
+
+  it("invalidates the departed token for any future rejoin", () => {
+    const { session } = harness(3);
+    const result = session.addPlayer("Guest") as { playerId: string; token: string };
+    session.leaveLobby(result.token);
+    expect(session.rejoin(result.token)).toMatchObject({ error: expect.any(String) });
+  });
+
+  it("refuses to let the host leave -- they close the room instead", () => {
+    const { session, hostToken } = harness(2);
+    expect(session.leaveLobby(hostToken)).toEqual({ error: "The host can't leave their own room -- close it instead." });
+    expect(session.getLobbyState().seats).toHaveLength(1);
+  });
+
+  it("rejects leaving once the game has started", () => {
+    const { session, hostToken } = harness(3);
+    const result = session.addPlayer("Guest") as { playerId: string; token: string };
+    session.start(hostToken);
+    expect(session.leaveLobby(result.token)).toEqual({ error: "Can't leave once the game has started." });
+  });
+
+  it("rejects an unrecognized token", () => {
+    const { session } = harness(3);
+    expect(session.leaveLobby("not-a-real-token")).toMatchObject({ error: expect.any(String) });
+  });
+});
+
 describe("GameSession display-hosted (Jackbox-style shared screen)", () => {
   it("seats no one for the host -- all playerCount seats are open for real players/AI", () => {
     const { session } = harness(3, 1, true);
@@ -414,6 +487,28 @@ describe("GameSession rematch", () => {
     // fabricated token is guaranteed not to belong to a real seated player.
     const result = session.rematch("not-a-real-token", "none", "medium");
     expect(result).toMatchObject({ error: expect.any(String) });
+  });
+
+  // Regression test for a real reported bug: turn order used to only ever rotate a
+  // fixed relative sequence to a different starting seat, so a given seat always
+  // followed the same other seat every game. dealAndStart now shuffles the whole
+  // order fresh every deal (start and every rematch) -- confirmed here by rematching
+  // many times and checking the actual player sequence (not just the starting seat)
+  // varies -- while colorIndex, tied to the stable original seat order, never does.
+  it("shuffles turn order fresh on every rematch, while keeping each seat's colorIndex fixed", () => {
+    const { session, hostToken, statePushes } = harness(6);
+    session.start(hostToken);
+    const seenOrders = new Set<string>();
+    let colorIndexById: Record<string, number | undefined> | null = null;
+    for (let i = 0; i < 15; i++) {
+      session.rematch(hostToken, "none", "medium");
+      const state = fromWireState(statePushes.at(-1)!.state);
+      seenOrders.add(state.players.map((p) => p.id).join(","));
+      const thisColorIndexById = Object.fromEntries(state.players.map((p) => [p.id, p.colorIndex]));
+      if (colorIndexById === null) colorIndexById = thisColorIndexById;
+      else expect(thisColorIndexById).toEqual(colorIndexById);
+    }
+    expect(seenOrders.size).toBeGreaterThan(1);
   });
 
   it("allows the host to force a new game mid-game, discarding the current one", () => {

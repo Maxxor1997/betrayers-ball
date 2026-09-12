@@ -7,7 +7,7 @@ import { BOLD_LOCATION_ART_IDS, LocationArt } from "@/app/components/LocationArt
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription, KINGSLAYER_BASE_VALUE, KINGSLAYER_INSTANCE_ID } from "@/lib/content/centerEffects";
 import { adjacentPositions, getAdjacentCards, inBounds, isOwnerlessPosition, isPositionFaceUp, parsePosKey } from "@/lib/engine/board";
-import { PLAYER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
+import { colorIndexFor, PLAYER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 import { computeNegatedInstanceIds, computePlagueInfection, flipBoostTargets, flipDisruptionTargets, ResolvedCard } from "@/lib/engine/resolution";
 import { isFlipUnlocked } from "@/lib/engine/turns";
 import { CardId, CardInstance, GameState, Position, posKey } from "@/lib/engine/types";
@@ -17,15 +17,15 @@ import { useHallOfFortunesReveal } from "@/app/hooks/useHallOfFortunesReveal";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { BreakdownPopup } from "./scoreBreakdown";
 
-/** Index-based, not identity-based -- same seat position always gets the same color regardless of who (human or AI, single- or multiplayer) sits there. */
+/** Same seat always gets the same color regardless of who sits there or how turn order shuffles game to game -- see PlayerState.colorIndex's own doc comment. */
 function ownerColorClass(state: GameState, ownerId: string): string {
-  const idx = state.players.findIndex((p) => p.id === ownerId);
+  const idx = colorIndexFor(state.players, ownerId);
   return PLAYER_COLOR_CLASSES[idx] ?? "border-zinc-400";
 }
 
 /** Same idea as ownerColorClass, but a plain `text-*` color -- for the card-back diamond (see card-back-pattern), which reads its color via `bg-current` rather than the button's own border/background classes. */
 function ownerTextColorClass(state: GameState, ownerId: string): string {
-  const idx = state.players.findIndex((p) => p.id === ownerId);
+  const idx = colorIndexFor(state.players, ownerId);
   return PLAYER_TEXT_COLOR_CLASSES[idx] ?? "text-zinc-400";
 }
 
@@ -361,16 +361,14 @@ export function BoardGrid({
   // The Frontier (borderlands) only -- its single Outpost tile glows every time a
   // card lands on the board's edge (occupancy is always public, so this doesn't
   // care about face state), same one-shot flash-then-power-off treatment as Ruin's
-  // own glow. Once every edge cell is finally occupied, the Outpost has nothing
-  // left to watch: instead of glowing forever it crumbles (reusing the same
+  // own glow. Once any corner is occupied, the Outpost crumbles (reusing the same
   // real-icon-copy .card-icon-crumble-piece-1..4 technique as Facestealer/
-  // Infiltrator's own crumble) and stays permanently empty after -- a one-time,
-  // one-way transition, not a Set/epoch since it can only ever happen once per
-  // game (occupied cells never become vacant again).
+  // Infiltrator's own crumble) -- a corner, not the full edge, since requiring
+  // every edge cell to fill first almost never happened in real play.
   const OUTPOST_GLOW_MS = 3000;
   const outpostGlowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outpostCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevEdgeFullRef = useRef(false);
+  const prevCornerOccupiedRef = useRef(false);
   const prevEdgeOccupiedCountRef = useRef(0);
   const [outpostGlowEpoch, setOutpostGlowEpoch] = useState(0);
   const [outpostCrumbling, setOutpostCrumbling] = useState(false);
@@ -749,15 +747,16 @@ export function BoardGrid({
     if (state.config.centerEffect !== "borderlands") return;
     const { width: bw, height: bh } = state.config.boardBounds;
     const onEdge = (p: Position) => p.x === 0 || p.y === 0 || p.x === bw - 1 || p.y === bh - 1;
+    const isCorner = (p: Position) => (p.x === 0 || p.x === bw - 1) && (p.y === 0 || p.y === bh - 1);
     const edgePositions: Position[] = [];
     for (let x = 0; x < bw; x++)
       for (let y = 0; y < bh; y++) if (onEdge({ x, y })) edgePositions.push({ x, y });
     const occupiedCount = edgePositions.filter((p) => state.board.has(posKey(p))).length;
-    const edgeFullNow = occupiedCount === edgePositions.length;
+    const cornerOccupiedNow = edgePositions.some((p) => isCorner(p) && state.board.has(posKey(p)));
     const prevOccupiedCount = prevEdgeOccupiedCountRef.current;
     prevEdgeOccupiedCountRef.current = occupiedCount;
 
-    if (edgeFullNow && !prevEdgeFullRef.current) {
+    if (cornerOccupiedNow && !prevCornerOccupiedRef.current) {
       if (outpostGlowTimerRef.current) clearTimeout(outpostGlowTimerRef.current);
       setOutpostGlowEpoch(0);
       setOutpostCrumbling(true);
@@ -766,7 +765,7 @@ export function BoardGrid({
         setOutpostCrumbling(false);
         setOutpostCollapsed(true);
       }, CRUMBLE_MS);
-    } else if (!edgeFullNow) {
+    } else if (!cornerOccupiedNow) {
       if (outpostCollapsed || outpostCrumbling) {
         if (outpostCollapseTimerRef.current) clearTimeout(outpostCollapseTimerRef.current);
         setOutpostCrumbling(false);
@@ -778,7 +777,7 @@ export function BoardGrid({
         outpostGlowTimerRef.current = setTimeout(() => setOutpostGlowEpoch(0), OUTPOST_GLOW_MS);
       }
     }
-    prevEdgeFullRef.current = edgeFullNow;
+    prevCornerOccupiedRef.current = cornerOccupiedNow;
   }, [state.board, state.config.boardBounds, state.config.centerEffect, outpostCollapsed, outpostCrumbling]);
 
   // No Man's Land (Trench) -- same reasoning as the Outpost's own dedicated effect

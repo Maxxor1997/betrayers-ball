@@ -95,7 +95,8 @@ function Room() {
   }, [session.connected, session.needsName, roomCode]);
 
   const isHost = !!session.lobby && session.myPlayerId === session.lobby.hostPlayerId;
-  const showGame = !session.roomClosed && session.connected && !session.needsName && session.lobby?.started && session.gameState && session.myPlayerId;
+  const showGame =
+    !session.roomClosed && !session.leftRoom && session.connected && !session.needsName && session.lobby?.started && session.gameState && session.myPlayerId;
   const gameEnded = session.gameState?.phase === "ended";
 
   const header = (
@@ -270,17 +271,26 @@ function Room() {
         </div>
       )}
 
-      {!session.roomClosed && !session.connected && session.connectFailed && <MultiplayerUnavailableBanner />}
+      {!session.roomClosed && session.leftRoom && (
+        <div className="flex w-full max-w-xs flex-col items-center gap-3 rounded-lg border border-zinc-300 p-5 text-center dark:border-zinc-700">
+          <p className="text-sm font-medium">You left the room.</p>
+          <Link href="/" className="rounded-full bg-zinc-900 px-4 py-1.5 text-sm text-white dark:bg-zinc-100 dark:text-black">
+            Back to home
+          </Link>
+        </div>
+      )}
 
-      {!session.roomClosed && !session.connected && !session.connectFailed && (
+      {!session.roomClosed && !session.leftRoom && !session.connected && session.connectFailed && <MultiplayerUnavailableBanner />}
+
+      {!session.roomClosed && !session.leftRoom && !session.connected && !session.connectFailed && (
         <p className="text-sm text-zinc-500">Connecting to the game server…</p>
       )}
 
-      {!session.roomClosed && session.connected && session.needsName && (
+      {!session.roomClosed && !session.leftRoom && session.connected && session.needsName && (
         <NameEntry onJoin={session.join} error={session.error} showPassword={roomHasPassword !== false} />
       )}
 
-      {!session.roomClosed && session.connected && !session.needsName && !session.lobby?.started && (
+      {!session.roomClosed && !session.leftRoom && session.connected && !session.needsName && !session.lobby?.started && (
         <Lobby roomCode={roomCode} session={session} />
       )}
     </div>
@@ -340,8 +350,10 @@ function NameEntry({
 }
 
 function Lobby({ roomCode, session }: { roomCode: string; session: ReturnType<typeof useMultiplayerSession> }) {
-  const { lobby, myPlayerId, error, startGame } = session;
+  const { lobby, myPlayerId, error, startGame, renameSelf, leaveRoom } = session;
   const [copied, setCopied] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
   // The server's own LAN-reachable origin (see lib/server/network.ts's getLanOrigin),
   // not window.location.origin -- the host almost always loaded this via "localhost",
   // which is meaningless to share with a different device.
@@ -394,9 +406,37 @@ function Lobby({ roomCode, session }: { roomCode: string; session: ReturnType<ty
           Players ({lobby?.seats.length ?? 0} / {lobby?.playerCount ?? "?"})
         </p>
         <ul className="flex flex-col gap-1">
-          {lobby?.seats.map((seat) => (
-            <SeatRow key={seat.playerId} seat={seat} isHost={seat.playerId === lobby.hostPlayerId} isYou={seat.playerId === myPlayerId} />
-          ))}
+          {lobby?.seats.map((seat) => {
+            const isYou = seat.playerId === myPlayerId;
+            return (
+              <SeatRow
+                key={seat.playerId}
+                seat={seat}
+                isHost={seat.playerId === lobby.hostPlayerId}
+                isYou={isYou}
+                editing={isYou && editingName}
+                nameDraft={nameDraft}
+                onNameDraftChange={setNameDraft}
+                onStartEdit={
+                  isYou
+                    ? () => {
+                        setNameDraft(seat.name);
+                        setEditingName(true);
+                      }
+                    : undefined
+                }
+                onSaveEdit={
+                  isYou
+                    ? () => {
+                        if (nameDraft.trim()) renameSelf(nameDraft);
+                        setEditingName(false);
+                      }
+                    : undefined
+                }
+                onCancelEdit={isYou ? () => setEditingName(false) : undefined}
+              />
+            );
+          })}
           {lobby &&
             Array.from({ length: Math.max(0, lobby.playerCount - lobby.seats.length) }).map((_, i) => (
               <li key={`open-${i}`} className="rounded border border-dashed border-zinc-300 px-2 py-1 text-xs text-zinc-400 dark:border-zinc-700">
@@ -414,6 +454,15 @@ function Lobby({ roomCode, session }: { roomCode: string; session: ReturnType<ty
 
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
 
+      {!isHost && (
+        <button
+          onClick={leaveRoom}
+          className="self-start rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900"
+        >
+          Leave lobby
+        </button>
+      )}
+
       {isHost ? (
         <button onClick={startGame} className="rounded-full bg-zinc-900 px-4 py-2 text-sm text-white dark:bg-zinc-100 dark:text-black">
           Start game
@@ -425,19 +474,69 @@ function Lobby({ roomCode, session }: { roomCode: string; session: ReturnType<ty
   );
 }
 
-export function SeatRow({ seat, isHost, isYou }: { seat: SeatInfo; isHost: boolean; isYou: boolean }) {
+export function SeatRow({
+  seat,
+  isHost,
+  isYou,
+  editing,
+  nameDraft,
+  onNameDraftChange,
+  onStartEdit,
+  onSaveEdit,
+  onCancelEdit,
+}: {
+  seat: SeatInfo;
+  isHost: boolean;
+  isYou: boolean;
+  /** The remaining props are all optional -- only /join's own Lobby (never host's read-only seat list) ever wires up renaming. */
+  editing?: boolean;
+  nameDraft?: string;
+  onNameDraftChange?: (name: string) => void;
+  onStartEdit?: () => void;
+  onSaveEdit?: () => void;
+  onCancelEdit?: () => void;
+}) {
   return (
     <li
       className={`flex items-center justify-between gap-2 rounded border px-2 py-1 text-sm ${
         seat.connected || seat.isAI ? "border-zinc-300 dark:border-zinc-700" : "border-zinc-200 opacity-50 dark:border-zinc-800"
       }`}
     >
-      <span>
-        {seat.name}
-        {isYou && <span className="text-zinc-500"> (you)</span>}
-        {isHost && <span className="text-zinc-500"> · host</span>}
-      </span>
-      <span className="text-[10px] tracking-wide text-zinc-400 uppercase">
+      {editing ? (
+        <form
+          className="flex min-w-0 flex-1 items-center gap-1"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSaveEdit?.();
+          }}
+        >
+          <input
+            autoFocus
+            value={nameDraft ?? ""}
+            onChange={(e) => onNameDraftChange?.(e.target.value)}
+            maxLength={30}
+            className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-sm dark:border-zinc-600 dark:bg-zinc-900"
+          />
+          <button type="submit" className="shrink-0 rounded-full bg-zinc-900 px-2 py-0.5 text-xs text-white dark:bg-zinc-100 dark:text-black">
+            Save
+          </button>
+          <button type="button" onClick={onCancelEdit} className="shrink-0 text-xs text-zinc-500 hover:underline">
+            Cancel
+          </button>
+        </form>
+      ) : (
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="truncate">{seat.name}</span>
+          {isYou && <span className="shrink-0 text-zinc-500"> (you)</span>}
+          {isHost && <span className="shrink-0 text-zinc-500"> · host</span>}
+          {onStartEdit && (
+            <button onClick={onStartEdit} className="shrink-0 text-xs text-zinc-400 hover:text-zinc-700 hover:underline dark:hover:text-zinc-200">
+              Edit
+            </button>
+          )}
+        </span>
+      )}
+      <span className="shrink-0 text-[10px] tracking-wide text-zinc-400 uppercase">
         {seat.isAI ? "AI" : seat.connected ? "connected" : "disconnected"}
       </span>
     </li>

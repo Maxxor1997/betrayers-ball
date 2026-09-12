@@ -6,16 +6,16 @@ import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveToo
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectDescription } from "@/lib/content/centerEffects";
-import { PLAYER_TEXT_COLOR_CLASSES, playerDotColorClass } from "@/lib/config/players";
+import { colorIndexFor, PLAYER_TEXT_COLOR_CLASSES, playerDotColorClass } from "@/lib/config/players";
 import { estimatedResolutionFor } from "@/lib/engine/endgame";
 import { roundRotationShiftFor } from "@/lib/engine/game";
-import { currentPlayerId } from "@/lib/engine/turns";
+import { currentPlayerId, firstFlipUnlockRound } from "@/lib/engine/turns";
 import { CardInstance, GameState } from "@/lib/engine/types";
 import { BreakdownPopup } from "./scoreBreakdown";
 
-/** Index-based, not identity-based -- same as Board.tsx's ownerColorClass, just the text-color palette. */
+/** Same as Board.tsx's ownerColorClass, just the text-color palette -- stable per-seat colorIndex, not turn-order position. */
 function ownerTextColorClass(state: GameState, ownerId: string): string {
-  const idx = state.players.findIndex((p) => p.id === ownerId);
+  const idx = colorIndexFor(state.players, ownerId);
   return PLAYER_TEXT_COLOR_CLASSES[idx] ?? "text-zinc-500";
 }
 
@@ -331,7 +331,7 @@ export function GameStatusPanel({
     flipText = "now";
   } else {
     flipLabel = "Flip unlocks";
-    flipNumber = state.config.flipUnlockRound;
+    flipNumber = firstFlipUnlockRound(state.config);
   }
 
   const votingOpen = state.round >= state.config.minRoundFloor;

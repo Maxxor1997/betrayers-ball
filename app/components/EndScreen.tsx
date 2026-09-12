@@ -3,18 +3,18 @@
 import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
-import { PLAYER_BORDER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
+import { colorIndexFor, PLAYER_BORDER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
 import { ResolutionResult, ResolvedCard } from "@/lib/engine/resolution";
 import { GameState } from "@/lib/engine/types";
 import { BreakdownPopup } from "./scoreBreakdown";
 
-/** Index-based, not identity-based -- same reasoning as Board.tsx's ownerColorClass. */
+/** Same reasoning as Board.tsx's ownerColorClass -- stable per-seat colorIndex, not turn-order position. */
 function ownerTextColorClass(state: GameState, ownerId: string): string {
-  const idx = state.players.findIndex((p) => p.id === ownerId);
+  const idx = colorIndexFor(state.players, ownerId);
   return PLAYER_TEXT_COLOR_CLASSES[idx] ?? "text-zinc-500";
 }
 function ownerBorderColorClass(state: GameState, ownerId: string): string {
-  const idx = state.players.findIndex((p) => p.id === ownerId);
+  const idx = colorIndexFor(state.players, ownerId);
   return PLAYER_BORDER_COLOR_CLASSES[idx] ?? "border-zinc-300 dark:border-zinc-700";
 }
 

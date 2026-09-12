@@ -141,6 +141,30 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
       ack({ ok: true });
     });
 
+    socket.on("room:rename", ({ roomCode, token, name }, ack) => {
+      const session = registry.get(roomCode);
+      if (!session) return ack({ ok: false, error: "No game found at that room code." });
+      const result = session.renameSeat(token, name);
+      ack("error" in result ? { ok: false, error: result.error } : { ok: true });
+    });
+
+    socket.on("room:leave", ({ roomCode, token }, ack) => {
+      const session = registry.get(roomCode);
+      if (!session) return ack({ ok: false, error: "No game found at that room code." });
+      const attachment = attachments.get(socket.id);
+      const result = session.leaveLobby(token);
+      if ("error" in result) return ack({ ok: false, error: result.error });
+      // Detach this socket from the room it just left -- otherwise it would keep
+      // receiving lobby:update broadcasts (and, if the room later starts, game:state)
+      // for a room it's no longer seated in.
+      if (attachment && attachment.roomCode === roomCode) {
+        socket.leave(`${roomCode}:${attachment.playerId}`);
+        socket.leave(roomCode);
+        attachments.delete(socket.id);
+      }
+      ack({ ok: true });
+    });
+
     socket.on("game:action", ({ roomCode, token, action }, ack) => {
       const session = registry.get(roomCode);
       if (!session) return ack({ ok: false, error: "No game found at that room code." });

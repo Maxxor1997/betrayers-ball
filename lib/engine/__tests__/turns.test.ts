@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyFlip, applyPass, applyPlace, getLegalFlipTargets, getLegalPlacementCells, mustPass } from "../turns";
+import { applyFlip, applyPass, applyPlace, firstFlipUnlockRound, getLegalFlipTargets, getLegalPlacementCells, mustPass } from "../turns";
 import { Board, CardId, CardInstance, GameConfig, GameState, posKey } from "../types";
 
 const CONFIG: GameConfig = {
@@ -240,6 +240,20 @@ describe("flipping — Shadowlands", () => {
     const c2 = state.board.get("2,3")!;
     const next = applyFlip(state, { type: "flip", playerId: "p1", instanceId: c1.instanceId });
     expect(() => applyFlip(next, { type: "flip", playerId: "p1", instanceId: c2.instanceId })).toThrow();
+  });
+});
+
+describe("firstFlipUnlockRound", () => {
+  it("matches config.flipUnlockRound when no center effect overrides the gate", () => {
+    expect(firstFlipUnlockRound(CONFIG)).toBe(CONFIG.flipUnlockRound);
+  });
+
+  // Regression test for the flip-status UI bug: it read config.flipUnlockRound
+  // directly and showed "2" under Shadowlands even though flips don't actually
+  // unlock there until round 3 (see flipGate's extra +1).
+  it("accounts for Shadowlands' flipGate override, one round later than the base config", () => {
+    const shadowlandsConfig: GameConfig = { ...CONFIG, centerEffect: "shadowlands" };
+    expect(firstFlipUnlockRound(shadowlandsConfig)).toBe(CONFIG.flipUnlockRound + 1);
   });
 });
 

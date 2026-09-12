@@ -52,7 +52,15 @@ export function createGame(
   config: GameConfig = DEFAULT_2P_CONFIG,
   rng?: Rng,
   aiPlayerIds: Iterable<string> = [],
-  firstPlayerIndex = 0
+  firstPlayerIndex = 0,
+  /**
+   * The stable order used for each player's `colorIndex` (see PlayerState's own doc
+   * comment) -- defaults to `playerIds` itself, so every existing caller (every
+   * single-player game, every test) keeps its current behavior of "seat position ==
+   * color" exactly. A caller that wants turn order shuffled independently of color
+   * (see GameSession.dealAndStart) passes its own stable seat order here instead.
+   */
+  colorOrder: string[] = playerIds
 ): GameState {
   const effectiveRng = rng ?? Math.random;
   // Hall of Fortunes: nobody is dealt a real starting hand -- every player starts
@@ -65,7 +73,7 @@ export function createGame(
   const handSize = config.centerEffect === "reckoning" ? 0 : config.handSize;
   const { players, remainingDeck } = dealNewGame(playerIds, handSize, effectiveRng);
   const aiIds = new Set(aiPlayerIds);
-  const finalPlayers = players.map((p) => ({ ...p, isAI: aiIds.has(p.id) }));
+  const finalPlayers = players.map((p) => ({ ...p, isAI: aiIds.has(p.id), colorIndex: colorOrder.indexOf(p.id) }));
   const state: GameState = {
     config,
     board: new Map(),

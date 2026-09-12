@@ -41,6 +41,22 @@ export function isFlipUnlocked(round: number, config: GameConfig): boolean {
 }
 
 /**
+ * The actual first round flips become legal, accounting for a center effect's own
+ * `flipGate` override (e.g. shadowlands' extra round of delay) -- unlike reading
+ * `config.flipUnlockRound` directly, which is only the *base* threshold and ignores
+ * any override, the exact bug this was added to fix (the flip-status UI showed "2"
+ * under shadowlands when the real unlock round was 3). Probes forward from round 1
+ * via `isFlipUnlocked` itself rather than hardcoding a per-effect offset, so it stays
+ * correct for any future round-gating effect too.
+ */
+export function firstFlipUnlockRound(config: GameConfig): number {
+  for (let round = 1; round <= config.roundCap + 1; round++) {
+    if (isFlipUnlocked(round, config)) return round;
+  }
+  return config.flipUnlockRound;
+}
+
+/**
  * Any face-down card on the board, any owner — the legal flip targets right now.
  * Except a card marked `opponentOnlyFlip` (see lib/content/cards.ts): its own owner
  * can't flip it, only an opponent can. A center effect can further narrow this via
