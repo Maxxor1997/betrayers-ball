@@ -298,14 +298,12 @@ export class GameSession {
     if (!this.isHost(callerToken)) return { error: "Only the host can start the game." };
     if (this.started) return { error: "This game has already started." };
 
-    // Shuffled per room -- which specific name a given AI seat gets is random, so
-    // (say) "Sir Loin of Beef" isn't always the same seat every game. Colors are
-    // unaffected: they come from each seat's stable colorIndex (see
-    // PlayerState.colorIndex's own doc comment), never from name assignment.
+    // Placeholder names -- dealAndStart (called right below) reshuffles every AI
+    // seat's name on every deal, this call included, so what's assigned here never
+    // actually reaches a player's screen.
     let aiIndex = 0;
-    const shuffledAiNames = shuffle(AI_NAMES, this.rng ?? Math.random);
     while (this.seats.size < this.playerCount) {
-      const seat = this.newSeat(shuffledAiNames[aiIndex % shuffledAiNames.length], true);
+      const seat = this.newSeat(AI_NAMES[aiIndex % AI_NAMES.length], true);
       this.seats.set(seat.playerId, seat);
       aiIndex++;
     }
@@ -427,7 +425,16 @@ export class GameSession {
     // see PlayerState.colorIndex's own doc comment for why these two can't share
     // the same array.
     const allIds = shuffle(seatOrder, rand);
-    const aiIds = [...this.seats.values()].filter((s) => s.isAI).map((s) => s.playerId);
+    const aiSeats = [...this.seats.values()].filter((s) => s.isAI);
+    // Reassigned fresh on every deal too, same reasoning as turn order above -- a
+    // rematch/continue re-fills the SAME seats rather than recreating them, so
+    // without this an AI seat's name would only ever have been randomized once, at
+    // whatever the room's very first Start happened to roll.
+    const shuffledAiNames = shuffle(AI_NAMES, rand);
+    aiSeats.forEach((seat, i) => {
+      seat.name = shuffledAiNames[i % shuffledAiNames.length];
+    });
+    const aiIds = aiSeats.map((s) => s.playerId);
     const config = configForPlayerCount(this.playerCount, this.centerEffect, this.aiDifficulty, rand);
     this.setState(createGame(allIds, config, this.rng, aiIds, 0, seatOrder));
     this.scheduleAiTurnIfNeeded();

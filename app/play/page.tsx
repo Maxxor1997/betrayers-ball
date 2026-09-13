@@ -6,6 +6,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { applyAction, configForPlayerCount, createGame } from "@/lib/engine/game";
+import { shuffle } from "@/lib/engine/deck";
 import { ResolutionResult, resolveBoard } from "@/lib/engine/resolution";
 import { currentPlayerId, getLegalFlipTargets, getLegalPlacementCells, isFlipUnlocked, mustPass, offeredCardsFor } from "@/lib/engine/turns";
 import { AiDifficulty, CenterEffectId, GameAction, GameState, Position, posKey } from "@/lib/engine/types";
@@ -84,11 +85,21 @@ function pickRandomCenterEffect(playerCount: number): CenterEffectId {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
+// Reshuffled every time newGameState runs (every new game/rematch), so a given AI
+// seat position doesn't always show the same name every game -- same reasoning as
+// multiplayer's own per-deal AI name reshuffle in GameSession.dealAndStart. Module-
+// level rather than component state purely to avoid threading an extra parameter
+// through every ownerDisplayName call site (there are many, several of them plain
+// markdown-export helpers) -- safe here since a single browser tab only ever has one
+// active single-player game at a time.
+let currentAiNameOrder: string[] = AI_NAMES;
+
 function newGameState(playerCount: number, centerEffect: CenterEffectId, aiDifficulty: AiDifficulty): GameState {
   const playerIds = buildPlayerIds(playerCount);
   const aiPlayerIds = playerIds.filter((id) => id !== HUMAN);
   const config = configForPlayerCount(playerCount, centerEffect, aiDifficulty);
   const firstPlayerIndex = Math.floor(Math.random() * playerIds.length);
+  currentAiNameOrder = shuffle(AI_NAMES);
   return createGame(playerIds, config, undefined, aiPlayerIds, firstPlayerIndex);
 }
 
@@ -99,7 +110,7 @@ function newGameState(playerCount: number, centerEffect: CenterEffectId, aiDiffi
 function ownerDisplayName(state: GameState, ownerId: string): string {
   if (ownerId === HUMAN) return "You";
   const aiIndex = state.players.filter((p) => p.id !== HUMAN).findIndex((p) => p.id === ownerId);
-  return AI_NAMES[aiIndex] ?? `AI ${aiIndex + 1}`;
+  return currentAiNameOrder[aiIndex] ?? `AI ${aiIndex + 1}`;
 }
 
 /**
