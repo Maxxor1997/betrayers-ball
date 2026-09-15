@@ -4,6 +4,7 @@ import { clearActiveTooltip, setActiveTooltip, toggleActiveTooltip, useActiveToo
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { colorIndexFor, PLAYER_BORDER_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } from "@/lib/config/players";
+import { computeStandardRanking, ordinal } from "@/lib/engine/endgame";
 import { ResolutionResult, ResolvedCard } from "@/lib/engine/resolution";
 import { GameState } from "@/lib/engine/types";
 import { BreakdownPopup } from "./scoreBreakdown";
@@ -16,22 +17,6 @@ function ownerTextColorClass(state: GameState, ownerId: string): string {
 function ownerBorderColorClass(state: GameState, ownerId: string): string {
   const idx = colorIndexFor(state.players, ownerId);
   return PLAYER_BORDER_COLOR_CLASSES[idx] ?? "border-zinc-300 dark:border-zinc-700";
-}
-
-/** "1st"/"2nd"/"3rd"/"4th", handling the 11th/12th/13th exception. */
-function ordinal(n: number): string {
-  const rem100 = n % 100;
-  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
-  switch (n % 10) {
-    case 1:
-      return `${n}st`;
-    case 2:
-      return `${n}nd`;
-    case 3:
-      return `${n}rd`;
-    default:
-      return `${n}th`;
-  }
 }
 
 function PlayerTable({
@@ -184,17 +169,9 @@ export function EndScreen({
         ? "you win!"
         : `${nameFor(gameResult.winnerIds[0])} wins.`;
 
-  // Standard competition ranking (1, 2, 2, 4 -- a tie doesn't compress the ranks below
-  // it), highest score first. `rankByPlayerId` and `countAtRank` together let each
-  // player's row say e.g. "2nd place" or "Tied for 2nd place".
-  const rankedPlayerIds = state.players.map((p) => p.id).sort((a, b) => gameResult.scores[b] - gameResult.scores[a]);
-  const rankByPlayerId = new Map<string, number>();
-  const countAtRank = new Map<number, number>();
-  rankedPlayerIds.forEach((id, i) => {
-    const rank = i === 0 || gameResult.scores[id] !== gameResult.scores[rankedPlayerIds[i - 1]] ? i + 1 : rankByPlayerId.get(rankedPlayerIds[i - 1])!;
-    rankByPlayerId.set(id, rank);
-    countAtRank.set(rank, (countAtRank.get(rank) ?? 0) + 1);
-  });
+  const playerIds = state.players.map((p) => p.id);
+  const rankedPlayerIds = [...playerIds].sort((a, b) => gameResult.scores[b] - gameResult.scores[a]);
+  const { rankByPlayerId, countAtRank } = computeStandardRanking(playerIds, gameResult.scores);
   const placeLabel = (id: string): string => {
     const rank = rankByPlayerId.get(id)!;
     const ord = ordinal(rank);

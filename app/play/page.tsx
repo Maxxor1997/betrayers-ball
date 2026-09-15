@@ -27,6 +27,7 @@ import { visibleBreakdown } from "@/app/components/scoreBreakdown";
 import { GameStatusPanel } from "@/app/components/GameStatusPanel";
 import { TurnActionChecklist } from "@/app/components/TurnActionChecklist";
 import { EndScreen } from "@/app/components/EndScreen";
+import { RoundEndOverlay } from "@/app/components/RoundEndOverlay";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
 import { useHallOfFortunesReveal } from "@/app/hooks/useHallOfFortunesReveal";
@@ -598,6 +599,7 @@ function Game() {
 
       {showInstructions && <InstructionsModal onClose={() => setShowInstructions(false)} />}
       {showMyStats && <MyStatsModal onClose={() => setShowMyStats(false)} />}
+      <RoundEndOverlay state={state} viewerId={HUMAN} nameFor={(id) => ownerDisplayName(state, id)} />
 
       {/* Always mounted with a reserved min-height, even when empty -- this area's
           content changes on almost every turn transition (human selects a card, AI's

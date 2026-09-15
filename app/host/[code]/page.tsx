@@ -11,6 +11,7 @@ import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
 import { BoardGrid } from "@/app/components/Board";
 import { GameStatusPanel } from "@/app/components/GameStatusPanel";
 import { EndScreen } from "@/app/components/EndScreen";
+import { RoundEndOverlay } from "@/app/components/RoundEndOverlay";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { HomeIcon } from "@/app/components/HomeIcon";
 import { CardCatalog } from "@/app/components/CardCatalog";
@@ -383,6 +384,7 @@ function DisplayGameView({
 
   return (
     <div className="flex w-full flex-1 flex-col gap-6 lg:flex-row lg:items-start lg:justify-center">
+      <RoundEndOverlay state={state} viewerId={DISPLAY_VIEWER_ID} nameFor={(id) => nameFor(lobby, id)} />
       <CardCatalog
         playerCount={lobby.playerCount}
         opponentVisibleBoardCardIds={opponentVisibleBoardCardIds}

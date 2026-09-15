@@ -49,6 +49,40 @@ export function computeGameResult(
 }
 
 /**
+ * Standard competition ranking (1, 2, 2, 4 -- a tie doesn't compress the ranks below
+ * it), highest score first. Shared so EndScreen and RoundEndOverlay compute the exact
+ * same "2nd place"/"Tied for 2nd place" labels off the same rule, rather than each
+ * reimplementing it (EndScreen originally did, inline).
+ */
+export function computeStandardRanking(playerIds: string[], scores: Record<string, number>): { rankByPlayerId: Map<string, number>; countAtRank: Map<number, number> } {
+  const rankedPlayerIds = [...playerIds].sort((a, b) => scores[b] - scores[a]);
+  const rankByPlayerId = new Map<string, number>();
+  const countAtRank = new Map<number, number>();
+  rankedPlayerIds.forEach((id, i) => {
+    const rank = i === 0 || scores[id] !== scores[rankedPlayerIds[i - 1]] ? i + 1 : rankByPlayerId.get(rankedPlayerIds[i - 1])!;
+    rankByPlayerId.set(id, rank);
+    countAtRank.set(rank, (countAtRank.get(rank) ?? 0) + 1);
+  });
+  return { rankByPlayerId, countAtRank };
+}
+
+/** "1st"/"2nd"/"3rd"/"4th", handling the 11th/12th/13th exception. Shared by EndScreen and RoundEndOverlay. */
+export function ordinal(n: number): string {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
+}
+
+/**
  * Full board resolution using only what `viewerId` could actually know -- their own
  * cards (face-up or not) plus anything face-up on the board; an opponent's
  * still-hidden card resolves as the neutral "Unknown" pseudo-card (see
