@@ -29,6 +29,7 @@ import { GameStatusPanel } from "@/app/components/GameStatusPanel";
 import { TurnActionChecklist } from "@/app/components/TurnActionChecklist";
 import { EndScreen } from "@/app/components/EndScreen";
 import { RoundEndOverlay } from "@/app/components/RoundEndOverlay";
+import { useRoundEndOverlayActive } from "@/app/hooks/roundEndOverlayActive";
 import { SOUNDS } from "@/lib/audio/sounds";
 import { playSound } from "@/lib/audio/soundManager";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
@@ -349,15 +350,22 @@ function Game() {
   // Drive the AI's turn(s) automatically. A turn can be up to two actions (an
   // optional flip, then a place/pass); this effect re-fires after each one while
   // it's still an AI's turn, so both actions play out with a short pause between.
+  // Paused while RoundEndOverlay is showing -- it used to keep dispatching AI turns
+  // underneath the overlay, so by the time a reveal (especially a queued multi-
+  // boundary burst) finished, several AI turns had already played out invisibly.
+  // Re-included in the dependency array so the effect re-fires (and reschedules a
+  // fresh AI_TURN_DELAY_MS pause) the instant the overlay closes, rather than
+  // resuming mid-way through a stale timer.
+  const overlayActive = useRoundEndOverlayActive();
   useEffect(() => {
-    if (!isAiTurn) return;
+    if (!isAiTurn || overlayActive) return;
     const timer = setTimeout(() => {
       const action = chooseAiActionForDifficulty(state, currentPlayerId(state), state.config.aiDifficulty);
       dispatch(action);
     }, AI_TURN_DELAY_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, isAiTurn]);
+  }, [state, isAiTurn, overlayActive]);
 
   // Folds this finished game into the human's own personal stats (see
   // lib/playtest/humanStats.ts) -- separate from the playtest page's bulk AI-sim

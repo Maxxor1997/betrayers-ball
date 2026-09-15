@@ -7,6 +7,7 @@ import { currentPlayerId } from "@/lib/engine/turns";
 import { GameState } from "@/lib/engine/types";
 import { SOUNDS } from "@/lib/audio/sounds";
 import { playSound } from "@/lib/audio/soundManager";
+import { setRoundEndOverlayActive } from "@/app/hooks/roundEndOverlayActive";
 
 const FLIP_STAGGER_MS = 600;
 const BANNER_HOLD_CONTINUE_MS = 2000;
@@ -107,6 +108,21 @@ export function RoundEndOverlay({ state, viewerId, nameFor }: { state: GameState
   };
 
   useEffect(() => clearTimers, []);
+
+  // Lets a page's own AI-turn driver (currently just /play's) pause while this is
+  // showing -- see roundEndOverlayActive.ts's own doc comment for why. Two separate
+  // effects rather than one with a cleanup: a single effect's cleanup fires between
+  // every re-invocation, not just on unmount, which would flip this false-then-true
+  // on every stage change instead of just tracking it directly.
+  useEffect(() => {
+    setRoundEndOverlayActive(stage !== "idle");
+  }, [stage]);
+
+  // Defensive only (no page unmounts this mid-reveal today) -- resets the flag on a
+  // genuine unmount so it can never get stuck true forever.
+  useEffect(() => {
+    return () => setRoundEndOverlayActive(false);
+  }, []);
 
   const startEvent = (event: RoundEvent) => {
     clearTimers();
