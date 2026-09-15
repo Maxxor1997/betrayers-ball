@@ -5,6 +5,8 @@ import { colorIndexFor, PLAYER_DOT_COLOR_CLASSES, PLAYER_TEXT_COLOR_CLASSES } fr
 import { computeStandardRanking, ordinal } from "@/lib/engine/endgame";
 import { currentPlayerId } from "@/lib/engine/turns";
 import { GameState } from "@/lib/engine/types";
+import { SOUNDS } from "@/lib/audio/sounds";
+import { playSound } from "@/lib/audio/soundManager";
 
 const FLIP_STAGGER_MS = 600;
 const BANNER_HOLD_CONTINUE_MS = 2000;
@@ -179,14 +181,26 @@ export function RoundEndOverlay({ state, viewerId, nameFor }: { state: GameState
   // (see the JSX below), for one consistent "round is changing" visual either way.
   useEffect(() => {
     if (stage !== "banner" || !round || round.ended) return;
-    const t = setTimeout(() => setRoundFlipped(true), 500);
+    const t = setTimeout(() => {
+      setRoundFlipped(true);
+      playSound(SOUNDS.roundFlip, 0.6);
+    }, 500);
     timersRef.current.push(t);
+  }, [stage, round]);
+
+  // The game-over banner's own one-shot sting -- fires exactly once per ended event
+  // (round changes identity every event, even across a queued burst -- see the
+  // queueing comment above), regardless of whether it arrived via a vote or forced
+  // roundCap end.
+  useEffect(() => {
+    if (stage === "banner" && round?.ended) playSound(SOUNDS.gameOver);
   }, [stage, round]);
 
   // Drives the vote-by-vote reveal, then hands off to the banner stage. Only ever
   // reached when this boundary actually had votes (see stage's initial value above).
   useEffect(() => {
     if (stage !== "votes" || !round) return;
+    if (revealedCount > 0) playSound(SOUNDS.vote, 0.5);
     if (revealedCount >= round.players.length) {
       const t = setTimeout(() => setStage("banner"), 500);
       timersRef.current.push(t);
@@ -260,6 +274,7 @@ export function RoundEndOverlay({ state, viewerId, nameFor }: { state: GameState
     }
     if (!roundFlipped) {
       setRoundFlipped(true);
+      playSound(SOUNDS.roundFlip, 0.6);
       return;
     }
     dismiss();

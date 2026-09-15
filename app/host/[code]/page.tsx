@@ -13,6 +13,7 @@ import { GameStatusPanel } from "@/app/components/GameStatusPanel";
 import { EndScreen } from "@/app/components/EndScreen";
 import { RoundEndOverlay } from "@/app/components/RoundEndOverlay";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
+import { SoundToggle } from "@/app/components/SoundToggle";
 import { HomeIcon } from "@/app/components/HomeIcon";
 import { CardCatalog } from "@/app/components/CardCatalog";
 import { LocationCatalog } from "@/app/components/LocationCatalog";
@@ -91,7 +92,8 @@ function Display() {
         <div className="justify-self-center text-center">
           <LocationTitle def={session.lobby ? CENTER_EFFECTS[session.lobby.centerEffect] : null} fallback={`Room ${roomCode}`} />
         </div>
-        <div className="justify-self-end">
+        <div className="flex justify-self-end gap-1.5">
+          <SoundToggle />
           <ThemeToggle />
         </div>
       </div>

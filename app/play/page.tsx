@@ -14,6 +14,7 @@ import { AI_DIFFICULTIES, AI_TURN_DELAY_MS, chooseAiActionForDifficulty, compute
 import { AI_NAMES, MAX_PLAYERS, MIN_PLAYERS, playerAccentClass, playerDotColorClass } from "@/lib/config/players";
 import { NewGameSetup, PendingFlip } from "./types";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
+import { SoundToggle } from "@/app/components/SoundToggle";
 import { HomeIcon } from "@/app/components/HomeIcon";
 import { CardCatalog } from "@/app/components/CardCatalog";
 import { LocationCatalog } from "@/app/components/LocationCatalog";
@@ -28,6 +29,8 @@ import { GameStatusPanel } from "@/app/components/GameStatusPanel";
 import { TurnActionChecklist } from "@/app/components/TurnActionChecklist";
 import { EndScreen } from "@/app/components/EndScreen";
 import { RoundEndOverlay } from "@/app/components/RoundEndOverlay";
+import { SOUNDS } from "@/lib/audio/sounds";
+import { playSound } from "@/lib/audio/soundManager";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
 import { useHallOfFortunesReveal } from "@/app/hooks/useHallOfFortunesReveal";
@@ -441,6 +444,7 @@ function Game() {
   }
 
   function handleCastVote(vote: boolean) {
+    playSound(SOUNDS.vote);
     dispatch({ type: "castVote", playerId: HUMAN, vote });
   }
 
@@ -554,7 +558,8 @@ function Game() {
           <div className="justify-self-center text-center">
             <LocationTitle def={CENTER_EFFECTS[state.config.centerEffect]} />
           </div>
-          <div className="justify-self-end">
+          <div className="flex justify-self-end gap-1.5">
+            <SoundToggle />
             <ThemeToggle />
           </div>
         </div>

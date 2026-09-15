@@ -16,6 +16,8 @@ import { useAssetExists } from "@/app/hooks/useAssetExists";
 import { useHallOfFortunesReveal } from "@/app/hooks/useHallOfFortunesReveal";
 import { useHasHover } from "@/app/hooks/useHasHover";
 import { BreakdownPopup } from "./scoreBreakdown";
+import { CARD_FLIP_SOUNDS, SOUNDS } from "@/lib/audio/sounds";
+import { playSound } from "@/lib/audio/soundManager";
 
 /** Same seat always gets the same color regardless of who sits there or how turn order shuffles game to game -- see PlayerState.colorIndex's own doc comment. */
 function ownerColorClass(state: GameState, ownerId: string): string {
@@ -466,6 +468,22 @@ export function BoardGrid({
     hasMountedRef.current = true;
     const justRevealed = [...newlyFlipped, ...newlyRisen];
     if (justRevealed.length === 0 && newlyPlaced.length === 0) return;
+
+    // A card's identity becomes public the instant it's revealed -- flipped, or a
+    // forceFaceUp card (Cyclops) placed already face-up -- so its own distinct sound
+    // (see lib/audio/sounds.ts's per-card mapping) is safe to play for every viewer
+    // right here, same moment the visual reveal animation starts. A plain face-down
+    // placement gets the shared generic "place" thud instead -- skipped for a
+    // newly-placed card that's ALSO in justRevealed (forceFaceUp again), so it isn't
+    // doubled up with its own reveal sound.
+    const revealedKeys = new Set(justRevealed);
+    for (const key of justRevealed) {
+      const sound = CARD_FLIP_SOUNDS[state.board.get(key)!.cardId];
+      if (sound) playSound(sound);
+    }
+    for (const key of newlyPlaced) {
+      if (!revealedKeys.has(key)) playSound(SOUNDS.place, 0.6);
+    }
 
     // One-shot flash: adds `ids` to whichever set `setter` manages, then removes
     // exactly those ids again after `ms` -- shared by the flip/rise/disruption/boost
