@@ -129,6 +129,23 @@ export function RoundEndOverlay({ state, viewerId, nameFor }: { state: GameState
   // Never replays a boundary already crossed before this component mounted (a page
   // reload/rejoin mid-game shouldn't dramatically re-show every past round).
   useEffect(() => {
+    // A new game started -- Continue/rematch/New Game all deal a fresh GameState
+    // (round reset to 1) into this SAME mounted component, so prevRoundRef/
+    // endHandledRef are still holding the PREVIOUS game's final round/ended state.
+    // Without this resync, the overlay silently never fires for the whole next
+    // game: e.g. prevRoundRef stuck at a prior game's round 4 makes "round 1 > 4"
+    // false for every boundary until (if ever) the new game's round number happens
+    // to exceed 4, and endHandledRef stuck true makes a genuine new ending look
+    // "already handled." A real game's round only ever counts up, so seeing it go
+    // backward is an unambiguous "this is a new game" signal -- resync silently
+    // here (nothing to reveal about a game just starting) rather than firing an
+    // event for it.
+    if (state.round < prevRoundRef.current) {
+      prevRoundRef.current = state.round;
+      endHandledRef.current = state.phase === "ended";
+      return;
+    }
+
     const isEndedNow = state.phase === "ended";
     const roundAdvanced = state.round > prevRoundRef.current;
     const justEnded = isEndedNow && !endHandledRef.current;
@@ -252,9 +269,20 @@ export function RoundEndOverlay({ state, viewerId, nameFor }: { state: GameState
   const endCount = votes ? round.players.slice(0, revealedCount).filter((id) => votes[id]).length : 0;
   const continueCount = votes ? round.players.slice(0, revealedCount).filter((id) => !votes[id]).length : 0;
 
+  // A game-ending event's EndScreen is already mounted underneath from the moment
+  // this component's very first stage renders (state.phase flips to "ended" in the
+  // SAME state update the boundary is detected from -- see the detection effect
+  // above), all the way through votes/banner/score/ranking. A translucent/blurred
+  // backdrop would let its real final scores and ranking show (and be readable)
+  // through the overlay well before the score count-up or vote reveal gets there --
+  // spoiling exactly the tension this whole sequence exists to build. Fully opaque
+  // for the entire ended sequence; the lighter blurred look is only for a continue,
+  // which has nothing sensitive mounted behind it.
+  const backdropClass = round.ended ? "bg-zinc-950" : "bg-black/70 backdrop-blur-[2px]";
+
   return (
     <div
-      className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-6 bg-black/70 px-4 backdrop-blur-[2px]"
+      className={`fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-6 px-4 ${backdropClass}`}
       onClick={skip}
       role="button"
       aria-label="Skip round-end reveal"
