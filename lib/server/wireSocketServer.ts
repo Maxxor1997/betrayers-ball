@@ -2,6 +2,8 @@ import type { Server, Socket } from "socket.io";
 import { GameSession } from "./session";
 import { RoomRegistry } from "./rooms";
 import { ClientToServerEvents, ServerToClientEvents } from "./protocol";
+import { clientIpFromSocket, geoFor, logEvent } from "./analytics";
+import { RateLimiter } from "./rateLimit";
 
 type IOServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type IOSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -24,12 +26,20 @@ interface SocketAttachment {
  * LAN address, never whatever `window.location.origin` the browser that happened to
  * create the room used (almost always "localhost", useless to anyone else).
  */
-export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOrigin: string): void {
+export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOrigin: string): { pruneRateLimiters: () => void } {
   // socket.id -> which room/player this connection last authenticated as, purely so a
   // "disconnect" event (which carries no payload of its own) knows who to mark
   // disconnected. Never consulted for authorization -- every event's own {roomCode,
   // token} payload is the actual credential, checked fresh by GameSession itself.
   const attachments = new Map<string, SocketAttachment>();
+
+  // Guards the two operations worth throttling: creating a room (the expensive one --
+  // spins up a whole GameSession) and joining one (cheap per-call, but still worth
+  // capping so one visitor can't hammer a room's lobby). Keyed by IP, not socket.id --
+  // a socket.id resets on every reconnect, which would make the limit trivially
+  // bypassable just by reconnecting.
+  const createLimiter = new RateLimiter(5, 10 * 60 * 1000);
+  const joinLimiter = new RateLimiter(20, 60 * 1000);
 
   function attach(socket: IOSocket, roomCode: string, playerId: string): void {
     attachments.set(socket.id, { roomCode, playerId });
@@ -43,6 +53,9 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
   io.on("connection", (socket: IOSocket) => {
     socket.on("room:create", ({ hostName, playerCount, centerEffect, asDisplay, aiDifficulty, password, deviceId, centerEffectMode }, ack) => {
       try {
+        if (!createLimiter.allow(clientIpFromSocket(socket) ?? socket.id)) {
+          return ack({ ok: false, error: "Too many rooms created recently. Please wait a bit and try again." });
+        }
         if (registry.hasActiveRoomForDevice(deviceId)) {
           return ack({ ok: false, error: "This device already hosts an active room. Close it before starting another." });
         }
@@ -73,6 +86,14 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
         // without this, the host would see no lobby at all (no Start button) until a
         // second player's join happens to trigger the first real broadcast.
         socket.emit("lobby:update", session.getLobbyState());
+        logEvent("room_created", {
+          roomCode: session.roomCode,
+          playerCount,
+          centerEffectMode,
+          aiDifficulty,
+          asDisplay: !!asDisplay,
+          ...geoFor(clientIpFromSocket(socket)),
+        });
         ack({ ok: true, roomCode: session.roomCode, playerId: session.hostPlayerId, token: session.hostToken, password: session.password });
       } catch (err) {
         ack({ ok: false, error: err instanceof Error ? err.message : "Couldn't create room." });
@@ -80,6 +101,9 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
     });
 
     socket.on("room:join", ({ roomCode, name, password, deviceId }, ack) => {
+      if (!joinLimiter.allow(clientIpFromSocket(socket) ?? socket.id)) {
+        return ack({ ok: false, error: "Too many join attempts recently. Please wait a bit and try again." });
+      }
       const session = registry.get(roomCode);
       if (!session) return ack({ ok: false, error: "No game found at that room code." });
       // GameSession.addPlayer broadcasts lobby:update synchronously, as part of the
@@ -92,6 +116,7 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
       if ("error" in result) return ack({ ok: false, error: result.error });
       attach(socket, session.roomCode, result.playerId);
       socket.emit("lobby:update", session.getLobbyState());
+      logEvent("player_joined", { roomCode: session.roomCode, ...geoFor(clientIpFromSocket(socket)) });
       ack({ ok: true, playerId: result.playerId, token: result.token });
     });
 
@@ -183,4 +208,12 @@ export function wireSocketServer(io: IOServer, registry: RoomRegistry, serverOri
       registry.get(attachment.roomCode)?.markDisconnected(attachment.playerId);
     });
   });
+
+  return {
+    /** See RateLimiter.prune's own doc comment -- caller (server.ts) sweeps this periodically alongside RoomRegistry.reapIdleRooms. */
+    pruneRateLimiters: () => {
+      createLimiter.prune();
+      joinLimiter.prune();
+    },
+  };
 }

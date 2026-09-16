@@ -10,6 +10,7 @@ import { randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { resolveBoard } from "@/lib/engine/resolution";
 import { computeRanks, createEmptyStats, placementBaseline, placementMaxDeviation, PlaytestStats, statsSummary, tallyGame } from "@/lib/playtest/cardStats";
 import { DISPLAY_VIEWER_ID, LobbyState, RoomStatsEntry, RoomSummary, SeatInfo, toWireState, WireGameState } from "./protocol";
+import { logEvent } from "./analytics";
 
 /** How long an unstarted lobby can sit with nobody touching it before RoomRegistry reaps it. */
 export const UNSTARTED_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
@@ -81,6 +82,8 @@ export class GameSession {
   private readonly rematchReady = new Set<string>();
   /** Last time anyone actually did something in this room -- see touch()/isReapable(). Starts at creation time, since a freshly-created lobby is itself a form of activity. */
   private lastActivityAt = Date.now();
+  /** When the currently-live (or just-ended) game was dealt -- see dealAndStart()/tallyRoomStats(). Reset on every fresh deal (start/rematch), so a room's Nth game logs its own duration, not the whole room's lifetime. */
+  private matchStartedAt = Date.now();
 
   private onLobbyChange: (lobby: LobbyState) => void;
   private onPlayerState: (playerId: string, state: WireGameState) => void;
@@ -424,6 +427,7 @@ export class GameSession {
     // keeps its own stable color across every game despite turn order moving --
     // see PlayerState.colorIndex's own doc comment for why these two can't share
     // the same array.
+    this.matchStartedAt = Date.now();
     const allIds = shuffle(seatOrder, rand);
     const aiSeats = [...this.seats.values()].filter((s) => s.isAI);
     // Reassigned fresh on every deal too, same reasoning as turn order above -- a
@@ -504,6 +508,18 @@ export class GameSession {
     );
     tallyGame(this.roomCardStats, resolved.cards, state.result.scores, this.playerCount, state.round, state.config.centerEffect);
     this.onLobbyChange(this.getLobbyState());
+
+    const humanSeats = [...this.seats.values()].filter((s) => !s.isAI).length;
+    logEvent("match_ended", {
+      roomCode: this.roomCode,
+      mode: this.displayHosted ? "screencast" : "multiplayer",
+      playerCount: this.playerCount,
+      humanSeats,
+      centerEffect: state.config.centerEffect,
+      aiDifficulty: this.aiDifficulty,
+      rounds: state.round,
+      durationMs: Date.now() - this.matchStartedAt,
+    });
   }
 
   dispatch(callerToken: string, action: GameAction): { ok: true } | { error: string } {

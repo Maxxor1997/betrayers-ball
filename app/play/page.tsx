@@ -35,6 +35,7 @@ import { playSound } from "@/lib/audio/soundManager";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
 import { useHallOfFortunesReveal } from "@/app/hooks/useHallOfFortunesReveal";
+import { track } from "@/lib/client/track";
 import {
   loadHumanCardStats,
   loadHumanPlacementStats,
@@ -311,9 +312,27 @@ function Game() {
     if (!next) setCardsCollapsed(true);
   }
   // Tally exactly once per game, the moment it reaches "ended" -- reset whenever a new
-  // game starts (confirmNewGame/playAgain below), same pattern the playtest page's own
-  // self-play tally uses (see PlaySelf.tsx's talliedRef).
+  // game starts (confirmNewGame/playAgain below).
   const talliedRef = useRef(false);
+  // When the current game was dealt -- see track("single_player_ended")'s durationMs
+  // below. Reset alongside talliedRef every time a fresh game actually starts. Starts
+  // at 0 (not Date.now()) since reading the clock is impure and this needs to be set
+  // during render's initial pass -- the mount effect below sets the real value.
+  const matchStartedAtRef = useRef(0);
+  // One ping for the very first game (whatever arrived via query params or the
+  // fallback default) -- confirmNewGame/playAgain send their own for every game after.
+  const trackedFirstGameRef = useRef(false);
+  useEffect(() => {
+    if (trackedFirstGameRef.current) return;
+    trackedFirstGameRef.current = true;
+    matchStartedAtRef.current = Date.now();
+    track("single_player_started", {
+      playerCount: state.config.playerCount,
+      centerEffect: state.config.centerEffect,
+      aiDifficulty: state.config.aiDifficulty,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const dispatch = (action: GameAction) => {
     setState((prev) => {
@@ -385,6 +404,13 @@ function Game() {
     tallyHumanGame(cardStats, placementStats, result.cards, state.result!.scores, state.config.playerCount, state.round, state.config.centerEffect, HUMAN);
     saveHumanCardStats(cardStats);
     saveHumanPlacementStats(placementStats);
+    track("single_player_ended", {
+      playerCount: state.config.playerCount,
+      centerEffect: state.config.centerEffect,
+      aiDifficulty: state.config.aiDifficulty,
+      rounds: state.round,
+      durationMs: Date.now() - matchStartedAtRef.current,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
@@ -471,6 +497,8 @@ function Game() {
     setNewGameSetup(null);
     setLastCenterEffectWasRandom(newGameSetup.centerEffect === "random");
     talliedRef.current = false;
+    matchStartedAtRef.current = Date.now();
+    track("single_player_started", { playerCount: newGameSetup.playerCount, centerEffect, aiDifficulty: newGameSetup.aiDifficulty });
   }
 
   /** One-click rematch, same player count and difficulty as the game that just ended -- no setup modal. Rerolls a fresh random location if that's how the last one was picked, otherwise reuses the same fixed one. */
@@ -480,6 +508,8 @@ function Game() {
     setSelectedInstanceId(null);
     setPendingFlip(null);
     talliedRef.current = false;
+    matchStartedAtRef.current = Date.now();
+    track("single_player_started", { playerCount, centerEffect, aiDifficulty: state.config.aiDifficulty });
   }
 
   function confirmFlip() {

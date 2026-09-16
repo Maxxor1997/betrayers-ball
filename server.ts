@@ -31,10 +31,11 @@ app.prepare().then(() => {
   const io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents>(httpServer);
   const serverOrigin = getLanOrigin(port);
   const registry = new RoomRegistry();
-  wireSocketServer(io, registry, serverOrigin);
+  const { pruneRateLimiters } = wireSocketServer(io, registry, serverOrigin);
 
   // unref -- this periodic sweep should never be the thing keeping the process alive.
   setInterval(() => registry.reapIdleRooms(), REAP_INTERVAL_MS).unref();
+  setInterval(() => pruneRateLimiters(), REAP_INTERVAL_MS).unref();
 
   httpServer.listen(port, "0.0.0.0", () => {
     console.log(`> Ready on http://localhost:${port} (${dev ? "development" : process.env.NODE_ENV})`);
