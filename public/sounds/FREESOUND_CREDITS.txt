@@ -1,0 +1,13 @@
+Card flip sounds sourced from freesound.org (Creative Commons), trimmed/converted
+to mp3 for this project:
+
+- Earthshaker  -- "angry-elephant" (507467) by danjocross
+- Footman      -- "shield-guard" (370203) by nekoninja
+- Warlord      -- "middle-ages-war-cry" (521830) by joelcarrsound
+- Suppressor   -- "swoosh" (263595) by porkmuncher
+- Exile        -- "angry-beast" (170454) by husky70
+- Bannerman    -- "war-horn" (539956) by adharca
+- Skysplitter  -- "lightning-strike" (74892) by parnellij
+- Truthseeker  -- "whoosh" (60013) by qubodup
+
+See https://freesound.org/people/<username>/sounds/<id>/ for each original.
