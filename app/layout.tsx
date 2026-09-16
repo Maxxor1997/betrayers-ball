@@ -33,8 +33,23 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  // Same PUBLIC_ORIGIN env var lib/server/network.ts's getLanOrigin uses for real join
+  // links -- without an absolute base, Next can't turn the generated opengraph-image
+  // route into the absolute URL a link-preview crawler needs. Falls back to localhost
+  // in dev, where no crawler will ever actually fetch it anyway.
+  metadataBase: new URL(process.env.PUBLIC_ORIGIN || "http://localhost:3000"),
   title: "Betrayer's Ball",
   description: "Turn-based hidden-info grid card game.",
+  openGraph: {
+    title: "Betrayer's Ball",
+    description: "Turn-based hidden-info grid card game.",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Betrayer's Ball",
+    description: "Turn-based hidden-info grid card game.",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
