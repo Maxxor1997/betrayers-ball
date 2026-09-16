@@ -1,13 +1,34 @@
-Card flip sounds sourced from freesound.org (Creative Commons), trimmed/converted
-to mp3 for this project:
+Card flip sounds sourced from freesound.org (Creative Commons), trimmed/
+converted to mp3 for this project. Two cards (Gloryseeker, Infiltrator) still
+use a sound from itch.io's "RPG Essentials Free" pack by Leohpaz instead --
+see the note at the bottom. Two cards (DyingGod, Mercenary) use Kenney sounds
+-- see KENNEY_LICENSE.txt.
 
-- Earthshaker  -- "angry-elephant" (507467) by danjocross
-- Footman      -- "shield-guard" (370203) by nekoninja
-- Warlord      -- "middle-ages-war-cry" (521830) by joelcarrsound
-- Suppressor   -- "swoosh" (263595) by porkmuncher
-- Exile        -- "angry-beast" (170454) by husky70
-- Bannerman    -- "war-horn" (539956) by adharca
-- Skysplitter  -- "lightning-strike" (74892) by parnellij
-- Truthseeker  -- "whoosh" (60013) by qubodup
+- Exile (Giant Bear) -- "angry-beast" (170454) by husky70
+- Warlord            -- "middle-ages-war-cry" (521830) by joelcarrsound
+- Pretender (Usurper) -- "unsheath_sword" (107589) by qat
+- Giant (Cyclops)    -- "scrapped-troll-sounds" (442561) by darsycho
+- Footman (Hoplite)  -- "marching-3" (200322) by webbfilmsuk
+- Berserker (Hydra)  -- "monster-bite" (467701) by lucasduff
+- Commander (Hipparch) -- "horse" (59569) by 3bagbrew
+- Skysplitter (Zeus-Born) -- "lightning-strike" (74892) by parnellij
+- Bannerman (Hornblower) -- "war-horn" (539956) by adharca
+- Beacon (Nightjar)  -- "tweeting" (164489) by a deleted Freesound account
+  (username no longer resolvable; sound page was 164489)
+- Chronicler (Doomherald) -- "bell-with-crows" (474266) by mkzing
+- Earthshaker        -- "angry-elephant" (507467) by danjocross
+- PlagueBearer (Noctule) -- "pigeons-flying" (532180) by mcmikai
+- Suppressor (Lictor) -- "swoosh" (263595) by porkmuncher
+- Truthseeker (Inquisitor) -- "torch" (479338) by danielvega
+- PlagueRat          -- "rat-squeak" (288941) by toefur
 
 See https://freesound.org/people/<username>/sounds/<id>/ for each original.
+
+---
+
+RPG Essentials Free (itch.io, by Leohpaz) -- no license file ships with the
+download; verbally confirmed Creative Commons terms, not independently
+verified against the itch.io page's exact license text. Still used for:
+
+- Gloryseeker (Pyre-Bird) -- "04_Fire_explosion_04_medium" (8_Atk_Magic_SFX)
+- Infiltrator (Facestealer) -- "88_Teleport_02" (12_Player_Movement_SFX)

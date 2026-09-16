@@ -2,7 +2,12 @@
 
 import { toggleSoundMuted, useSoundMuted } from "@/lib/audio/soundManager";
 
-/** Mute/unmute button for sound effects -- same frame/sizing as ThemeToggle, meant to sit right next to it. */
+/**
+ * Mute/unmute button for sound effects -- same frame/sizing as ThemeToggle, meant to
+ * sit right next to it. Icon-only (no text label) -- a label here was squishing the
+ * page title on mobile's already-tight header row; aria-label/title still carry the
+ * text for accessibility and desktop hover.
+ */
 export function SoundToggle() {
   const muted = useSoundMuted();
 
@@ -10,9 +15,10 @@ export function SoundToggle() {
     <button
       onClick={() => toggleSoundMuted()}
       aria-label={muted ? "Unmute sound effects" : "Mute sound effects"}
-      className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+      title={muted ? "Unmute sound effects" : "Mute sound effects"}
+      className="flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-zinc-300 text-sm hover:bg-zinc-100 sm:h-[34px] sm:w-[34px] sm:text-base dark:border-zinc-700 dark:hover:bg-zinc-900"
     >
-      {muted ? "🔇 Muted" : "🔊 Sound"}
+      {muted ? "🔇" : "🔊"}
     </button>
   );
 }

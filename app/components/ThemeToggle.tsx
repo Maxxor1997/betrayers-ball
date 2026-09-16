@@ -27,7 +27,7 @@ export function ThemeToggle() {
   }, []);
 
   if (theme === null) {
-    return <span className="inline-block h-[26px] w-[68px] sm:h-[34px] sm:w-[88px]" aria-hidden />;
+    return <span className="inline-block h-[30px] w-[30px] sm:h-[34px] sm:w-[34px]" aria-hidden />;
   }
 
   function toggle() {
@@ -38,13 +38,17 @@ export function ThemeToggle() {
 
   // rounded-lg (not the rounded-full pill every action button uses) -- a different
   // frame shape sets this apart at a glance as a utility/nav control, not an action.
+  // Icon-only (no text label) -- a label here was squishing the page title on
+  // mobile's already-tight header row; aria-label/title still carry the text for
+  // accessibility and desktop hover.
   return (
     <button
       onClick={toggle}
       aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-      className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 sm:px-4 sm:py-1.5 sm:text-sm dark:border-zinc-700 dark:hover:bg-zinc-900"
+      title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+      className="flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-zinc-300 text-sm hover:bg-zinc-100 sm:h-[34px] sm:w-[34px] sm:text-base dark:border-zinc-700 dark:hover:bg-zinc-900"
     >
-      {theme === "dark" ? "🌙 Dark" : "☀️ Light"}
+      {theme === "dark" ? "🌙" : "☀️"}
     </button>
   );
 }
