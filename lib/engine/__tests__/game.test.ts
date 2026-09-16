@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyAction, configForPlayerCount, createGame } from "../game";
-import { getLegalFlipTargets, getLegalPlacementCells, mustPass, offeredCardsFor } from "../turns";
+import { getLegalFlipTargets, getLegalPlacementCells, offeredCardsFor } from "../turns";
 import { Board, GameConfig, GameState, posKey } from "../types";
 
 function deterministicRng(seed: number) {

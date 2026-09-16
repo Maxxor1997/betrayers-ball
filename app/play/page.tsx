@@ -30,10 +30,9 @@ import { TurnActionChecklist } from "@/app/components/TurnActionChecklist";
 import { EndScreen } from "@/app/components/EndScreen";
 import { RoundEndOverlay } from "@/app/components/RoundEndOverlay";
 import { useRoundEndOverlayActive } from "@/app/hooks/roundEndOverlayActive";
-import { SOUNDS } from "@/lib/audio/sounds";
-import { playSound } from "@/lib/audio/soundManager";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
+import { useMounted } from "@/app/hooks/useMounted";
 import { useHallOfFortunesReveal } from "@/app/hooks/useHallOfFortunesReveal";
 import { track } from "@/lib/client/track";
 import {
@@ -223,8 +222,7 @@ function buildBoardStateMarkdown(state: GameState, endResult: ResolutionResult |
 // mismatch). Rendering nothing until after mount guarantees the first real render
 // of <Game/> happens purely on the client.
 export default function PlayPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useMounted();
 
   if (!mounted) {
     return <div className="flex flex-1 items-center justify-center p-8 text-sm text-zinc-500">Loading…</div>;
@@ -478,7 +476,9 @@ function Game() {
   }
 
   function handleCastVote(vote: boolean) {
-    playSound(SOUNDS.vote);
+    // No sound here -- RoundEndOverlay's own vote-by-vote reveal (including this
+    // player's own vote) plays one per flip once everyone's in; playing one here too
+    // meant a 4-player game clicked 5 times instead of 4.
     dispatch({ type: "castVote", playerId: HUMAN, vote });
   }
 

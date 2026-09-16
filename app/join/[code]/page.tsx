@@ -7,16 +7,15 @@ import { useMultiplayerSession } from "@/app/hooks/useMultiplayerSession";
 import { loadCredentials } from "@/app/hooks/multiplayerCredentials";
 import { listMultiplayerRooms } from "@/app/hooks/listMultiplayerRooms";
 import { MultiplayerUnavailableBanner } from "@/app/components/MultiplayerUnavailableNotice";
-import { isMobileViewport } from "@/app/hooks/isMobileViewport";
+import { useIsMobileOnMount } from "@/app/hooks/useIsMobileOnMount";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
+import { useMounted } from "@/app/hooks/useMounted";
 import { useHallOfFortunesReveal } from "@/app/hooks/useHallOfFortunesReveal";
 import { BoardGrid } from "@/app/components/Board";
 import { Hand } from "@/app/components/Hand";
 import { GameStatusPanel } from "@/app/components/GameStatusPanel";
 import { EndScreen } from "@/app/components/EndScreen";
 import { RoundEndOverlay } from "@/app/components/RoundEndOverlay";
-import { SOUNDS } from "@/lib/audio/sounds";
-import { playSound } from "@/lib/audio/soundManager";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { SoundToggle } from "@/app/components/SoundToggle";
 import { HomeIcon } from "@/app/components/HomeIcon";
@@ -47,8 +46,7 @@ export function nameFor(lobby: LobbyState | null, playerId: string): string {
  * markup mismatch, since sessionStorage/window.location are only meaningful client-side.
  */
 export default function JoinPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useMounted();
   if (!mounted) {
     return <div className="flex flex-1 items-center justify-center p-8 text-sm text-zinc-500">Loading…</div>;
   }
@@ -63,8 +61,7 @@ function Room() {
   const [showRoomStats, setShowRoomStats] = useState(false);
   const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(null);
   const [confirmingEnd, setConfirmingEnd] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => setIsMobile(isMobileViewport()), []);
+  const isMobile = useIsMobileOnMount();
   const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobile);
   // Cards and Locations share the same sidebar slot and are mutually exclusive --
   // see openCards/openLocations below, which each close the other whenever they
@@ -739,7 +736,9 @@ function GameView({
   }
 
   function handleCastVote(vote: boolean) {
-    playSound(SOUNDS.vote);
+    // No sound here -- RoundEndOverlay's own vote-by-vote reveal (including this
+    // player's own vote) plays one per flip once everyone's in; playing one here too
+    // meant a 4-player game clicked 5 times instead of 4.
     dispatch({ type: "castVote", playerId: myPlayerId, vote });
   }
 

@@ -10,6 +10,16 @@ import { playSound } from "@/lib/audio/soundManager";
 import { setRoundEndOverlayActive } from "@/app/hooks/roundEndOverlayActive";
 
 const FLIP_STAGGER_MS = 600;
+/**
+ * How long after a vote tile's `revealed` prop flips true before its sound plays --
+ * the tile's own flip is a 500ms rotateY animation (see globals.css's
+ * card-flip-reveal), so playing the sound the instant `revealed` becomes true (at the
+ * very start of that animation, card still edge-on) lands noticeably before the tile
+ * visually shows its result. This roughly matches the point the rotation crosses
+ * 90deg and the result face becomes visible, so the sound lands with the reveal
+ * instead of the wind-up.
+ */
+const VOTE_FLIP_SOUND_DELAY_MS = 260;
 const BANNER_HOLD_CONTINUE_MS = 2000;
 const BANNER_HOLD_ENDED_MS = 1600;
 const SCORE_COUNT_MS = 2600;
@@ -216,7 +226,10 @@ export function RoundEndOverlay({ state, viewerId, nameFor }: { state: GameState
   // reached when this boundary actually had votes (see stage's initial value above).
   useEffect(() => {
     if (stage !== "votes" || !round) return;
-    if (revealedCount > 0) playSound(SOUNDS.vote, 0.5);
+    if (revealedCount > 0) {
+      const soundTimer = setTimeout(() => playSound(SOUNDS.vote, 0.5), VOTE_FLIP_SOUND_DELAY_MS);
+      timersRef.current.push(soundTimer);
+    }
     if (revealedCount >= round.players.length) {
       const t = setTimeout(() => setStage("banner"), 500);
       timersRef.current.push(t);

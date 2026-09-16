@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
+import { useMounted } from "@/app/hooks/useMounted";
 import { SoundToggle } from "@/app/components/SoundToggle";
 import { BoardGrid } from "@/app/components/Board";
 import { IntegerField } from "@/app/components/IntegerField";
@@ -403,8 +404,7 @@ function buildEverythingMarkdown(
  * client-only state (random shuffles there, localStorage here).
  */
 export default function PlaytestPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useMounted();
   if (!mounted) {
     return <div className="flex flex-1 items-center justify-center p-8 text-sm text-zinc-500">Loading…</div>;
   }

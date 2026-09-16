@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMultiplayerSession } from "@/app/hooks/useMultiplayerSession";
 import { loadCredentials } from "@/app/hooks/multiplayerCredentials";
 import { MultiplayerUnavailableBanner } from "@/app/components/MultiplayerUnavailableNotice";
-import { isMobileViewport } from "@/app/hooks/isMobileViewport";
+import { useIsMobileOnMount } from "@/app/hooks/useIsMobileOnMount";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
+import { useMounted } from "@/app/hooks/useMounted";
 import { BoardGrid } from "@/app/components/Board";
 import { GameStatusPanel } from "@/app/components/GameStatusPanel";
 import { EndScreen } from "@/app/components/EndScreen";
@@ -42,8 +43,7 @@ const EMPTY_KEYS = new Set<string>();
  * to as a display.
  */
 export default function HostPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useMounted();
   if (!mounted) {
     return <div className="flex flex-1 items-center justify-center p-8 text-sm text-zinc-500">Loading…</div>;
   }
@@ -58,8 +58,7 @@ function Display() {
   const [showRoomStats, setShowRoomStats] = useState(false);
   const [newGameSetup, setNewGameSetup] = useState<NewGameSetup | null>(null);
   const [confirmingEnd, setConfirmingEnd] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => setIsMobile(isMobileViewport()), []);
+  const isMobile = useIsMobileOnMount();
   const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobile);
   // Cards and Locations share the same sidebar slot and are mutually exclusive --
   // see openCards/openLocations below, which each close the other whenever they

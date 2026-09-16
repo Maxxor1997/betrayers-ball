@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { BoardGrid } from "@/app/components/Board";
 import { EndScreen } from "@/app/components/EndScreen";
@@ -8,6 +8,7 @@ import { CardArt } from "@/app/components/CardArt";
 import { HomeIcon } from "@/app/components/HomeIcon";
 import { LocationTitle } from "@/app/components/LocationTitle";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
+import { useMounted } from "@/app/hooks/useMounted";
 import { SoundToggle } from "@/app/components/SoundToggle";
 import { MAX_PLAYERS, MIN_PLAYERS, playerDotColorClass } from "@/lib/config/players";
 import { ALL_CARD_IDS, CARD_DEFS } from "@/lib/content/cards";
@@ -30,8 +31,7 @@ function playerId(index: number): string {
 }
 
 export default function SandboxPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useMounted();
   if (!mounted) {
     return <div className="flex flex-1 items-center justify-center p-8 text-sm text-zinc-500">Loading…</div>;
   }

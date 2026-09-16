@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
+import { useMounted } from "@/app/hooks/useMounted";
 import { IntegerField } from "@/app/components/IntegerField";
 import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS } from "@/lib/ai/difficulty";
 import { DEFAULT_TWO_PLY_OPTIONS } from "@/lib/ai/twoPly";
@@ -421,8 +422,7 @@ type ArenaMode = "shuffle" | "fixed";
  * client, where its initializers reading localStorage are always safe.
  */
 export default function ArenaPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useMounted();
   if (!mounted) {
     return <div className="flex flex-1 items-center justify-center p-8 text-sm text-zinc-500">Loading…</div>;
   }

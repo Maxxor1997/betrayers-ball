@@ -14,7 +14,7 @@ import { createMultiplayerRoom } from "@/app/hooks/createMultiplayerRoom";
 import { listMultiplayerRooms } from "@/app/hooks/listMultiplayerRooms";
 import { loadCredentials } from "@/app/hooks/multiplayerCredentials";
 import { isLocalRoom } from "@/app/hooks/localRooms";
-import { isMobileViewport } from "@/app/hooks/isMobileViewport";
+import { useIsMobileOnMount } from "@/app/hooks/useIsMobileOnMount";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
 import { CENTER_EFFECTS, randomCenterEffectPool } from "@/lib/content/centerEffects";
 import { RoomSummary } from "@/lib/server/protocol";
@@ -214,7 +214,7 @@ function ActiveSessions() {
 
       {error && <MultiplayerUnavailableBanner />}
       {rooms && rooms.length === 0 && !error && (
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">No games you've created or joined from this browser right now.</p>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">No games you&apos;ve created or joined from this browser right now.</p>
       )}
       {rooms && rooms.length > 0 && (
         <ul className="flex flex-col gap-2">
@@ -310,8 +310,7 @@ export default function HomePage() {
   // Starts false (SSR-safe -- window isn't available yet) and corrects itself once
   // mounted; useDefaultCollapsed only ever applies this once, so the brief
   // false->true flip on phones doesn't fight a manual toggle.
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => setIsMobile(isMobileViewport()), []);
+  const isMobile = useIsMobileOnMount();
   const [cardsCollapsed, setCardsCollapsed] = useDefaultCollapsed(isMobile);
   // Cards and Locations share the same sidebar slot and are mutually exclusive --
   // see openCards/openLocations below, which each close the other whenever they
