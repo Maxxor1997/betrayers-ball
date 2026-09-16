@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
+import { SoundToggle } from "@/app/components/SoundToggle";
 import { BoardGrid } from "@/app/components/Board";
 import { IntegerField } from "@/app/components/IntegerField";
 import { FixedTooltip } from "@/app/components/CardCatalog";
@@ -12,7 +13,7 @@ import { useHasHover } from "@/app/hooks/useHasHover";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectLabel, randomCenterEffectPool, selectableCenterEffects } from "@/lib/content/centerEffects";
 import { MAX_PLAYERS, MIN_PLAYERS } from "@/lib/config/players";
-import { ResolvedCard, resolveBoard } from "@/lib/engine/resolution";
+import { resolveBoard } from "@/lib/engine/resolution";
 import { AI_DIFFICULTIES, AI_DIFFICULTY_LABELS, DEFAULT_AI_DIFFICULTY } from "@/lib/ai/difficulty";
 import { AiDifficulty, CardBucket, CardId, CenterEffectId, GameState } from "@/lib/engine/types";
 import {
@@ -30,7 +31,6 @@ import {
   tallyGame,
 } from "@/lib/playtest/cardStats";
 import { loadStats, resetStats, saveStats } from "@/lib/playtest/store";
-import { PlaySelf } from "./PlaySelf";
 
 /** Same grouping CardCatalog uses -- keeps the two card listings visually consistent. */
 const BUCKET_ORDER: CardBucket[] = ["Slam", "Engine", "Control"];
@@ -424,7 +424,6 @@ function Playtest() {
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [watchLive, setWatchLive] = useState(false);
   const [liveState, setLiveState] = useState<GameState | null>(null);
-  const [selfPlayedCount, setSelfPlayedCount] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>("bucket");
   const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [heatmapSortKey, setHeatmapSortKey] = useState<HeatmapSortKey>("bucket");
@@ -709,14 +708,6 @@ function Playtest() {
     });
   }
 
-  function onSelfGameEnded(cards: ResolvedCard[], scores: Record<string, number>, roundsPlayed: number, resolvedCenterEffect: CenterEffectId) {
-    const working = loadStats();
-    tallyGame(working, cards, scores, playerCount, roundsPlayed, resolvedCenterEffect);
-    saveStats(working);
-    setStats(working);
-    setSelfPlayedCount((n) => n + 1);
-  }
-
   return (
     <div className="flex flex-1 flex-col items-center gap-6 px-4 py-8">
       <header className="flex w-full max-w-4xl flex-col gap-2">
@@ -724,7 +715,10 @@ function Playtest() {
           <h1 className="text-lg font-semibold sm:text-xl">
             Betrayer&apos;s Ball <span className="font-normal text-zinc-500">— card balance</span>
           </h1>
-          <ThemeToggle />
+          <div className="flex gap-1.5">
+            <SoundToggle />
+            <ThemeToggle />
+          </div>
         </div>
         <div className="flex w-full flex-wrap items-center gap-1.5">
           <Link
@@ -1191,17 +1185,6 @@ function Playtest() {
         </div>
       )}
 
-      <div className="flex w-full max-w-4xl flex-col gap-3 rounded-lg border border-zinc-300 p-4 dark:border-zinc-700">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-sm font-medium">Play it yourself</p>
-          {selfPlayedCount > 0 && (
-            <p className="text-xs text-zinc-500">
-              {selfPlayedCount} game{selfPlayedCount === 1 ? "" : "s"} you&rsquo;ve played this session, tallied into the same stats above.
-            </p>
-          )}
-        </div>
-        <PlaySelf playerCount={playerCount} centerEffect={centerEffect} aiDifficulty={aiDifficulty} onGameEnded={onSelfGameEnded} />
-      </div>
     </div>
   );
 }

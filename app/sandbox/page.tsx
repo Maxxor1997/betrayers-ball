@@ -8,6 +8,7 @@ import { CardArt } from "@/app/components/CardArt";
 import { HomeIcon } from "@/app/components/HomeIcon";
 import { LocationTitle } from "@/app/components/LocationTitle";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
+import { SoundToggle } from "@/app/components/SoundToggle";
 import { MAX_PLAYERS, MIN_PLAYERS, playerDotColorClass } from "@/lib/config/players";
 import { ALL_CARD_IDS, CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectLabel, selectableCenterEffects } from "@/lib/content/centerEffects";
@@ -282,7 +283,8 @@ function Sandbox() {
             <div className="justify-self-center text-center">
               <LocationTitle def={CENTER_EFFECTS[centerEffect]} fallback="Sandbox" />
             </div>
-            <div className="justify-self-end">
+            <div className="flex justify-self-end gap-1.5">
+              <SoundToggle />
               <ThemeToggle />
             </div>
           </div>

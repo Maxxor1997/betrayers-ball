@@ -1,6 +1,7 @@
 "use client";
 
 import { CardArt } from "@/app/components/CardArt";
+import { LocationArt } from "@/app/components/LocationArt";
 import { BreakdownPopup } from "@/app/components/scoreBreakdown";
 import { CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS } from "@/lib/content/centerEffects";
@@ -126,7 +127,8 @@ function MiniTurnOrder() {
 function MiniCenterTile() {
   const effect = CENTER_EFFECTS.reckoning;
   return (
-    <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400">
+    <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border-2 border-dashed border-zinc-400 p-1 text-center text-[9px] leading-tight break-words text-zinc-400">
+      <LocationArt id="reckoning" className={`h-6 w-6 shrink-0 ${effect.themeColorClass}`} />
       {effect.label}
     </div>
   );
