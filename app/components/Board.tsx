@@ -1115,13 +1115,17 @@ export function BoardGrid({
                   // standing in for one of the viewer's own 3 freshly-offered
                   // cards (see hofSlot above): it spins in place through
                   // hofPhase's own "spinning" window, then the Pillar face
-                  // fades out while the real card's icon/name/value fades in
+                  // fades out while the real card's icon/value fades in
                   // underneath it at the same time (same cross-fade shape as
                   // Outpost's crumble-then-empty transition, just revealing
                   // instead of emptying), holds briefly, then hofPhase returns
                   // to "idle" and this whole block stops rendering, letting the
-                  // tile fall back to its plain Pillar art above.
-                  <div className="@container absolute inset-0 z-20 aspect-square w-full overflow-hidden rounded-md border-2 border-dashed border-zinc-400 bg-white/85 p-1 dark:bg-zinc-950/85">
+                  // tile fall back to its plain Pillar art above. Icon + base
+                  // value only, no name -- matching exactly what this same card
+                  // would show if it were actually sitting face-up on the board
+                  // right now (renderFaceUpContent's own icon is h-1/2, and its
+                  // name only ever shows once a cell is wide enough anyway).
+                  <div className="@container absolute inset-0 z-20 aspect-square w-full overflow-hidden rounded-md border-2 border-dashed border-zinc-400 bg-white/85 p-1 [perspective:600px] dark:bg-zinc-950/85">
                     <div
                       className={`absolute inset-0 flex flex-col items-center justify-center gap-0.5 p-1 ${CENTER_EFFECTS.reckoning.themeColorClass} ${
                         hofPhase === "revealed" ? "hof-reveal-fade-out" : "hof-pillar-spin"
@@ -1134,9 +1138,6 @@ export function BoardGrid({
                         hofPhase === "revealed" ? "hof-reveal-fade-in" : ""
                       }`}
                     >
-                      <span className="hidden w-full truncate text-[length:clamp(6px,22cqw,10px)] leading-tight font-semibold @[48px]:block">
-                        {hofDef.name}
-                      </span>
                       <CardArt cardId={hofCard.cardId} className="h-1/2 w-1/2 shrink-0" />
                       <span className="text-[length:clamp(9px,26cqw,15px)] leading-none font-bold">{hofDef.base}</span>
                     </div>

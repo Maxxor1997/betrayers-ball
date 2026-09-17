@@ -311,7 +311,6 @@ export function GameStatusPanel({
   flipUnlocked,
   onCopyState,
   copyFeedback,
-  panelRef,
 }: {
   state: GameState;
   /** Whose panel this is -- the score tracker and turn-order "(You)" tag are both relative to this. */
@@ -321,8 +320,6 @@ export function GameStatusPanel({
   /** Single-player only feature (the board-state markdown dump) -- omitted entirely (button hidden) when not provided, e.g. in multiplayer. */
   onCopyState?: () => void;
   copyFeedback?: boolean;
-  /** DealAnimation's real "where do the flying cards start from" anchor (see /play's own call site) -- optional since only a page that also renders DealAnimation needs it. Attached directly to this component's own root element rather than a caller-side wrapper div, so it can't accidentally break the `<aside>`'s own w-full/shrink-0/lg:sticky flex-child sizing. */
-  panelRef?: React.RefObject<HTMLElement | null>;
 }) {
   // Flip: label + either a round number (when there's a specific round to wait for)
   // or a text pill (already-resolved states with no single round to point at).
@@ -341,7 +338,7 @@ export function GameStatusPanel({
   const voteLabel = votingOpen ? "Voting open" : "Voting opens";
 
   return (
-    <aside ref={panelRef} className="w-full shrink-0 lg:sticky lg:top-8 lg:w-40 lg:self-start">
+    <aside className="w-full shrink-0 lg:sticky lg:top-8 lg:w-40 lg:self-start">
       <div className="flex flex-col items-center gap-4 rounded-xl border border-zinc-300 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-950">
         <RoundBadge round={state.round} roundCap={state.config.roundCap} />
         {(state.phase === "playing" || state.phase === "voting") && state.players.some((p) => p.id === viewerId) && (

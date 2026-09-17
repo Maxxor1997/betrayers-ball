@@ -78,6 +78,37 @@ html {
   }
 }
 
+/* Hand's own deal reveal (see Hand.tsx's dealPhase) -- every card sits face-down and
+   flares up with this at the same time (no stagger -- the reveal is meant to read as
+   "the hand" glowing at once, not a one-by-one dealing motion), then all flip
+   face-up together right after. Same emerald as .turn-glow above (this app's
+   "your cards are ready" color) but a one-shot flash-then-off, not an infinite pulse
+   -- it needs to be back at zero box-shadow by the time the flip takes over, not
+   still mid-pulse. */
+@keyframes hand-deal-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+  35% {
+    box-shadow:
+      0 0 0 2px rgba(16, 185, 129, 0.9),
+      0 0 22px 6px rgba(16, 185, 129, 0.6);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.hand-deal-glow {
+  animation: hand-deal-glow 0.45s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hand-deal-glow {
+    animation: none;
+  }
+}
+
 /* Mirror Pool's own ownerless tiles -- a one-shot celebratory blue glow (cyan,
    distinct from .turn-glow's emerald) right when a mirrored pair is newly
    revealed as a matching type (see Board.tsx's poolGlowIds/POOL_GLOW_MS) --
@@ -259,41 +290,6 @@ html {
   }
 }
 
-/* DealAnimation -- each card-back flies from GameStatusPanel's real on-screen
-   position to the hand tray's (its own `--dx`/`--dy`, computed per-card in JS from
-   real getBoundingClientRect() measurements -- see DealAnimation.tsx), with a
-   slight overshoot-then-settle (the 85% keyframe) so it reads as landing rather
-   than just stopping, and fades out right at arrival as the real hand (kept at
-   opacity-0 by the caller until then) fades in to take its place. */
-@keyframes deal-fly-card {
-  0% {
-    transform: translate(0, 0) scale(0.85);
-    opacity: 1;
-  }
-  85% {
-    transform: translate(calc(var(--dx, 0px) * 0.98), calc(var(--dy, 0px) * 0.98)) scale(1.05);
-    opacity: 1;
-  }
-  100% {
-    transform: translate(var(--dx, 0px), var(--dy, 0px)) scale(1);
-    opacity: 0;
-  }
-}
-
-.deal-fly-card {
-  animation: deal-fly-card 0.5s cubic-bezier(0.2, 0.6, 0.3, 1) forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .deal-fly-card {
-    /* Never actually reached -- DealAnimation.tsx skips the whole sequence (calls
-       onDone immediately) under reduced motion, so this is a defensive fallback
-       only, matching the other one-shot flourishes' own convention. */
-    animation: none;
-    opacity: 0;
-  }
-}
-
 /* No Man's Land's own cannons -- a single one-shot rotateY flip (NOT a spin that
    returns to its starting look, unlike Usurper's own card-icon-multi-spin) the
    moment a corner's own quadrant is completely filled -- ends at 180deg and
@@ -331,6 +327,7 @@ html {
   width: 100%;
   height: 100%;
   transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
   animation: card-flip-reveal 0.5s cubic-bezier(0.3, 0.1, 0.2, 1) forwards;
 }
 
@@ -346,7 +343,15 @@ html {
 .card-flip-face {
   position: absolute;
   inset: 0;
+  /* -webkit- prefix required for backface-visibility to actually take effect on
+     iOS/mobile Safari -- without it, both faces briefly show through/double-expose
+     around the 90deg crossing instead of exactly one ever being visible, reading as
+     a flicker. Never noticeable for a single card flipping at a time (a real board
+     card, RoundFlipTile, VoteTile), but Hand's own deal reveal flips every hand card
+     at once, and that's enough simultaneous 3D compositing for mobile GPUs to make
+     the missing prefix's flicker actually visible. */
   backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 .card-flip-face-back {
@@ -1407,13 +1412,23 @@ html {
    pillar spins in place (same rotateY dimension as Usurper's own icon-spin) for the
    whole "spinning" phase, then the pillar face fades out while the real card face
    fades in underneath it at the same time, so the swap reads as one continuous
-   reveal rather than two separately-timed pieces. */
+   reveal rather than two separately-timed pieces.
+
+   Perspective comes from the real `perspective` property on this element's own
+   parent (Board.tsx's own [perspective:600px] on the reckoning tile's wrapper) --
+   NOT from `perspective(...)` chained into this keyframe's own `transform`, unlike
+   Usurper's card-icon-multi-spin. That combined-into-one-transform-function form is
+   known to render inconsistently on some mobile WebKit versions -- the element can
+   visibly shrink through the whole rotation instead of just foreshortening in width
+   the way a real 3D spin should. `[perspective:...]` on a parent + plain rotateY on
+   the child (the same split this app's own card/round-tile flips already use) is
+   the more broadly reliable pairing. */
 @keyframes hof-pillar-spin {
   0% {
-    transform: perspective(400px) rotateY(0deg);
+    transform: rotateY(0deg);
   }
   100% {
-    transform: perspective(400px) rotateY(720deg);
+    transform: rotateY(720deg);
   }
 }
 

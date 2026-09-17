@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CardArt } from "@/app/components/CardArt";
 import { FixedTooltip } from "@/app/components/CardCatalog";
 import { setActiveTooltip, toggleActiveTooltip, useActiveTooltipId } from "@/app/hooks/activeTooltip";
@@ -10,6 +10,10 @@ import { Board, CardId, CardInstance } from "@/lib/engine/types";
 
 /** How long a touch has to be held before it counts as a long-press (vs. a normal tap-to-select). */
 const LONG_PRESS_MS = 500;
+/** Matches .hand-deal-glow's own animation-duration (globals.css) -- how long every card sits face-down and glowing before they all flip. */
+const HAND_DEAL_GLOW_MS = 450;
+/** Matches .card-flip-reveal's own hardcoded 0.5s duration (globals.css) -- how long the flip itself takes once it starts. */
+const HAND_DEAL_FLIP_MS = 500;
 
 export interface HandProps {
   cards: CardInstance[];
@@ -23,9 +27,50 @@ export interface HandProps {
   round: number;
   roundCap: number;
   board: Board;
+  /** True for the brief moment a freshly dealt hand should play its own reveal (every card face-down, a synchronized glow, then all flip face-up together) instead of just appearing -- see /play's own call site. Omitted (or false) renders every card normally right away, e.g. every other page that uses Hand. */
+  dealing?: boolean;
+  /** Fires once the deal reveal above finishes -- the caller clears its own `dealing` flag from this (see /play), same shape as RoundEndOverlay's onDone. */
+  onDealt?: () => void;
 }
 
-export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disabled, ownerAccentClass, round, roundCap, board }: HandProps) {
+export function Hand({
+  cards,
+  selectedInstanceId,
+  onCardClick,
+  onCardDragStart,
+  disabled,
+  ownerAccentClass,
+  round,
+  roundCap,
+  board,
+  dealing = false,
+  onDealt,
+}: HandProps) {
+  // Every card sits face-down for HAND_DEAL_GLOW_MS (with a synchronized glow --
+  // no stagger, since the whole point is "the hand" revealing at once, not a
+  // one-by-one dealing motion), then all flip face-up together over
+  // HAND_DEAL_FLIP_MS, then settle into the normal interactive render. Restarts
+  // cleanly if `dealing` flips true again before finishing (a fresh game started
+  // while a previous reveal was still mid-flight) since the effect's own cleanup
+  // clears whatever timers were pending.
+  const [dealPhase, setDealPhase] = useState<"facedown" | "flip" | "done">(dealing ? "facedown" : "done");
+  useEffect(() => {
+    if (!dealing) {
+      setDealPhase("done");
+      return;
+    }
+    setDealPhase("facedown");
+    const flipTimer = setTimeout(() => setDealPhase("flip"), HAND_DEAL_GLOW_MS);
+    const doneTimer = setTimeout(() => {
+      setDealPhase("done");
+      onDealt?.();
+    }, HAND_DEAL_GLOW_MS + HAND_DEAL_FLIP_MS);
+    return () => {
+      clearTimeout(flipTimer);
+      clearTimeout(doneTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dealing]);
   // Grouped by cardId (so duplicates sit next to each other), but the groups
   // themselves keep whatever order `cards` already arrived in -- the same order
   // Hall of Fortunes' own Pillar tiles show (see useHallOfFortunesReveal/Board.tsx,
@@ -106,6 +151,40 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
                 : isHydraTwoPlusOther
                   ? "text-green-600 dark:text-green-400"
                   : "";
+        // Shared between the normal interactive button below and the flip's own
+        // back-face (see dealPhase === "flip" below) -- same reasoning as Board.tsx's
+        // renderFaceUpContent: the flip briefly shows this exact content mid-rotation,
+        // so it has to be the literal same markup, not a re-approximation of it.
+        const cardContent = (
+          <>
+            <span className="w-full text-[length:clamp(8px,20cqw,10px)] leading-tight break-words font-semibold">{def.name}</span>
+            <CardArt cardId={card.cardId} className={`h-7 w-7 shrink-0 ${colorClass}`} />
+            <span className="text-[length:clamp(14px,32cqw,20px)] leading-none font-bold">{def.base}</span>
+            {/* Truncated to 2 lines, not left to grow -- keeps the card's fixed h-28
+                from growing with description length. Full text is available via
+                long-press/double-click below (FixedTooltip), not shown inline --
+                that was tried and removed as finnicky on mobile when it was a plain
+                hover tooltip. */}
+            <span className="line-clamp-2 w-full text-[length:clamp(7px,16cqw,9px)] leading-tight break-words text-zinc-500 dark:text-zinc-400">
+              {def.text}
+            </span>
+          </>
+        );
+
+        // Full h-full/w-full coverage (not scaled down) -- same as every face-down
+        // card on the board itself (Board.tsx's own plain and mid-flip card backs
+        // both use card-back-pattern at h-full w-full); a smaller diamond read as
+        // visibly different from -- and smaller than -- the real board convention.
+        // The glow class goes directly on this bordered box (not a wrapping div) so
+        // the box-shadow actually follows its rounded corners -- and it's only ever
+        // added in the plain facedown phase, never on the flip's own front face,
+        // since the glow is meant to be long over by the time the flip starts.
+        const backFace = (glowing: boolean) => (
+          <div className={`flex h-28 w-full items-center justify-center rounded-md border-2 p-1.5 ${ownerAccentClass} ${glowing ? "hand-deal-glow" : ""}`}>
+            <div className="card-back-pattern h-full w-full text-zinc-500 opacity-40 dark:text-zinc-400" />
+          </div>
+        );
+
         return (
           <div key={card.instanceId} className="relative" style={{ flex: "1 1 7rem", minWidth: "4rem", maxWidth: "7rem" }}>
             <button
@@ -175,19 +254,50 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
                 disabled ? "cursor-default" : "cursor-grab active:cursor-grabbing"
               } ${selected ? "border-amber-500 bg-amber-50 dark:bg-amber-950" : ownerAccentClass}`}
             >
-              <span className="w-full text-[length:clamp(8px,20cqw,10px)] leading-tight break-words font-semibold">{def.name}</span>
-              <CardArt cardId={card.cardId} className={`h-7 w-7 shrink-0 ${colorClass}`} />
-              <span className="text-[length:clamp(14px,32cqw,20px)] leading-none font-bold">{def.base}</span>
-              {/* Truncated to 2 lines, not left to grow -- keeps the card's fixed h-28
-                  from growing with description length. Full text is available via
-                  long-press/double-click below (FixedTooltip), not shown inline --
-                  that was tried and removed as finnicky on mobile when it was a plain
-                  hover tooltip. */}
-              <span className="line-clamp-2 w-full text-[length:clamp(7px,16cqw,9px)] leading-tight break-words text-zinc-500 dark:text-zinc-400">
-                {def.text}
-              </span>
+              {cardContent}
             </button>
             {activeTooltipId === tooltipId && activeRect && <FixedTooltip rect={activeRect}>{def.fullText}</FixedTooltip>}
+            {dealPhase !== "done" && (
+              // Layered on TOP of the real button above (which is always mounted,
+              // never torn down) rather than being the only thing rendered while
+              // dealing -- an earlier version swapped between two entirely
+              // different subtrees (this facedown/flip markup vs. the real button)
+              // depending on dealPhase, and replacing one DOM structure with
+              // another right as the flip's own rotation finished visibly flickered
+              // on mobile (the browser has to un-composite the just-finished 3D
+              // layer and immediately repaint fresh 2D content in the same spot).
+              // Peeling an overlay away from an already-mounted, already-correct
+              // button underneath has nothing to repaint when it's removed.
+              <div
+                // An opaque background of its own (not just whatever the flip's two
+                // faces happen to paint) -- .card-flip-face only ever shows ONE face
+                // at a time via backface-visibility, but neither face covers the
+                // brief edge-on moment as the rotation crosses 90deg, and without
+                // this the always-mounted real button underneath would show through
+                // right at that instant.
+                className={`absolute inset-0 z-10 h-28 rounded-md bg-white dark:bg-zinc-950 ${dealPhase === "flip" ? "[perspective:600px]" : ""}`}
+              >
+                {dealPhase === "flip" ? (
+                  <div className="card-flip-inner">
+                    <div className="card-flip-face">{backFace(false)}</div>
+                    {/* @container here too, matching the real button -- cardContent's
+                        font sizes are all cqw-based (clamp(...,Ncqw,...)), resolved
+                        against the nearest ancestor with its own container-type.
+                        Without @container on this face too, those sizes would
+                        resolve against whatever ancestor further up happens to
+                        establish one instead (or the viewport, if none does) --
+                        visibly different from the real button's own sizing. */}
+                    <div
+                      className={`card-flip-face card-flip-face-back @container flex h-28 w-full flex-col items-center justify-start gap-1 rounded-md border-2 p-1.5 text-center ${ownerAccentClass}`}
+                    >
+                      {cardContent}
+                    </div>
+                  </div>
+                ) : (
+                  backFace(true)
+                )}
+              </div>
+            )}
           </div>
         );
       })}

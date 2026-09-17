@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CardInstance, GameState } from "@/lib/engine/types";
 import { useRoundEndOverlayActive } from "@/app/hooks/roundEndOverlayActive";
 
@@ -43,7 +43,11 @@ export function useHallOfFortunesReveal(
   const pendingOfferRef = useRef<CardInstance[] | null>(null);
   const overlayActive = useRoundEndOverlayActive();
 
-  useEffect(() => {
+  // Layout effects (not plain effects) -- a plain useEffect runs AFTER the browser
+  // paints, so the render that first shows the fresh (real, un-obscured) offer would
+  // actually flash on screen for a frame before this got a chance to hide it behind
+  // "spinning". Running before paint instead closes that gap.
+  useLayoutEffect(() => {
     if (state.config.centerEffect !== "reckoning") return;
     const activeId = state.players[state.currentPlayerIndex]?.id;
     if (!activeId) return;
@@ -70,7 +74,7 @@ export function useHallOfFortunesReveal(
 
   // Once the overlay closes, start whatever offer got held above -- if nothing was
   // held (the common case: most turns don't cross a round boundary), this is a no-op.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (overlayActive || !pendingOfferRef.current) return;
     const offer = pendingOfferRef.current;
     pendingOfferRef.current = null;
