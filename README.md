@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Betrayer's Ball
 
-## Getting Started
+A turn-based, hidden-information grid card game. Place cards face-down, flip them at the right moment, and score off their printed values once the game ends — support cards buff/debuff their neighbors, so *when* you reveal a card matters as much as what it is.
 
-First, run the development server:
+Play solo against AI, or host a real multiplayer game — either everyone joins from their own phone (Jackbox-style), or one device acts as a shared screencast display while players use their phones as controllers.
+
+## Play now
+
+- **[betrayers-ball.onrender.com](https://betrayers-ball.onrender.com/)** — the real deployment, with full multiplayer support.
+- **[board-game-bice.vercel.app](https://board-game-bice.vercel.app)** — backup mirror. Single-player only: Vercel's serverless hosting can't run the persistent Socket.IO server multiplayer needs, so hosting/joining a room isn't available there (the app will tell you if you try).
+
+## Features
+
+- Single-player vs. AI, with three difficulty levels
+- LAN multiplayer — host a room, everyone else joins from their own browser
+- Screencast mode — one device shows the board, everyone else plays from their phone
+- A dozen+ locations (center-tile effects) that bend the normal rules for the whole game
+- In-app card/location catalogs, per-game and lifetime stats, and a card-balance simulator for playtesting
+
+## Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open [http://localhost:3000](http://localhost:3000). `npm run dev` runs the real custom server (`server.ts`) with Socket.IO attached, so multiplayer works locally too — other devices on your network can join at the LAN address printed in the terminal.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Other scripts:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm test         # run the test suite once
+npm run test:watch
+npm run build && npm start   # production build + the real server
+npm run lint
+```
 
-## Learn More
+## Tech stack
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Next.js (App Router) + TypeScript + Tailwind, with a custom server (`server.ts`) attaching Socket.IO for real-time multiplayer. See `CLAUDE.md`/`AGENTS.md` for the fuller architecture rundown, and `game_spec.md`/`board_game_design.md` for the game's own rules and design rationale.
