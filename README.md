@@ -1,21 +1,27 @@
 # Betrayer's Ball
 
-A turn-based, hidden-information grid card game. Place cards face-down, flip them at the right moment, and score off their printed values once the game ends — support cards buff/debuff their neighbors, so *when* you reveal a card matters as much as what it is.
+A multiplayer, turn-based, hidden-information grid card game with a social deduction element.
 
-Play solo against AI, or host a real multiplayer game — either everyone joins from their own phone (Jackbox-style), or one device acts as a shared screencast display while players use their phones as controllers.
+Place cards on the board to build the highest total score. Cards start face-down and are worth their base value plus effects from themselves or other cards — position, ownership, face-up status can all matter.
+
+Play solo against AI, or host a real multiplayer game (2-8p) — all players join from their own phone (Jackbox-style).
+
+<img width="557" height="546" alt="Screen Shot 2026-09-17 at 3 55 50 PM" src="https://github.com/user-attachments/assets/0e9f0de2-1e55-4052-940e-4470f39e369e" />
+
 
 ## Play now
 
-- **[betrayers-ball.onrender.com](https://betrayers-ball.onrender.com/)** — the real deployment, with full multiplayer support.
-- **[board-game-bice.vercel.app](https://board-game-bice.vercel.app)** — backup mirror. Single-player only: Vercel's serverless hosting can't run the persistent Socket.IO server multiplayer needs, so hosting/joining a room isn't available there (the app will tell you if you try).
-
+- **[betrayers-ball.onrender.com](https://betrayers-ball.onrender.com/)** — main deployment with multi-player support.
+- **[board-game-bice.vercel.app](https://board-game-bice.vercel.app)** — backup mirror, single-player only.
+  
 ## Features
 
-- Single-player vs. AI, with three difficulty levels
-- LAN multiplayer — host a room, everyone else joins from their own browser
-- Screencast mode — one device shows the board, everyone else plays from their phone
+- Single-player vs. AI, with four difficulty levels
+- LAN multiplayer(2-8p) — host a room, everyone else joins from their own browser
+- Screencast mode(2-8p) — one device shows the board, everyone else plays from their phone
 - A dozen+ locations (center-tile effects) that bend the normal rules for the whole game
-- In-app card/location catalogs, per-game and lifetime stats, and a card-balance simulator for playtesting
+- In-app card/location catalogs, per-game and lifetime stats
+- Card Balance, AI Arena, and Sandbox modes for experimentation
 
 ## Development
 
