@@ -26,7 +26,18 @@ export interface HandProps {
 }
 
 export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, disabled, ownerAccentClass, round, roundCap, board }: HandProps) {
-  const sortedCards = [...cards].sort((a, b) => CARD_DEFS[a.cardId].name.localeCompare(CARD_DEFS[b.cardId].name));
+  // Grouped by cardId (so duplicates sit next to each other), but the groups
+  // themselves keep whatever order `cards` already arrived in -- the same order
+  // Hall of Fortunes' own Pillar tiles show (see useHallOfFortunesReveal/Board.tsx,
+  // which index into state.handOffers directly with no sort of their own), so a
+  // freshly-drawn hand doesn't read as scrambled relative to what was just shown
+  // spinning on the board. Array.prototype.sort is stable, so a plain sort-by-
+  // first-occurrence-index is enough to group without otherwise reordering anything.
+  const firstIndexByCardId = new Map<CardId, number>();
+  for (const [i, card] of cards.entries()) {
+    if (!firstIndexByCardId.has(card.cardId)) firstIndexByCardId.set(card.cardId, i);
+  }
+  const sortedCards = [...cards].sort((a, b) => firstIndexByCardId.get(a.cardId)! - firstIndexByCardId.get(b.cardId)!);
 
   const hasHover = useHasHover();
   const activeTooltipId = useActiveTooltipId();
@@ -105,13 +116,20 @@ export function Hand({ cards, selectedInstanceId, onCardClick, onCardDragStart, 
               // though the listener itself lives on the wrapping div above, not this
               // button. Gating the handler body instead keeps the button a normal,
               // fully hoverable element; aria-disabled keeps it announced correctly.
-              onClick={() => {
+              onClick={(e) => {
                 // Set by a long-press that just fired (see onPointerDown below) --
                 // touch still dispatches a click right after touchend, which would
                 // otherwise select/deselect the card out from under the description
-                // that just opened.
+                // that just opened. stopPropagation is what actually keeps the
+                // tooltip open: this click still bubbles all the way to `document`
+                // like any other, and activeTooltip.ts's own document-level click
+                // listener closes whatever tooltip is open on ANY click it doesn't
+                // see stopped -- without this, the long-press's own tooltip would
+                // open for a single frame and then immediately get closed by its own
+                // trailing click, before ever becoming visible.
                 if (suppressNextClick.current) {
                   suppressNextClick.current = false;
+                  e.stopPropagation();
                   return;
                 }
                 if (!disabled) onCardClick(card.instanceId);
