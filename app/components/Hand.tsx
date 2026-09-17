@@ -186,7 +186,21 @@ export function Hand({
         );
 
         return (
-          <div key={card.instanceId} className="relative" style={{ flex: "1 1 7rem", minWidth: "4rem", maxWidth: "7rem" }}>
+          <div
+            key={card.instanceId}
+            // hand-card-appear plays once, automatically, the instant this exact
+            // element is first inserted into the DOM -- no JS mount-detection
+            // needed, a CSS animation just runs from a freshly-painted node's first
+            // frame regardless of why it appeared. Real games never actually see it
+            // (this card was already mounted, just hidden under the facedown/flip
+            // overlay, by the time dealPhase reaches "done"), but Hall of Fortunes'
+            // own per-turn offer -- which skips that whole reveal and mounts these
+            // cards directly the instant a fresh offer becomes real content -- used
+            // to pop in at full opacity with no transition at all, easy to read as
+            // a flicker.
+            className="relative hand-card-appear"
+            style={{ flex: "1 1 7rem", minWidth: "4rem", maxWidth: "7rem" }}
+          >
             <button
               // Not a native `disabled` attribute -- disabled buttons unreliably
               // suppress mouse events across browsers (WebKit especially), including

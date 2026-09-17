@@ -1125,16 +1125,38 @@ export function BoardGrid({
                   // would show if it were actually sitting face-up on the board
                   // right now (renderFaceUpContent's own icon is h-1/2, and its
                   // name only ever shows once a cell is wide enough anyway).
-                  <div className="@container absolute inset-0 z-20 aspect-square w-full overflow-hidden rounded-md border-2 border-dashed border-zinc-400 bg-white/85 p-1 [perspective:600px] dark:bg-zinc-950/85">
-                    <div
-                      className={`absolute inset-0 flex flex-col items-center justify-center gap-0.5 p-1 ${CENTER_EFFECTS.reckoning.themeColorClass} ${
-                        hofPhase === "revealed" ? "hof-reveal-fade-out" : "hof-pillar-spin"
-                      }`}
-                    >
-                      <LocationArt id="reckoning" className="h-3/4 w-3/4 shrink-0" />
+                  // border-2/p-1 live on the two INNER layers below (the spin layer
+                  // and the reveal layer), NOT on this outer box -- an absolutely
+                  // positioned element's containing block is its ancestor's PADDING
+                  // box, so an ancestor's OWN padding never actually insets an
+                  // `absolute inset-0` child (only that ancestor's BORDER does,
+                  // since border shrinks the padding box itself). Putting border+
+                  // padding here while the icon sits inside two more `absolute
+                  // inset-0` layers below it meant the padding was silently
+                  // ignored for sizing purposes -- the icon ended up computing its
+                  // h-3/4/h-full against a box only ever reduced by the border,
+                  // never the padding, always bigger than idle's equivalent (real,
+                  // normal-flow-children-respecting) box. Putting them directly on
+                  // the two flex divs that are the icon's actual normal-flow
+                  // parent fixes that: an element's OWN padding always applies to
+                  // ITS OWN normal-flow children, position notwithstanding.
+                  <div className="@container absolute inset-0 z-20 aspect-square w-full overflow-hidden rounded-md text-center text-[9px] leading-tight break-words">
+                    {/* perspective lives on this plain wrapper, kept separate from
+                        the @container box above -- some mobile WebKit versions
+                        visibly mis-size (shrink) a 3D-rotating descendant of an
+                        element that also establishes a container-query context,
+                        even though neither logically affects the other's layout. */}
+                    <div className="hof-pillar-perspective absolute inset-0">
+                      <div
+                        className={`absolute inset-0 flex flex-col items-center justify-center gap-0.5 @[70px]:border-2 @[70px]:border-dashed @[70px]:border-zinc-400 @[70px]:bg-white/85 @[70px]:p-1 @[70px]:dark:bg-zinc-950/85 ${CENTER_EFFECTS.reckoning.themeColorClass} ${
+                          hofPhase === "revealed" ? "hof-reveal-fade-out" : "hof-pillar-spin"
+                        }`}
+                      >
+                        <LocationArt id="reckoning" className="h-full w-full shrink-0 @[70px]:h-3/4 @[70px]:w-3/4" />
+                      </div>
                     </div>
                     <div
-                      className={`absolute inset-0 flex flex-col items-center justify-center gap-0.5 p-1 text-center opacity-0 ${
+                      className={`absolute inset-0 flex flex-col items-center justify-center gap-0.5 text-center opacity-0 @[70px]:border-2 @[70px]:border-dashed @[70px]:border-zinc-400 @[70px]:bg-white/85 @[70px]:p-1 @[70px]:dark:bg-zinc-950/85 ${
                         hofPhase === "revealed" ? "hof-reveal-fade-in" : ""
                       }`}
                     >
