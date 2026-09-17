@@ -223,6 +223,77 @@ html {
   }
 }
 
+/* RoundEndOverlay's round-cap-hit ending -- the completed round's own tile (see
+   RoundBreakTile) flares up right before it cracks apart into four pieces (see
+   .card-icon-crumble-piece-1..4, reused as-is here). Faster and punchier than the
+   board's own location glows above (0.4s vs 3s) since this is the wind-up for an
+   immediate break, not a lingering ambient flash -- ends at full brightness
+   (rather than powering back off) so there's no visible dip right as the crumble
+   pieces take over in the same spot. Rose (matching the vote tiles' own "to end"
+   color, RoundEndOverlay.tsx), not amber -- amber is this app's winner/celebration
+   color (ScoreTile/FinalRankingCard's isWinner glow), which isn't what this is. */
+@keyframes round-break-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0);
+  }
+  60% {
+    box-shadow:
+      0 0 0 3px rgba(244, 63, 94, 0.95),
+      0 0 34px 10px rgba(244, 63, 94, 0.7);
+  }
+  100% {
+    box-shadow:
+      0 0 0 3px rgba(244, 63, 94, 0.95),
+      0 0 34px 10px rgba(244, 63, 94, 0.7);
+  }
+}
+
+.round-break-glow {
+  animation: round-break-glow 0.4s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .round-break-glow {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.95);
+  }
+}
+
+/* DealAnimation -- each card-back flies from GameStatusPanel's real on-screen
+   position to the hand tray's (its own `--dx`/`--dy`, computed per-card in JS from
+   real getBoundingClientRect() measurements -- see DealAnimation.tsx), with a
+   slight overshoot-then-settle (the 85% keyframe) so it reads as landing rather
+   than just stopping, and fades out right at arrival as the real hand (kept at
+   opacity-0 by the caller until then) fades in to take its place. */
+@keyframes deal-fly-card {
+  0% {
+    transform: translate(0, 0) scale(0.85);
+    opacity: 1;
+  }
+  85% {
+    transform: translate(calc(var(--dx, 0px) * 0.98), calc(var(--dy, 0px) * 0.98)) scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx, 0px), var(--dy, 0px)) scale(1);
+    opacity: 0;
+  }
+}
+
+.deal-fly-card {
+  animation: deal-fly-card 0.5s cubic-bezier(0.2, 0.6, 0.3, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deal-fly-card {
+    /* Never actually reached -- DealAnimation.tsx skips the whole sequence (calls
+       onDone immediately) under reduced motion, so this is a defensive fallback
+       only, matching the other one-shot flourishes' own convention. */
+    animation: none;
+    opacity: 0;
+  }
+}
+
 /* No Man's Land's own cannons -- a single one-shot rotateY flip (NOT a spin that
    returns to its starting look, unlike Usurper's own card-icon-multi-spin) the
    moment a corner's own quadrant is completely filled -- ends at 180deg and

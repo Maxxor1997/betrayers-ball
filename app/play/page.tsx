@@ -29,6 +29,7 @@ import { GameStatusPanel } from "@/app/components/GameStatusPanel";
 import { TurnActionChecklist } from "@/app/components/TurnActionChecklist";
 import { EndScreen } from "@/app/components/EndScreen";
 import { RoundEndOverlay } from "@/app/components/RoundEndOverlay";
+import { DealAnimation } from "@/app/components/DealAnimation";
 import { useRoundEndOverlayActive } from "@/app/hooks/roundEndOverlayActive";
 import { isMobileViewport } from "@/app/hooks/isMobileViewport";
 import { useDefaultCollapsed } from "@/app/hooks/useDefaultCollapsed";
@@ -312,6 +313,20 @@ function Game() {
   // Tally exactly once per game, the moment it reaches "ended" -- reset whenever a new
   // game starts (confirmNewGame/playAgain below).
   const talliedRef = useRef(false);
+  // Shows DealAnimation's fly-cards-into-the-hand sequence -- true from the very
+  // first render (the initial state above is itself a freshly dealt game) and
+  // re-armed by confirmNewGame/playAgain, same "starts true, cleared by the
+  // animation's own onDone" shape as every other one-shot reveal on this page. Never
+  // true for Hall of Fortunes (reckoning) -- nobody's dealt a real starting hand
+  // there (handSize 0, cards only ever arrive as a per-turn 3-card offer -- see
+  // game.ts), so a "deal a full hand" flourish would show something that didn't
+  // actually happen.
+  const [dealing, setDealing] = useState(state.config.centerEffect !== "reckoning");
+  // DealAnimation's real start/end anchors -- GameStatusPanel (source) and the hand
+  // tray (target). Attached unconditionally (not just while dealing) so both are
+  // already mounted and measurable the instant DealAnimation itself mounts.
+  const statusPanelRef = useRef<HTMLElement | null>(null);
+  const handAreaRef = useRef<HTMLDivElement | null>(null);
   // When the current game was dealt -- see track("single_player_ended")'s durationMs
   // below. Reset alongside talliedRef every time a fresh game actually starts. Starts
   // at 0 (not Date.now()) since reading the clock is impure and this needs to be set
@@ -375,14 +390,14 @@ function Game() {
   // resuming mid-way through a stale timer.
   const overlayActive = useRoundEndOverlayActive();
   useEffect(() => {
-    if (!isAiTurn || overlayActive) return;
+    if (!isAiTurn || overlayActive || dealing) return;
     const timer = setTimeout(() => {
       const action = chooseAiActionForDifficulty(state, currentPlayerId(state), state.config.aiDifficulty);
       dispatch(action);
     }, AI_TURN_DELAY_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, isAiTurn, overlayActive]);
+  }, [state, isAiTurn, overlayActive, dealing]);
 
   // Folds this finished game into the human's own personal stats (see
   // lib/playtest/humanStats.ts) -- separate from the playtest page's bulk AI-sim
@@ -498,6 +513,7 @@ function Game() {
     setLastCenterEffectWasRandom(newGameSetup.centerEffect === "random");
     talliedRef.current = false;
     matchStartedAtRef.current = Date.now();
+    setDealing(centerEffect !== "reckoning");
     track("single_player_started", { playerCount: newGameSetup.playerCount, centerEffect, aiDifficulty: newGameSetup.aiDifficulty });
   }
 
@@ -509,6 +525,7 @@ function Game() {
     setPendingFlip(null);
     talliedRef.current = false;
     matchStartedAtRef.current = Date.now();
+    setDealing(centerEffect !== "reckoning");
     track("single_player_started", { playerCount, centerEffect, aiDifficulty: state.config.aiDifficulty });
   }
 
@@ -642,7 +659,11 @@ function Game() {
 
       {showInstructions && <InstructionsModal onClose={() => setShowInstructions(false)} />}
       {showMyStats && <MyStatsModal onClose={() => setShowMyStats(false)} />}
-      <RoundEndOverlay state={state} viewerId={HUMAN} nameFor={(id) => ownerDisplayName(state, id)} />
+      {dealing ? (
+        <DealAnimation sourceRef={statusPanelRef} targetRef={handAreaRef} cardCount={human.hand.length} onDone={() => setDealing(false)} />
+      ) : (
+        <RoundEndOverlay state={state} viewerId={HUMAN} nameFor={(id) => ownerDisplayName(state, id)} />
+      )}
 
       {/* Always mounted with a reserved min-height, even when empty -- this area's
           content changes on almost every turn transition (human selects a card, AI's
@@ -692,17 +713,25 @@ function Game() {
 
       {(state.phase === "playing" || state.phase === "voting") && (
         <div className="flex w-full flex-col items-center gap-3">
-          <Hand
-            cards={hofReveal.phase === "idle" ? offeredCardsFor(state, HUMAN) : []}
-            selectedInstanceId={selectedInstanceId}
-            onCardClick={handleHandCardClick}
-            onCardDragStart={handleHandDragStart}
-            disabled={!isHumanTurn}
-            ownerAccentClass={playerAccentClass(state.players, HUMAN)}
-            round={state.round}
-            roundCap={state.config.roundCap}
-            board={state.board}
-          />
+          {/* Kept at opacity-0 while DealAnimation's flying cards are still headed
+              here, then fades in right as they land -- otherwise the real (already
+              fully dealt) hand would just show through underneath the animation,
+              spoiling the illusion that these cards are what's arriving. Still fully
+              laid out and measurable throughout (see handAreaRef/DealAnimation's own
+              call site below) -- opacity doesn't affect geometry. */}
+          <div ref={handAreaRef} className={`w-full transition-opacity duration-300 ${dealing ? "opacity-0" : "opacity-100"}`}>
+            <Hand
+              cards={hofReveal.phase === "idle" ? offeredCardsFor(state, HUMAN) : []}
+              selectedInstanceId={selectedInstanceId}
+              onCardClick={handleHandCardClick}
+              onCardDragStart={handleHandDragStart}
+              disabled={!isHumanTurn}
+              ownerAccentClass={playerAccentClass(state.players, HUMAN)}
+              round={state.round}
+              roundCap={state.config.roundCap}
+              board={state.board}
+            />
+          </div>
           {humanMustPass && (
             <button onClick={handlePass} className="rounded-full bg-zinc-900 px-4 py-1.5 text-sm text-white dark:bg-zinc-100 dark:text-black">
               No legal move — Pass
@@ -785,6 +814,7 @@ function Game() {
         flipUnlocked={flipUnlocked}
         onCopyState={copyBoardState}
         copyFeedback={copyFeedback}
+        panelRef={statusPanelRef}
       />
     </div>
   );

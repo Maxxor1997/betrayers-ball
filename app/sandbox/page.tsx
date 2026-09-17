@@ -13,7 +13,8 @@ import { SoundToggle } from "@/app/components/SoundToggle";
 import { MAX_PLAYERS, MIN_PLAYERS, playerDotColorClass } from "@/lib/config/players";
 import { ALL_CARD_IDS, CARD_DEFS } from "@/lib/content/cards";
 import { CENTER_EFFECTS, centerEffectLabel, selectableCenterEffects } from "@/lib/content/centerEffects";
-import { configForPlayerCount } from "@/lib/engine/game";
+import { configForPlayerCount, createGame } from "@/lib/engine/game";
+import { RoundEndOverlay } from "@/app/components/RoundEndOverlay";
 import { resolveBoard } from "@/lib/engine/resolution";
 import { Board, CardBucket, CardId, CardInstance, CenterEffectId, GameResult, GameState, PlayerState, Position, posKey } from "@/lib/engine/types";
 
@@ -56,6 +57,33 @@ function Sandbox() {
   const [removeMode, setRemoveMode] = useState(false);
   const [showScoring, setShowScoring] = useState(false);
   const nextInstanceId = useRef(0);
+  // RoundEndOverlay preview state (see the "Trigger end-of-game overlay" button in
+  // SandboxControls below) -- fabricates a "round 6 just ended" GameState and mounts
+  // RoundEndOverlay on it, purely so the natural-roundCap-hit ending sequence (round
+  // tile shown, glows, cracks apart -- see RoundEndOverlay.tsx's RoundBreakTile) can
+  // be checked without actually playing a real 6-round game every time it's tweaked.
+  // The scores/winner are made up -- this never runs the real engine's scoring,
+  // since RoundEndOverlay only ever reads state.result as already-computed data.
+  const [previewState, setPreviewState] = useState<GameState | null>(null);
+  // Bumped on every trigger and passed to RoundEndOverlay as `key` -- forces a fresh
+  // instance (fresh internal refs) each time, rather than re-using the same one. A
+  // real game always starts its next boundary from a LOWER round than the previous
+  // game's final one, which is exactly what RoundEndOverlay's own "did a new game
+  // just start" resync (state.round < prevRoundRef.current) keys off; this preview
+  // reuses roundCap for every trigger, so without a fresh instance, a second click
+  // would look identical to the first game's already-handled ending and silently do
+  // nothing.
+  const [previewKey, setPreviewKey] = useState(0);
+
+  function triggerRoundEndPreview() {
+    setPreviewKey((k) => k + 1);
+    const previewConfig = configForPlayerCount(PREVIEW_PLAYER_IDS.length, "none", "medium");
+    const fresh = createGame(PREVIEW_PLAYER_IDS, previewConfig);
+    setPreviewState({ ...fresh, round: previewConfig.roundCap, phase: "playing" });
+    setTimeout(() => {
+      setPreviewState((prev) => (prev ? { ...prev, phase: "ended", result: PREVIEW_RESULT } : prev));
+    }, 50);
+  }
 
   const viewerId = playerId(viewerIndex);
   const players: PlayerState[] = useMemo(
@@ -324,6 +352,7 @@ function Sandbox() {
           showScoring={showScoring}
           onShowScoringChange={setShowScoring}
           onClearBoard={resetBoard}
+          onTriggerRoundEndPreview={triggerRoundEndPreview}
         />
 
         <BoardGrid
@@ -351,10 +380,23 @@ function Sandbox() {
             <EndScreen state={state} result={resolved} viewerId={viewerId} nameFor={nameFor} />
           </div>
         )}
+
+        {previewState && (
+          <RoundEndOverlay
+            key={previewKey}
+            state={previewState}
+            viewerId={PREVIEW_PLAYER_IDS[0]}
+            nameFor={(id) => PREVIEW_PLAYER_NAMES[id] ?? id}
+          />
+        )}
       </div>
     </div>
   );
 }
+
+const PREVIEW_PLAYER_IDS = ["p1", "p2", "p3", "p4"];
+const PREVIEW_PLAYER_NAMES: Record<string, string> = { p1: "Alice", p2: "Bo", p3: "Cy", p4: "Dee" };
+const PREVIEW_RESULT: GameResult = { scores: { p1: 14, p2: 9, p3: 21, p4: 6 }, winnerIds: ["p3"] };
 
 function SandboxControls({
   playerCount,
@@ -372,6 +414,7 @@ function SandboxControls({
   showScoring,
   onShowScoringChange,
   onClearBoard,
+  onTriggerRoundEndPreview,
 }: {
   playerCount: number;
   onPlayerCountChange: (n: number) => void;
@@ -388,6 +431,8 @@ function SandboxControls({
   showScoring: boolean;
   onShowScoringChange: (value: boolean) => void;
   onClearBoard: () => void;
+  /** Fabricates a "round 6 just ended" GameState and mounts RoundEndOverlay on it -- see Sandbox's own triggerRoundEndPreview for why. */
+  onTriggerRoundEndPreview: () => void;
 }) {
   const controlClass = "rounded border border-zinc-300 bg-transparent px-2 py-1 text-xs dark:border-zinc-700";
   const availableLocations = selectableCenterEffects(playerCount);
@@ -490,6 +535,14 @@ function SandboxControls({
           }`}
         >
           {showScoring ? "Scoring: shown" : "Scoring: hidden"}
+        </button>
+
+        <button
+          onClick={onTriggerRoundEndPreview}
+          title="Fires the natural end-of-game reveal (round card, glow, break) with made-up scores -- for checking the animation/sound without playing a full game."
+          className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs whitespace-nowrap hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          Trigger end-of-game overlay
         </button>
       </div>
     </div>

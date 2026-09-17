@@ -22,6 +22,12 @@ const FLIP_STAGGER_MS = 600;
 const VOTE_FLIP_SOUND_DELAY_MS = 260;
 const BANNER_HOLD_CONTINUE_MS = 2000;
 const BANNER_HOLD_ENDED_MS = 1600;
+/** How long the natural roundCap-hit ending shows its plain (pre-glow) round tile before the break sequence starts -- see the roundBreakPhase effect below. */
+const ROUND_BREAK_SHOW_MS = 500;
+/** Matches .round-break-glow's own 0.4s duration (globals.css) -- the crumble pieces take over right as the glow finishes, not mid-flare. */
+const ROUND_BREAK_GLOW_MS = 400;
+/** Matches .card-icon-crumble-piece-1..4's own worst case: the last piece starts at a 0.15s stagger and runs for 0.5s, so 0.65s covers every piece finishing. */
+const ROUND_BREAK_ANIM_MS = 650;
 const SCORE_COUNT_MS = 2600;
 const SCORE_SETTLE_PAUSE_MS = 900;
 
@@ -104,6 +110,11 @@ export function RoundEndOverlay({ state, viewerId, nameFor }: { state: GameState
   // a vote-less continue -- there's no vote-by-vote reveal to build tension, so the
   // round number itself flipping is the one piece of drama available.
   const [roundFlipped, setRoundFlipped] = useState(false);
+  // Drives the natural roundCap-hit ending's own reveal (see RoundBreakTile) -- shown
+  // plain, then glows, then cracks apart. A voted end skips this entirely (it already
+  // has the vote-by-vote tiles for buildup); this only ever applies when the game
+  // ends with no vote at all, i.e. round.ended && !round.votes.
+  const [roundBreakPhase, setRoundBreakPhase] = useState<"idle" | "glow" | "break">("idle");
 
   const setStage = (next: Stage) => {
     stageRef.current = next;
@@ -140,6 +151,7 @@ export function RoundEndOverlay({ state, viewerId, nameFor }: { state: GameState
     setRevealedCount(0);
     setDisplayedScores({});
     setRoundFlipped(false);
+    setRoundBreakPhase("idle");
     setStage(event.votes ? "votes" : "banner");
   };
 
@@ -214,12 +226,30 @@ export function RoundEndOverlay({ state, viewerId, nameFor }: { state: GameState
     timersRef.current.push(t);
   }, [stage, round]);
 
-  // The game-over banner's own one-shot sting -- fires exactly once per ended event
-  // (round changes identity every event, even across a queued burst -- see the
-  // queueing comment above), regardless of whether it arrived via a vote or forced
-  // roundCap end.
+  // The game-over banner's own one-shot sting for a VOTED end -- fires the instant the
+  // banner shows, since the preceding vote-by-vote reveal already built the tension.
+  // A natural roundCap-hit end (no vote) plays its own copy of this sound instead,
+  // timed to the round tile's break below.
   useEffect(() => {
-    if (stage === "banner" && round?.ended) playSound(SOUNDS.gameOver);
+    if (stage === "banner" && round?.ended && round.votes) playSound(SOUNDS.gameOver);
+  }, [stage, round]);
+
+  // The natural roundCap-hit ending's own reveal: show the just-completed round's
+  // tile plainly for a beat, then it glows, then cracks apart into four pieces (see
+  // RoundBreakTile/.round-break-glow/.card-icon-crumble-piece-1..4) -- the visual
+  // "the game is over" moment in place of an abrupt cut to a plain banner. Only for
+  // round.ended && !round.votes (a voted end never reaches this: shouldEndGame is
+  // checked before the vote branch in advanceTurn, so a voted end's completedRound is
+  // always below roundCap).
+  useEffect(() => {
+    if (stage !== "banner" || !round || !round.ended || round.votes) return;
+    const glowTimer = setTimeout(() => setRoundBreakPhase("glow"), ROUND_BREAK_SHOW_MS);
+    const breakTimer = setTimeout(() => {
+      setRoundBreakPhase("break");
+      playSound(SOUNDS.gameOver);
+    }, ROUND_BREAK_SHOW_MS + ROUND_BREAK_GLOW_MS);
+    const advanceTimer = setTimeout(() => setStage("score"), ROUND_BREAK_SHOW_MS + ROUND_BREAK_GLOW_MS + ROUND_BREAK_ANIM_MS);
+    timersRef.current.push(glowTimer, breakTimer, advanceTimer);
   }, [stage, round]);
 
   // Drives the vote-by-vote reveal, then hands off to the banner stage. Only ever
@@ -239,7 +269,10 @@ export function RoundEndOverlay({ state, viewerId, nameFor }: { state: GameState
     timersRef.current.push(t);
   }, [stage, round, revealedCount]);
 
-  // Banner stage -> continuing dismisses itself; ended chains into the score reveal.
+  // Banner stage -> continuing dismisses itself; a voted ending chains into the score
+  // reveal after a plain hold. A natural roundCap-hit ending (no vote) skips this --
+  // the roundBreakPhase effect above drives its own timing into "score" instead, once
+  // the round tile's glow-then-crack sequence actually finishes.
   useEffect(() => {
     if (stage !== "banner" || !round) return;
     if (!round.ended) {
@@ -247,6 +280,7 @@ export function RoundEndOverlay({ state, viewerId, nameFor }: { state: GameState
       timersRef.current.push(t);
       return;
     }
+    if (!round.votes) return;
     const t = setTimeout(() => setStage("score"), BANNER_HOLD_ENDED_MS);
     timersRef.current.push(t);
   }, [stage, round]);
@@ -346,10 +380,30 @@ export function RoundEndOverlay({ state, viewerId, nameFor }: { state: GameState
       {stage === "banner" && !round.ended && (
         <>
           <RoundFlipTile completedRound={round.completedRound} nextRound={round.nextRound} flipped={roundFlipped} />
+          {roundFlipped && round.nextRound === state.config.roundCap && (
+            <p className="text-sm font-semibold text-rose-400">Last round!</p>
+          )}
           {round.roundLeaderId && <RoundLeaderLine name={nameFor(round.roundLeaderId)} isYou={round.roundLeaderId === viewerId} />}
         </>
       )}
-      {stage === "banner" && round.ended && <p className="text-3xl font-bold text-amber-400">Game Over</p>}
+      {stage === "banner" &&
+        round.ended &&
+        (round.votes ? (
+          <p className="text-3xl font-bold text-rose-400">Game Over</p>
+        ) : (
+          <>
+            <RoundBreakTile round={round.completedRound} phase={roundBreakPhase} />
+            {/* Always rendered (not conditionally mounted) so its layout space is
+                reserved from the moment this banner appears -- mounting it only once
+                roundBreakPhase reaches "break" used to make the tile above visibly
+                jump upward right as the text popped in, since the flex column is
+                center-justified and suddenly had a new sibling to make room for at
+                the exact same instant the tile started breaking apart. */}
+            <p className={`text-3xl font-bold text-rose-400 transition-opacity duration-200 ${roundBreakPhase === "break" ? "opacity-100" : "opacity-0"}`}>
+              Game Over
+            </p>
+          </>
+        ))}
 
       {stage === "score" && (
         <div className="flex flex-wrap items-center justify-center gap-5">
@@ -395,6 +449,36 @@ function RoundFlipTile({ completedRound, nextRound, flipped }: { completedRound:
           <div className="flex h-full w-full items-center justify-center rounded-md border-2 border-zinc-600 bg-zinc-800 text-3xl font-bold text-zinc-300">
             {completedRound}
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The natural roundCap-hit ending's own reveal (no vote to show first): the just-
+ * completed round's tile sits plainly for a beat, flares up (.round-break-glow),
+ * then cracks into four pieces that fall away -- same real-content-copy crumble
+ * technique Facestealer's stolen-face reveal uses (.card-icon-crumble-piece-1..4,
+ * see Board.tsx/globals.css), just applied to this tile's own round number instead
+ * of a card icon. The plain/glowing tile and the four-piece overlay are mutually
+ * exclusive (never both mounted at once) so nothing doubles up mid-transition.
+ */
+function RoundBreakTile({ round, phase }: { round: number; phase: "idle" | "glow" | "break" }) {
+  const tileClass = "flex h-full w-full items-center justify-center rounded-md border-2 border-rose-500 bg-rose-950/60 text-3xl font-bold text-rose-300";
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <span className="text-xs tracking-wide text-zinc-400 uppercase">Round</span>
+      <div className="relative aspect-square w-20">
+        {phase !== "break" ? (
+          <div className={`${tileClass} ${phase === "glow" ? "round-break-glow" : ""}`}>{round}</div>
+        ) : (
+          <>
+            <div className={`absolute inset-0 ${tileClass} card-icon-crumble-piece-1`}>{round}</div>
+            <div className={`absolute inset-0 ${tileClass} card-icon-crumble-piece-2`}>{round}</div>
+            <div className={`absolute inset-0 ${tileClass} card-icon-crumble-piece-3`}>{round}</div>
+            <div className={`absolute inset-0 ${tileClass} card-icon-crumble-piece-4`}>{round}</div>
+          </>
         )}
       </div>
     </div>

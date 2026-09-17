@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CardInstance, GameState } from "@/lib/engine/types";
+import { useRoundEndOverlayActive } from "@/app/hooks/roundEndOverlayActive";
 
 const HOF_SPIN_MS = 1100;
 const HOF_REVEAL_HOLD_MS = 1400;
@@ -33,6 +34,14 @@ export function useHallOfFortunesReveal(
   const prevOfferKeyByPlayerRef = useRef<Record<string, string>>({});
   const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A fresh offer detected while RoundEndOverlay is still showing -- held here instead
+  // of starting the spin right away (see the effect below). A new offer is often dealt
+  // as PART of the very same state update that advances the round
+  // (redrawOfferForCurrentPlayer runs inside applyRoundStart), so without this the
+  // Pillars would start spinning underneath/racing the round-end reveal instead of
+  // waiting their turn.
+  const pendingOfferRef = useRef<CardInstance[] | null>(null);
+  const overlayActive = useRoundEndOverlayActive();
 
   useEffect(() => {
     if (state.config.centerEffect !== "reckoning") return;
@@ -47,13 +56,31 @@ export function useHallOfFortunesReveal(
     prevOfferKeyByPlayerRef.current[activeId] = offerKey;
     if (offerKey === prevKey || offer.length === 0 || activeId !== viewerId) return;
 
+    if (overlayActive) {
+      pendingOfferRef.current = offer;
+      return;
+    }
     if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     setDisplayCards(offer);
     setPhase("spinning");
     revealTimerRef.current = setTimeout(() => setPhase("revealed"), HOF_SPIN_MS);
     idleTimerRef.current = setTimeout(() => setPhase("idle"), HOF_SPIN_MS + HOF_REVEAL_HOLD_MS);
-  }, [state.handOffers, state.currentPlayerIndex, state.players, state.config.centerEffect, viewerId]);
+  }, [state.handOffers, state.currentPlayerIndex, state.players, state.config.centerEffect, viewerId, overlayActive]);
+
+  // Once the overlay closes, start whatever offer got held above -- if nothing was
+  // held (the common case: most turns don't cross a round boundary), this is a no-op.
+  useEffect(() => {
+    if (overlayActive || !pendingOfferRef.current) return;
+    const offer = pendingOfferRef.current;
+    pendingOfferRef.current = null;
+    if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    setDisplayCards(offer);
+    setPhase("spinning");
+    revealTimerRef.current = setTimeout(() => setPhase("revealed"), HOF_SPIN_MS);
+    idleTimerRef.current = setTimeout(() => setPhase("idle"), HOF_SPIN_MS + HOF_REVEAL_HOLD_MS);
+  }, [overlayActive]);
 
   useEffect(() => {
     return () => {
